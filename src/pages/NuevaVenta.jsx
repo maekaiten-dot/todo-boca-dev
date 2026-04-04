@@ -1,5 +1,5 @@
 // src/pages/NuevaVenta.jsx
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { registrarVenta } from '../api/sheets.js'
 import BarcodeScanner from '../components/BarcodeScanner.jsx'
 
@@ -15,6 +15,66 @@ const METODOS_PAGO = [
 ]
 
 const DESCUENTOS = [0, 5, 10, 15, 20, 25, 30, 40, 50]
+
+// ── Descuentos por volumen de imanes ─────────────────────────────────────────
+const IMANES_A = new Set(['TB00049','TB00050','TB00051','TB00052','TB00053','TB00054','TB00055','TB00056','TB00058','TB00359','TB01011','TB01043','TB01044'])
+const IMANES_B = new Set(['TB00399','TB00433','TB00587','TB00741','TB00805','TB00059'])
+
+// Retorna el precio unitario con descuento según cantidad total del grupo
+function precioImanConDescuento(grupo, cantidadTotal) {
+  if (grupo === 'A') {
+    if (cantidadTotal >= 3) return 6000
+    if (cantidadTotal === 2) return 7000
+    return 8000
+  }
+  if (grupo === 'B') {
+    if (cantidadTotal >= 3) return 4000
+    if (cantidadTotal === 2) return 5000
+    return 6000
+  }
+  return null
+}
+
+// Calcula totales con descuentos de imanes aplicados
+function calcularTotalesConDescuento(carrito, descCarrito) {
+  // Contar total de unidades por grupo
+  let cantA = 0, cantB = 0
+  carrito.forEach(item => {
+    if (IMANES_A.has(item.id)) cantA += item.cantidad
+    else if (IMANES_B.has(item.id)) cantB += item.cantidad
+  })
+
+  // Calcular subtotal con precios ajustados
+  let subtotalBruto = 0
+  let descuentoImanes = 0
+
+  carrito.forEach(item => {
+    const subtotalItem = item.precioUnitario * item.cantidad
+    subtotalBruto += subtotalItem
+
+    if (IMANES_A.has(item.id) && cantA > 1) {
+      const precioDesc = precioImanConDescuento('A', cantA)
+      descuentoImanes += (item.precioUnitario - precioDesc) * item.cantidad
+    } else if (IMANES_B.has(item.id) && cantB > 1) {
+      const precioDesc = precioImanConDescuento('B', cantB)
+      descuentoImanes += (item.precioUnitario - precioDesc) * item.cantidad
+    }
+  })
+
+  const subtotalConImanes = subtotalBruto - descuentoImanes
+  const descCarritoMonto = subtotalConImanes * (descCarrito / 100)
+  const totalNeto = subtotalConImanes - descCarritoMonto
+
+  return {
+    totalBruto: subtotalBruto,
+    descuentoImanes,
+    subtotalConImanes,
+    descCarritoMonto,
+    totalNeto,
+    cantA,
+    cantB,
+  }
+}
 
 export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistrada, usuarios: usuariosProp }) {
   const [carrito, setCarrito] = useState([])
@@ -43,10 +103,11 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
     }
   }, [usuariosProp])
 
+  const normalizr = str => str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
   const articulosFiltrados = articulos.filter(a => {
     if (!busqueda.trim()) return true
-    const q = busqueda.toLowerCase()
-    return a.nombre.toLowerCase().includes(q) || a.id.toLowerCase().includes(q)
+    const q = normalizr(busqueda)
+    return normalizr(a.nombre).includes(q) || normalizr(a.id).includes(q)
   })
 
   function agregarAlCarrito(art) {
@@ -85,15 +146,23 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
     setConfirmarReinicio(false)
   }
 
-  const totalBruto = carrito.reduce((s, i) => s + i.precioUnitario * i.cantidad, 0)
-  const totalNeto = totalBruto * (1 - descCarrito / 100)
+  // Calcular totales con descuentos automáticos
+  const totales = calcularTotalesConDescuento(carrito, descCarrito)
 
   async function cerrarVenta() {
     if (carrito.length === 0) return
     setSaving(true)
     try {
       const notas = divisaActual && montoDivisa ? `${divisaActual.code} ${montoDivisa}` : ''
-      const idVenta = await registrarVenta({ items: carrito, metodoPago, descCarrito, empleado, notas })
+      // Pasamos descuentoImanes para que quede registrado
+      const idVenta = await registrarVenta({
+        items: carrito,
+        metodoPago,
+        descCarrito,
+        empleado,
+        notas,
+        descuentoImanes: totales.descuentoImanes,
+      })
       showToast('Venta ' + idVenta + ' registrada ✓', 'success')
       setCarrito([])
       setDescCarrito(0)
@@ -120,6 +189,17 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
   function showToast(msg, type) {
     setToast({ msg, type })
     setTimeout(() => setToast(null), 3500)
+  }
+
+  // Precio efectivo de un item considerando descuento de imanes
+  function precioEfectivoItem(item) {
+    if (IMANES_A.has(item.id) && totales.cantA > 1) {
+      return precioImanConDescuento('A', totales.cantA)
+    }
+    if (IMANES_B.has(item.id) && totales.cantB > 1) {
+      return precioImanConDescuento('B', totales.cantB)
+    }
+    return item.precioUnitario
   }
 
   return (
@@ -182,28 +262,43 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
               <div style={{fontSize:48}}>🛒</div>
               <div>El carrito está vacío</div>
             </div>
-          ) : carrito.map((item, idx) => (
-            <div key={item.id+idx} style={S.cartItem}>
-              {item.foto
-                ? <img src={item.foto} alt="" style={S.thumb} onError={e=>e.target.style.display='none'} />
-                : <div style={S.thumbPH}>📦</div>
-              }
-              <div style={S.artInfo}>
-                <div style={S.artNombre}>{item.nombre}</div>
-                <div style={S.artSku}>{item.id}</div>
-                <div style={{...S.artSku, marginTop:2}}>${item.precioUnitario.toLocaleString('es-AR')} c/u</div>
-              </div>
-              <div style={S.cartRight}>
-                <div style={S.qtyRow}>
-                  <button style={S.qtyBtn} onClick={()=>cambiarCantidad(idx,-1)}>−</button>
-                  <span style={S.qty}>{item.cantidad}</span>
-                  <button style={S.qtyBtn} onClick={()=>cambiarCantidad(idx,+1)}>+</button>
+          ) : carrito.map((item, idx) => {
+            const precioEfectivo = precioEfectivoItem(item)
+            const tieneDescIman = precioEfectivo < item.precioUnitario
+            return (
+              <div key={item.id+idx} style={S.cartItem}>
+                {item.foto
+                  ? <img src={item.foto} alt="" style={S.thumb} onError={e=>e.target.style.display='none'} />
+                  : <div style={S.thumbPH}>📦</div>
+                }
+                <div style={S.artInfo}>
+                  <div style={S.artNombre}>{item.nombre}</div>
+                  <div style={S.artSku}>{item.id}</div>
+                  <div style={{display:'flex', alignItems:'center', gap:6, marginTop:2}}>
+                    {tieneDescIman && (
+                      <span style={{...S.artSku, textDecoration:'line-through', opacity:0.5}}>
+                        ${item.precioUnitario.toLocaleString('es-AR')}
+                      </span>
+                    )}
+                    <span style={{...S.artSku, color: tieneDescIman ? '#22c55e' : 'var(--muted)'}}>
+                      ${precioEfectivo.toLocaleString('es-AR')} c/u
+                    </span>
+                  </div>
                 </div>
-                <div style={S.cartTotal}>${(item.precioUnitario*item.cantidad).toLocaleString('es-AR')}</div>
-                <button style={S.removeBtn} onClick={()=>quitarDelCarrito(idx)}>✕</button>
+                <div style={S.cartRight}>
+                  <div style={S.qtyRow}>
+                    <button style={S.qtyBtn} onClick={()=>cambiarCantidad(idx,-1)}>−</button>
+                    <span style={S.qty}>{item.cantidad}</span>
+                    <button style={S.qtyBtn} onClick={()=>cambiarCantidad(idx,+1)}>+</button>
+                  </div>
+                  <div style={{...S.cartTotal, color: tieneDescIman ? '#22c55e' : 'var(--accent)'}}>
+                    ${(precioEfectivo * item.cantidad).toLocaleString('es-AR')}
+                  </div>
+                  <button style={S.removeBtn} onClick={()=>quitarDelCarrito(idx)}>✕</button>
+                </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       </div>
 
@@ -213,16 +308,25 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
           <span style={S.colTitle}>TOTAL VENTA</span>
         </div>
         <div style={S.totalPanel}>
-          <div style={S.totalNeto}>${Math.round(totalNeto).toLocaleString('es-AR')}</div>
+          <div style={S.totalNeto}>${Math.round(totales.totalNeto).toLocaleString('es-AR')}</div>
           <div style={S.totalNetoLabel}>TOTAL NETO</div>
+
           <div style={S.totalBrutoRow}>
             <span style={{fontFamily:'Barlow,sans-serif',fontSize:16,color:'var(--muted)'}}>TOTAL BRUTO</span>
-            <span style={{fontFamily:'Barlow Condensed,sans-serif',fontWeight:700,fontSize:18,color:'var(--text)'}}>${totalBruto.toLocaleString('es-AR')}</span>
+            <span style={{fontFamily:'Barlow Condensed,sans-serif',fontWeight:700,fontSize:18,color:'var(--text)'}}>${totales.totalBruto.toLocaleString('es-AR')}</span>
           </div>
+
+          {totales.descuentoImanes > 0 && (
+            <div style={S.totalBrutoRow}>
+              <span style={{fontFamily:'Barlow,sans-serif',fontSize:14,color:'#22c55e'}}>🧲 Descuento imanes</span>
+              <span style={{fontFamily:'Barlow Condensed,sans-serif',fontWeight:700,fontSize:15,color:'#22c55e'}}>−${totales.descuentoImanes.toLocaleString('es-AR')}</span>
+            </div>
+          )}
+
           {descCarrito > 0 && (
             <div style={S.totalBrutoRow}>
-              <span style={{fontFamily:'Barlow,sans-serif',fontSize:16,color:'var(--muted)'}}>Descuento {descCarrito}%</span>
-              <span style={{fontFamily:'Barlow Condensed,sans-serif',fontWeight:700,fontSize:16,color:'#22c55e'}}>−${(totalBruto-totalNeto).toLocaleString('es-AR')}</span>
+              <span style={{fontFamily:'Barlow,sans-serif',fontSize:14,color:'var(--muted)'}}>Descuento {descCarrito}%</span>
+              <span style={{fontFamily:'Barlow Condensed,sans-serif',fontWeight:700,fontSize:15,color:'#22c55e'}}>−${Math.round(totales.descCarritoMonto).toLocaleString('es-AR')}</span>
             </div>
           )}
 
@@ -275,13 +379,13 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
 
           <div style={S.fieldLabel}>DTO</div>
           <select style={S.select} value={descCarrito} onChange={e=>setDescCarrito(Number(e.target.value))}>
-            {DESCUENTOS.map(d => <option key={d} value={d}>{d===0?'':  `${d}%`}</option>)}
+            {DESCUENTOS.map(d => <option key={d} value={d}>{d===0?'Sin descuento':`${d}%`}</option>)}
           </select>
 
           <div style={S.divider}/>
 
           <button style={{...S.cerrarBtn, opacity: (saving||carrito.length===0)?0.5:1}} onClick={cerrarVenta} disabled={saving||carrito.length===0}>
-            {saving ? 'Guardando...' : `CERRAR VENTA · $${Math.round(totalNeto).toLocaleString('es-AR')}`}
+            {saving ? 'Guardando...' : `CERRAR VENTA · $${Math.round(totales.totalNeto).toLocaleString('es-AR')}`}
           </button>
           <button style={{...S.reiniciarBtn, opacity: carrito.length===0?0.4:1}} onClick={()=>setConfirmarReinicio(true)} disabled={carrito.length===0}>
             REINICIAR CARRITO
@@ -289,7 +393,6 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
         </div>
       </div>
 
-      {/* Modal confirmación */}
       {confirmarReinicio && (
         <div style={S.overlay} onClick={()=>setConfirmarReinicio(false)}>
           <div style={S.confirmBox} onClick={e=>e.stopPropagation()}>
@@ -330,7 +433,7 @@ const S = {
   clearBtn: { background:'none', border:'none', color:'var(--muted)', cursor:'pointer', fontSize:14 },
   scanBtn: { background:'none', border:'none', color:'var(--accent)', cursor:'pointer', fontSize:22, padding:'0 6px', display:'flex', alignItems:'center' },
   scrollList: { flex:1, overflowY:'auto' },
-  artRow: { width:'100%', display:'flex', alignItems:'center', gap:12, padding:'10px 14px', background:'none', border:'none', borderBottom:'1px solid var(--border)', cursor:'pointer', color:'var(--text)', textAlign:'left', transition:'background 0.1s' },
+  artRow: { width:'100%', display:'flex', alignItems:'center', gap:12, padding:'10px 14px', background:'none', border:'none', borderBottom:'1px solid var(--border)', cursor:'pointer', color:'var(--text)', textAlign:'left' },
   thumb: { width:88, height:88, objectFit:'cover', borderRadius:8, flexShrink:0, border:'1px solid var(--border)' },
   thumbPH: { width:88, height:88, display:'flex', alignItems:'center', justifyContent:'center', background:'var(--surface2)', borderRadius:8, fontSize:32, flexShrink:0, border:'1px solid var(--border)' },
   artInfo: { flex:1, minWidth:0 },

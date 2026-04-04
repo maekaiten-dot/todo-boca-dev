@@ -9,7 +9,7 @@ import { getArticulos, getUsuarios } from './api/sheets.js'
 const PERFILES = ['Admin', 'Caja', 'Empleado']
 
 const TABS_POR_PERFIL = {
-  Admin:    [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }, { id:'log', label:'Log', icon:'📋' }, { id:'stats', label:'Stats', icon:'📈' }],
+  Admin:    [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }, { id:'log', label:'Historial', icon:'📋' }, { id:'stats', label:'Stats', icon:'📈' }],
   Caja:     [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }],
   Empleado: [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }],
 }

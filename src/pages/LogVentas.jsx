@@ -92,7 +92,7 @@ export default function LogVentas() {
   return (
     <div style={S.page}>
       <div style={S.header}>
-        <div style={S.headerTitle}>LOG DE VENTAS</div>
+        <div style={S.headerTitle}>REGISTRO DE VENTAS HISTÓRICO</div>
         <button style={S.refreshBtn} onClick={cargar}>↻</button>
       </div>
 

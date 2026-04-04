@@ -379,7 +379,7 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
 
           <div style={S.fieldLabel}>DTO</div>
           <select style={S.select} value={descCarrito} onChange={e=>setDescCarrito(Number(e.target.value))}>
-            {DESCUENTOS.map(d => <option key={d} value={d}>{d===0?'Sin descuento':`${d}%`}</option>)}
+            {DESCUENTOS.map(d => <option key={d} value={d}>{d===0?'':`${d}%`}</option>)}
           </select>
 
           <div style={S.divider}/>

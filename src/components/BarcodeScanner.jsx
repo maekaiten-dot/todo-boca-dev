@@ -1,110 +1,105 @@
 // src/components/BarcodeScanner.jsx
 import { useEffect, useRef, useState } from 'react'
-import {
-  BrowserMultiFormatReader,
-  DecodeHintType,
-  BarcodeFormat,
-} from '@zxing/library'
-
-const FORMATS = [
-  BarcodeFormat.QR_CODE,
-  BarcodeFormat.EAN_13,
-  BarcodeFormat.EAN_8,
-  BarcodeFormat.CODE_128,
-  BarcodeFormat.CODE_39,
-  BarcodeFormat.UPC_A,
-  BarcodeFormat.UPC_E,
-  BarcodeFormat.DATA_MATRIX,
-  BarcodeFormat.ITF,
-  BarcodeFormat.CODABAR,
-]
+import jsQR from 'jsqr'
 
 export default function BarcodeScanner({ onDetected, onClose }) {
   const videoRef = useRef(null)
-  const readerRef = useRef(null)
+  const canvasRef = useRef(null)
+  const streamRef = useRef(null)
+  const animFrameRef = useRef(null)
   const [confirmacion, setConfirmacion] = useState(null)
   const [error, setError] = useState(null)
-  const scanningRef = useRef(true)
+  const pausedRef = useRef(false)
 
   useEffect(() => {
-    const hints = new Map()
-    hints.set(DecodeHintType.POSSIBLE_FORMATS, FORMATS)
-    hints.set(DecodeHintType.TRY_HARDER, true)
-
-    const reader = new BrowserMultiFormatReader(hints, {
-      delayBetweenScanAttempts: 50,
-      delayBetweenScanSuccess: 1500,
-    })
-    readerRef.current = reader
-
-    const constraints = {
-      video: {
-        facingMode: { ideal: 'environment' },
-        width: { ideal: 1920 },
-        height: { ideal: 1080 },
-        advanced: [{ focusMode: 'continuous' }, { exposureMode: 'continuous' }],
-      }
-    }
-
-    navigator.mediaDevices.getUserMedia(constraints)
-      .then(stream => {
-        if (!videoRef.current) return
-        videoRef.current.srcObject = stream
-
-        // Intentar activar autoenfoque continuo en la pista de video
-        const track = stream.getVideoTracks()[0]
-        if (track) {
-          const caps = track.getCapabilities?.()
-          if (caps?.focusMode?.includes('continuous')) {
-            track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(() => {})
-          }
-        }
-
-        videoRef.current.play().then(() => {
-          scanLoop(reader, stream)
-        })
-      })
-      .catch(() => setError('No se pudo acceder a la cámara. Verificá los permisos.'))
-
+    startCamera()
     return () => {
-      scanningRef.current = false
+      pausedRef.current = true
+      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current)
       stopStream()
     }
   }, [])
 
+  async function startCamera() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        }
+      })
+      streamRef.current = stream
+
+      // Intentar autoenfoque continuo
+      const track = stream.getVideoTracks()[0]
+      try {
+        const caps = track.getCapabilities?.()
+        if (caps?.focusMode?.includes('continuous')) {
+          await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] })
+        }
+      } catch (_) {}
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+        videoRef.current.setAttribute('playsinline', true)
+        await videoRef.current.play()
+        scanLoop()
+      }
+    } catch (e) {
+      setError('No se pudo acceder a la cámara. Verificá los permisos.')
+    }
+  }
+
   function stopStream() {
     try {
-      if (videoRef.current?.srcObject) {
-        videoRef.current.srcObject.getTracks().forEach(t => t.stop())
-        videoRef.current.srcObject = null
-      }
+      streamRef.current?.getTracks().forEach(t => t.stop())
+      streamRef.current = null
+      if (videoRef.current) videoRef.current.srcObject = null
     } catch (_) {}
   }
 
-  function scanLoop(reader, stream) {
-    if (!scanningRef.current || !videoRef.current) return
+  function scanLoop() {
+    if (pausedRef.current) return
 
-    try {
-      const result = reader.decodeFromVideoElement(videoRef.current)
-      if (result) {
-        const codigo = result.getText()
-        scanningRef.current = false
-        const info = onDetected(codigo)
-        setConfirmacion(info)
-        setTimeout(() => {
-          setConfirmacion(null)
-          scanningRef.current = true
-          scanLoop(reader, stream)
-        }, 1500)
-        return
-      }
-    } catch (_) {}
+    const video = videoRef.current
+    const canvas = canvasRef.current
+    if (!video || !canvas || video.readyState !== video.HAVE_ENOUGH_DATA) {
+      animFrameRef.current = requestAnimationFrame(scanLoop)
+      return
+    }
 
-    requestAnimationFrame(() => scanLoop(reader, stream))
+    const w = video.videoWidth
+    const h = video.videoHeight
+    canvas.width = w
+    canvas.height = h
+
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })
+    ctx.drawImage(video, 0, 0, w, h)
+    const imageData = ctx.getImageData(0, 0, w, h)
+
+    const code = jsQR(imageData.data, w, h, {
+      inversionAttempts: 'dontInvert',
+    })
+
+    if (code?.data) {
+      pausedRef.current = true
+      const info = onDetected(code.data)
+      setConfirmacion(info)
+      setTimeout(() => {
+        setConfirmacion(null)
+        pausedRef.current = false
+        scanLoop()
+      }, 1500)
+      return
+    }
+
+    animFrameRef.current = requestAnimationFrame(scanLoop)
   }
 
   function handleClose() {
-    scanningRef.current = false
+    pausedRef.current = true
+    if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current)
     stopStream()
     onClose()
   }
@@ -113,7 +108,7 @@ export default function BarcodeScanner({ onDetected, onClose }) {
     <div style={S.overlay} onClick={handleClose}>
       <div style={S.box} onClick={e => e.stopPropagation()}>
         <div style={S.header}>
-          <span style={S.title}>ESCANEAR PRODUCTO</span>
+          <span style={S.title}>ESCANEAR QR</span>
           <button style={S.closeBtn} onClick={handleClose}>✕</button>
         </div>
 
@@ -122,8 +117,9 @@ export default function BarcodeScanner({ onDetected, onClose }) {
         ) : (
           <div style={S.videoWrap}>
             <video ref={videoRef} style={S.video} muted playsInline />
+            <canvas ref={canvasRef} style={{ display: 'none' }} />
             <div style={S.crosshair} />
-            {!confirmacion && <div style={S.hint}>Apuntá al código de barras o QR</div>}
+            {!confirmacion && <div style={S.hint}>Apuntá el QR al recuadro</div>}
             {confirmacion && (
               <div style={{...S.confirmBanner, ...(confirmacion.ok ? S.confirmOk : S.confirmError)}}>
                 <div style={S.confirmIcon}>{confirmacion.ok ? '✓' : '✕'}</div>
@@ -145,8 +141,8 @@ const S = {
   closeBtn: { background:'none', border:'none', color:'var(--muted)', fontSize:20, cursor:'pointer', padding:'0 4px' },
   videoWrap: { position:'relative', background:'#000', aspectRatio:'4/3' },
   video: { width:'100%', height:'100%', objectFit:'cover', display:'block' },
-  crosshair: { position:'absolute', inset:0, margin:'auto', width:'70%', height:'45%', border:'2.5px solid var(--accent)', borderRadius:8, boxShadow:'0 0 0 2000px rgba(0,0,0,0.35)' },
-  hint: { position:'absolute', bottom:16, left:0, right:0, textAlign:'center', fontFamily:'Barlow, sans-serif', fontSize:14, color:'rgba(255,255,255,0.7)' },
+  crosshair: { position:'absolute', inset:0, margin:'auto', width:'65%', height:'65%', border:'2.5px solid var(--accent)', borderRadius:12, boxShadow:'0 0 0 2000px rgba(0,0,0,0.4)' },
+  hint: { position:'absolute', bottom:16, left:0, right:0, textAlign:'center', fontFamily:'Barlow, sans-serif', fontSize:14, color:'rgba(255,255,255,0.8)' },
   confirmBanner: { position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:12 },
   confirmOk: { background:'rgba(34,197,94,0.92)' },
   confirmError: { background:'rgba(239,68,68,0.92)' },

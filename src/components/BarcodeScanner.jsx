@@ -1,64 +1,129 @@
 // src/components/BarcodeScanner.jsx
-import { useEffect, useRef, useState, useCallback } from 'react'
-import { BrowserMultiFormatReader } from '@zxing/browser'
+import { useEffect, useRef, useState } from 'react'
+import {
+  BrowserMultiFormatReader,
+  DecodeHintType,
+  BarcodeFormat,
+} from '@zxing/library'
 
-// Tablet: pantalla mínima >= 768px → cámara delantera
-// Teléfono: pantalla mínima < 768px → cámara trasera
-const facingMode = Math.min(window.screen.width, window.screen.height) >= 768
-  ? 'user'
-  : 'environment'
+const FORMATS = [
+  BarcodeFormat.QR_CODE,
+  BarcodeFormat.EAN_13,
+  BarcodeFormat.EAN_8,
+  BarcodeFormat.CODE_128,
+  BarcodeFormat.CODE_39,
+  BarcodeFormat.UPC_A,
+  BarcodeFormat.UPC_E,
+  BarcodeFormat.DATA_MATRIX,
+  BarcodeFormat.ITF,
+  BarcodeFormat.CODABAR,
+]
 
 export default function BarcodeScanner({ onDetected, onClose }) {
   const videoRef = useRef(null)
-  const controlsRef = useRef(null)
-  const [confirmacion, setConfirmacion] = useState(null) // { nombre, ok }
+  const readerRef = useRef(null)
+  const [confirmacion, setConfirmacion] = useState(null)
   const [error, setError] = useState(null)
-
-  const startScanning = useCallback(() => {
-    const reader = new BrowserMultiFormatReader()
-    reader.decodeFromConstraints(
-      { video: { facingMode } },
-      videoRef.current,
-      (result) => {
-        if (!result) return
-        const codigo = result.getText()
-        try { controlsRef.current?.stop() } catch (_) {}
-        controlsRef.current = null
-        const info = onDetected(codigo) // devuelve { nombre, ok }
-        setConfirmacion(info)
-        setTimeout(() => {
-          setConfirmacion(null)
-          startScanning()
-        }, 2000)
-      }
-    )
-    .then(controls => { controlsRef.current = controls })
-    .catch(() => setError('No se pudo acceder a la cámara. Verificá los permisos.'))
-  }, [])
+  const scanningRef = useRef(true)
 
   useEffect(() => {
-    startScanning()
+    const hints = new Map()
+    hints.set(DecodeHintType.POSSIBLE_FORMATS, FORMATS)
+    hints.set(DecodeHintType.TRY_HARDER, true)
+
+    const reader = new BrowserMultiFormatReader(hints, {
+      delayBetweenScanAttempts: 50,
+      delayBetweenScanSuccess: 1500,
+    })
+    readerRef.current = reader
+
+    const constraints = {
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+        advanced: [{ focusMode: 'continuous' }, { exposureMode: 'continuous' }],
+      }
+    }
+
+    navigator.mediaDevices.getUserMedia(constraints)
+      .then(stream => {
+        if (!videoRef.current) return
+        videoRef.current.srcObject = stream
+
+        // Intentar activar autoenfoque continuo en la pista de video
+        const track = stream.getVideoTracks()[0]
+        if (track) {
+          const caps = track.getCapabilities?.()
+          if (caps?.focusMode?.includes('continuous')) {
+            track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(() => {})
+          }
+        }
+
+        videoRef.current.play().then(() => {
+          scanLoop(reader, stream)
+        })
+      })
+      .catch(() => setError('No se pudo acceder a la cámara. Verificá los permisos.'))
+
     return () => {
-      try { controlsRef.current?.stop() } catch (_) {}
+      scanningRef.current = false
+      stopStream()
     }
   }, [])
 
+  function stopStream() {
+    try {
+      if (videoRef.current?.srcObject) {
+        videoRef.current.srcObject.getTracks().forEach(t => t.stop())
+        videoRef.current.srcObject = null
+      }
+    } catch (_) {}
+  }
+
+  function scanLoop(reader, stream) {
+    if (!scanningRef.current || !videoRef.current) return
+
+    try {
+      const result = reader.decodeFromVideoElement(videoRef.current)
+      if (result) {
+        const codigo = result.getText()
+        scanningRef.current = false
+        const info = onDetected(codigo)
+        setConfirmacion(info)
+        setTimeout(() => {
+          setConfirmacion(null)
+          scanningRef.current = true
+          scanLoop(reader, stream)
+        }, 1500)
+        return
+      }
+    } catch (_) {}
+
+    requestAnimationFrame(() => scanLoop(reader, stream))
+  }
+
+  function handleClose() {
+    scanningRef.current = false
+    stopStream()
+    onClose()
+  }
+
   return (
-    <div style={S.overlay} onClick={onClose}>
+    <div style={S.overlay} onClick={handleClose}>
       <div style={S.box} onClick={e => e.stopPropagation()}>
         <div style={S.header}>
           <span style={S.title}>ESCANEAR PRODUCTO</span>
-          <button style={S.closeBtn} onClick={onClose}>✕</button>
+          <button style={S.closeBtn} onClick={handleClose}>✕</button>
         </div>
 
         {error ? (
           <div style={S.error}>{error}</div>
         ) : (
           <div style={S.videoWrap}>
-            <video ref={videoRef} style={S.video} />
+            <video ref={videoRef} style={S.video} muted playsInline />
             <div style={S.crosshair} />
             {!confirmacion && <div style={S.hint}>Apuntá al código de barras o QR</div>}
-
             {confirmacion && (
               <div style={{...S.confirmBanner, ...(confirmacion.ok ? S.confirmOk : S.confirmError)}}>
                 <div style={S.confirmIcon}>{confirmacion.ok ? '✓' : '✕'}</div>
@@ -80,7 +145,7 @@ const S = {
   closeBtn: { background:'none', border:'none', color:'var(--muted)', fontSize:20, cursor:'pointer', padding:'0 4px' },
   videoWrap: { position:'relative', background:'#000', aspectRatio:'4/3' },
   video: { width:'100%', height:'100%', objectFit:'cover', display:'block' },
-  crosshair: { position:'absolute', inset:0, margin:'auto', width:'60%', height:'40%', border:'2px solid var(--accent)', borderRadius:8, boxShadow:'0 0 0 2000px rgba(0,0,0,0.4)' },
+  crosshair: { position:'absolute', inset:0, margin:'auto', width:'70%', height:'45%', border:'2.5px solid var(--accent)', borderRadius:8, boxShadow:'0 0 0 2000px rgba(0,0,0,0.35)' },
   hint: { position:'absolute', bottom:16, left:0, right:0, textAlign:'center', fontFamily:'Barlow, sans-serif', fontSize:14, color:'rgba(255,255,255,0.7)' },
   confirmBanner: { position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:12 },
   confirmOk: { background:'rgba(34,197,94,0.92)' },

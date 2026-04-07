@@ -509,7 +509,7 @@ export async function agregarArticulo(art, empleado = '') {
     art.stockCierre || '0',
     art.stockActual || '0',
   ]
-  await sheetsAppend('ARTICULOS!A:K', [row])
+  await sheetsAppend('ARTICULOS!A1', [row])
   await registrarLog({
     accion: 'ARTICULO_CREADO',
     detalle: `${art.id} · ${art.nombre} · $${art.precioUnitario}`,

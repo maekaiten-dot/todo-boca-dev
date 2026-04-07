@@ -496,10 +496,15 @@ export async function generarIdArticulo() {
  * Agrega un artículo nuevo al sheet
  */
 export async function agregarArticulo(art, empleado = '') {
-  // Buscar la última fila con datos en columna A
   const data = await sheetsGet('ARTICULOS!A:A')
   const rows = data.values || []
-  const nextRow = rows.length + 1
+  
+  // Encontrar el índice real de la última fila con ID
+  let lastRow = 1
+  rows.forEach((r, i) => {
+    if (r[0] && r[0].toString().trim() !== '') lastRow = i + 1
+  })
+  const nextRow = lastRow + 1
 
   const row = [
     art.id, art.nombre, art.stockInicial || '0', art.info || '',
@@ -509,7 +514,6 @@ export async function agregarArticulo(art, empleado = '') {
   ]
 
   await sheetsUpdate(`ARTICULOS!A${nextRow}:K${nextRow}`, [row])
-
   await registrarLog({
     accion: 'ARTICULO_CREADO',
     detalle: `${art.id} · ${art.nombre} · $${art.precioUnitario}`,

@@ -32,7 +32,6 @@ async function getAccessToken() {
   const claimB64 = encode(claim)
   const signingInput = `${headerB64}.${claimB64}`
 
-  // Import private key
   const pemBody = PRIVATE_KEY.replace(/-----BEGIN PRIVATE KEY-----|-----END PRIVATE KEY-----|\n/g, '')
   const binaryKey = Uint8Array.from(atob(pemBody), (c) => c.charCodeAt(0))
 
@@ -114,7 +113,6 @@ async function sheetsBatchGet(ranges) {
 function getArgentinaDate() {
   const now = new Date()
   const locale = now.toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', hour12: false })
-  // locale = "1/4/2026, 13:38:44"
   const [fechaPart, horaPart] = locale.split(', ')
   const [dia, mes, anio] = fechaPart.split('/')
   const meses = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre']
@@ -128,33 +126,26 @@ function getArgentinaDate() {
 }
 
 // ── Descuentos de imanes ─────────────────────────────────────────────────────
-// Lógica copiada de la lógica de AppSheet existente
-// Imanes serie TB00049–TB00359 y TB00399–TB00805
 
 function isIman(skuOrNombre) {
-  // Detecta si es un imán por SKU o nombre
   if (!skuOrNombre) return false
   const s = String(skuOrNombre).toUpperCase()
   return s.includes('IMAN') || s.includes('IMÁN') || s.includes('MAGNET')
 }
 
 function calcularDescuentoImanes(items) {
-  // items: array de { articulo, nombre, cantidad, precioUnitario }
-  // Retorna { dtoIman8000x3, dtoIman8000x2, dtoIman6000x3, dtoIman6000x2, totalDescuentoImanes }
-
   const imanes8000 = items.filter(i => isIman(i.nombre) && i.precioUnitario >= 8000)
   const imanes6000 = items.filter(i => isIman(i.nombre) && i.precioUnitario >= 6000 && i.precioUnitario < 8000)
 
   const cant8000 = imanes8000.reduce((s, i) => s + i.cantidad, 0)
   const cant6000 = imanes6000.reduce((s, i) => s + i.cantidad, 0)
 
-  // x3 = cada grupo de 3 tiene descuento, x2 = cada grupo de 2
   const grupos8000x3 = Math.floor(cant8000 / 3)
   const grupos8000x2 = Math.floor((cant8000 % 3) / 2)
   const grupos6000x3 = Math.floor(cant6000 / 3)
   const grupos6000x2 = Math.floor((cant6000 % 3) / 2)
 
-  const dtoIman8000x3 = grupos8000x3 * 3 * 8000 * 0 // placeholder, reemplazar con lógica real
+  const dtoIman8000x3 = grupos8000x3 * 3 * 8000 * 0
   const dtoIman8000x2 = grupos8000x2 * 2 * 8000 * 0
   const dtoIman6000x3 = grupos6000x3 * 3 * 6000 * 0
   const dtoIman6000x2 = grupos6000x2 * 2 * 6000 * 0
@@ -168,28 +159,51 @@ function calcularDescuentoImanes(items) {
   }
 }
 
-// ── API pública ──────────────────────────────────────────────────────────────
+// ── Log de actividad ─────────────────────────────────────────────────────────
 
 /**
- * Trae todos los artículos de la hoja ARTICULOS
- * Retorna array de objetos mapeados a columnas reales
+ * Registra un evento en la pestaña APP_LOG
+ * accion: string corto (ej: 'VENTA_REGISTRADA', 'VENTA_ANULADA', 'LOGIN', 'ERROR')
+ * detalle: string descriptivo
+ * idReferencia: ID de venta u otro objeto relacionado (opcional)
+ * empleado: nombre del empleado (opcional)
+ * resultado: 'OK' | 'ERROR' | string
  */
+export async function registrarLog({ accion, detalle, idReferencia = '', empleado = '', resultado = 'OK' }) {
+  try {
+    const dt = getArgentinaDate()
+    const timestamp = new Date().toISOString()
+    const row = [
+      `'${timestamp}`,      // A: TIMESTAMP ISO
+      `'${dt.fecha}`,       // B: FECHA
+      `'${dt.hora}`,        // C: HORA
+      empleado,             // D: EMPLEADO
+      accion,               // E: ACCION
+      detalle,              // F: DETALLE
+      idReferencia,         // G: ID_REFERENCIA
+      resultado,            // H: RESULTADO
+    ]
+    await sheetsAppend('APP_LOG!A:H', [row])
+  } catch (e) {
+    // El log nunca debe romper la app — falla silenciosamente
+    console.warn('Error al registrar log:', e)
+  }
+}
+
+// ── API pública ──────────────────────────────────────────────────────────────
+
 export async function getArticulos() {
-  // Leemos desde la fila 1 (headers incluidos) para mapear por nombre de columna
   const data = await sheetsGet('ARTICULOS!A1:Z')
   const rows = data.values || []
   if (rows.length === 0) return []
 
-  // Fila 0 = headers, normalizados a mayúsculas sin espacios extremos
   const headers = rows[0].map(h => h?.toString().toUpperCase().trim() ?? '')
 
-  // Encuentra el índice de la primera columna cuyo header contiene alguna de las palabras clave
   const col = (...keys) => {
     for (const key of keys) {
       const idx = headers.findIndex(h => h === key)
       if (idx >= 0) return idx
     }
-    // Si no hay match exacto, intenta match parcial
     for (const key of keys) {
       const idx = headers.findIndex(h => h.includes(key))
       if (idx >= 0) return idx
@@ -209,12 +223,10 @@ export async function getArticulos() {
   const iStockC   = col('STOCK CIERRE', 'CIERRE')
   const iStockA   = col('STOCK ACTUAL', 'ACTUAL')
 
-  // Fallback a los índices hardcodeados originales si algún header no se encontró
   const idx = (found, fallback) => found >= 0 ? found : fallback
-
   const parseNum = v => Number(String(v || '0').replace(/[$\s]/g, '').replace(/\./g, '').replace(',', '.')) || 0
 
-  return rows.slice(1) // saltear fila de headers
+  return rows.slice(1)
     .filter(r => r[idx(iId, 0)])
     .map(r => ({
       id:             r[idx(iId, 0)]     || '',
@@ -235,9 +247,6 @@ export async function getArticulos() {
     })
 }
 
-/**
- * Trae los usuarios de la hoja USUARIOS
- */
 export async function getUsuarios() {
   const data = await sheetsGet('USUARIOS!A2:E')
   const rows = data.values || []
@@ -282,9 +291,6 @@ function mapRow(r) {
   }
 }
 
-/**
- * Trae las ventas del día actual de DETALLE DE VENTAS (incluye anuladas)
- */
 export async function getVentasHoy() {
   const data = await sheetsGet('DETALLE DE VENTAS!A2:AD')
   const rows = data.values || []
@@ -294,19 +300,13 @@ export async function getVentasHoy() {
     .map(mapRow)
 }
 
-/**
- * Trae todo el historial de ventas
- */
 export async function getHistoricoVentas() {
   const data = await sheetsGet('DETALLE DE VENTAS!A2:AD')
   const rows = data.values || []
   return rows.filter(r => r[0]).map(mapRow)
 }
 
-/**
- * Anula todas las filas de un ID_VENTA marcando ANULADO = TRUE
- */
-export async function anularVenta(idVenta) {
+export async function anularVenta(idVenta, empleado = '') {
   const data = await sheetsGet('DETALLE DE VENTAS!A2:U')
   const rows = data.values || []
   const requests = []
@@ -318,12 +318,16 @@ export async function anularVenta(idVenta) {
   })
   if (requests.length === 0) throw new Error('No se encontraron filas para anular')
   await Promise.all(requests)
+  await registrarLog({
+    accion: 'VENTA_ANULADA',
+    detalle: `Venta ${idVenta} anulada completamente (${requests.length} items)`,
+    idReferencia: idVenta,
+    empleado,
+    resultado: 'OK',
+  })
   return requests.length
 }
 
-/**
- * Genera un nuevo ID de venta basado en fecha + secuencia
- */
 export async function generarIdVenta() {
   const data = await sheetsGet('DETALLE DE VENTAS!B2:B')
   const rows = data.values || []
@@ -334,15 +338,7 @@ export async function generarIdVenta() {
   return `${prefix}-${String(seq).padStart(3, '0')}`
 }
 
-/**
- * Registra una venta completa (carrito) en DETALLE DE VENTAS
- * items: [{ articulo, nombre, foto, cantidad, precioUnitario, costoUnitario, descuento }]
- * metodoPago: string
- * descCarrito: number (% descuento sobre total)
- * empleado: string
- * notas: string
- */
-export async function registrarVenta({ items, metodoPago, descCarrito = 0, empleado = '', notas = '' }) {
+export async function registrarVenta({ items, metodoPago, descCarrito = 0, empleado = '', notas = '', descuentoImanes = 0 }) {
   const dt = getArgentinaDate()
   const idVenta = await generarIdVenta()
   const { totalDescuentoImanes, dtoIman8000x3, dtoIman8000x2, dtoIman6000x3, dtoIman6000x2 } =
@@ -357,55 +353,66 @@ export async function registrarVenta({ items, metodoPago, descCarrito = 0, emple
     const ingresoNeto = precioTotalFinal - costoTotal
 
     return [
-      idDetalle,                    // A: ID_DETALLE DE VENTA
-      idVenta,                      // B: ID_VENTA
-      `'${dt.fecha}`,               // C: FECHA (apostrofe fuerza texto)
-      `'${dt.hora}`,                // D: HORA (apostrofe fuerza texto)
-      dt.mes,                       // E: MES
-      dt.anio,                      // F: AÑO
-      item.articulo,                // G: ARTICULO (ID)
-      item.nombre,                  // H: NOMBRE
-      item.foto || '',              // I: FOTO_ART
-      item.cantidad,                // J: CANTIDAD
-      item.precioUnitario,          // K: PRECIO UNITARIO
-      precioTotal,                  // L: PRECIO TOTAL
-      item.costoUnitario,           // M: COSTO UNITARIO
-      costoTotal,                   // N: COSTO TOTAL
-      empleado,                     // O: EMPLEADO
-      metodoPago,                   // P: MÉTODO DE PAGO
-      descuentoItem,                // Q: DESCUENTO
-      descCarrito > 0 ? `${descCarrito}%` : '', // R: DESC_CARRITO
-      precioTotalFinal,             // S: PRECIO TOTAL FINAL
-      notas,                        // T: NOTAS
-      false,                        // U: ANULADO
-      ingresoNeto,                  // V: INGRESO NETO TOTAL
-      dtoIman8000x3,                // W: DESCUENTO IMANES
-      dtoIman8000x3,                // X: DTO IMAN 8000 x3
-      dtoIman8000x2,                // Y: DTO IMAN 8000 x2
-      dtoIman6000x3,                // Z: DTO IMAN 6000 x3
-      dtoIman6000x2,                // AA: DTO IMAN 6000 x2
-      '',                           // AB: MM 35 dias Ventas Totales (formula)
-      '',                           // AC: MM 35 dias Ventas Tarjeta + QR (formula)
-      '',                           // AD: Factor Tarj + QR / Tot (formula)
+      idDetalle,
+      idVenta,
+      `'${dt.fecha}`,
+      `'${dt.hora}`,
+      dt.mes,
+      dt.anio,
+      item.articulo,
+      item.nombre,
+      item.foto || '',
+      item.cantidad,
+      item.precioUnitario,
+      precioTotal,
+      item.costoUnitario,
+      costoTotal,
+      empleado,
+      metodoPago,
+      descuentoItem,
+      descCarrito > 0 ? `${descCarrito}%` : '',
+      precioTotalFinal,
+      notas,
+      false,
+      ingresoNeto,
+      dtoIman8000x3,
+      dtoIman8000x3,
+      dtoIman8000x2,
+      dtoIman6000x3,
+      dtoIman6000x2,
+      '',
+      '',
+      '',
     ]
   })
 
   await sheetsAppend('DETALLE DE VENTAS!A:AD', rows)
+
+  const totalVenta = items.reduce((s, i) => {
+    const pf = i.cantidad * i.precioUnitario * (1 - (i.descuento||0)/100) * (1 - descCarrito/100)
+    return s + pf
+  }, 0)
+
+  await registrarLog({
+    accion: 'VENTA_REGISTRADA',
+    detalle: `${items.length} producto(s) · ${metodoPago}${descCarrito > 0 ? ` · DTO ${descCarrito}%` : ''}${descuentoImanes > 0 ? ` · DTO imanes $${descuentoImanes}` : ''} · Total $${Math.round(totalVenta).toLocaleString('es-AR')}`,
+    idReferencia: idVenta,
+    empleado,
+    resultado: 'OK',
+  })
+
   return idVenta
 }
 
-/**
- * Anula un item individual por ID_DETALLE
- * Si todos los items del ID_VENTA quedan anulados, anula también la venta entera
- */
-export async function anularItemVenta(idDetalle, todosLosItems) {
+export async function anularItemVenta(idDetalle, todosLosItems, empleado = '') {
   const data = await sheetsGet('DETALLE DE VENTAS!A2:U')
   const rows = data.values || []
 
-  // Encontrar fila del idDetalle a anular
   const requests = []
+  let idVenta = ''
   rows.forEach((r, idx) => {
     if (r[0] === idDetalle) {
+      idVenta = r[1]
       const rowNum = idx + 2
       requests.push(sheetsUpdate(`DETALLE DE VENTAS!U${rowNum}`, [['TRUE']]))
     }
@@ -414,19 +421,141 @@ export async function anularItemVenta(idDetalle, todosLosItems) {
   if (requests.length === 0) throw new Error('No se encontró el item')
   await Promise.all(requests)
 
-  // Verificar si todos los items de esa venta quedaron anulados
-  const idVenta = todosLosItems[0]?.idVenta
-  if (idVenta) {
+  await registrarLog({
+    accion: 'ITEM_ANULADO',
+    detalle: `Item ${idDetalle} anulado de venta ${idVenta || todosLosItems[0]?.idVenta}`,
+    idReferencia: idDetalle,
+    empleado,
+    resultado: 'OK',
+  })
+
+  const idVentaFinal = idVenta || todosLosItems[0]?.idVenta
+  if (idVentaFinal) {
     const itemsActivos = todosLosItems.filter(i => i.idDetalle !== idDetalle && !i.anulado)
     if (itemsActivos.length === 0) {
-      // Anular toda la venta
       const ventaRequests = []
       rows.forEach((r, idx) => {
-        if (r[1] === idVenta && r[20] !== 'TRUE') {
+        if (r[1] === idVentaFinal && r[20] !== 'TRUE') {
           ventaRequests.push(sheetsUpdate(`DETALLE DE VENTAS!U${idx + 2}`, [['TRUE']]))
         }
       })
       await Promise.all(ventaRequests)
+      await registrarLog({
+        accion: 'VENTA_ANULADA_AUTO',
+        detalle: `Venta ${idVentaFinal} anulada automáticamente (todos los items anulados)`,
+        idReferencia: idVentaFinal,
+        empleado,
+        resultado: 'OK',
+      })
     }
   }
+}
+
+// ── Artículos CRUD ────────────────────────────────────────────────────────────
+
+/**
+ * Trae todos los artículos SIN filtrar por disponibilidad (para el ABM)
+ */
+export async function getArticulosAdmin() {
+  const data = await sheetsGet('ARTICULOS!A1:K')
+  const rows = data.values || []
+  if (rows.length === 0) return []
+  return rows.slice(1)
+    .map((r, idx) => ({
+      rowNum: idx + 2, // fila real en el sheet (1-indexed, +1 por header)
+      id:              r[0] || '',
+      nombre:          r[1] || '',
+      stockInicial:    r[2] || '0',
+      info:            r[3] || '',
+      disponibilidad:  r[4] || 'ACTIVO',
+      foto:            r[5] || '',
+      precioUnitario:  r[6] || '0',
+      costoUnitario:   r[7] || '0',
+      cantidadReponer: r[8] || '0',
+      stockCierre:     r[9] || '0',
+      stockActual:     r[10] || '0',
+    }))
+    .filter(r => r.id)
+}
+
+/**
+ * Genera el próximo ID de artículo (TB + número siguiente)
+ */
+export async function generarIdArticulo() {
+  const data = await sheetsGet('ARTICULOS!A2:A')
+  const rows = data.values || []
+  const ids = rows
+    .map(r => r[0])
+    .filter(id => id && /^TB\d+$/.test(id))
+    .map(id => parseInt(id.replace('TB', '')))
+  const maxId = ids.length > 0 ? Math.max(...ids) : 0
+  return `TB${String(maxId + 1).padStart(5, '0')}`
+}
+
+/**
+ * Agrega un artículo nuevo al sheet
+ */
+export async function agregarArticulo(art, empleado = '') {
+  const row = [
+    art.id,
+    art.nombre,
+    art.stockInicial || '0',
+    art.info || '',
+    art.disponibilidad || 'ACTIVO',
+    art.foto || '',
+    art.precioUnitario || '0',
+    art.costoUnitario || '0',
+    art.cantidadReponer || '0',
+    art.stockCierre || '0',
+    art.stockActual || '0',
+  ]
+  await sheetsAppend('ARTICULOS!A:K', [row])
+  await registrarLog({
+    accion: 'ARTICULO_CREADO',
+    detalle: `${art.id} · ${art.nombre} · $${art.precioUnitario}`,
+    idReferencia: art.id,
+    empleado,
+    resultado: 'OK',
+  })
+}
+
+/**
+ * Edita un artículo existente por número de fila
+ */
+export async function editarArticulo(rowNum, art, empleado = '') {
+  const row = [
+    art.id,
+    art.nombre,
+    art.stockInicial || '0',
+    art.info || '',
+    art.disponibilidad || 'ACTIVO',
+    art.foto || '',
+    art.precioUnitario || '0',
+    art.costoUnitario || '0',
+    art.cantidadReponer || '0',
+    art.stockCierre || '0',
+    art.stockActual || '0',
+  ]
+  await sheetsUpdate(`ARTICULOS!A${rowNum}:K${rowNum}`, [row])
+  await registrarLog({
+    accion: 'ARTICULO_EDITADO',
+    detalle: `${art.id} · ${art.nombre} · $${art.precioUnitario}`,
+    idReferencia: art.id,
+    empleado,
+    resultado: 'OK',
+  })
+}
+
+/**
+ * Cambia la disponibilidad de un artículo
+ */
+export async function toggleDisponibilidad(rowNum, artId, nuevaDisp, empleado = '') {
+  await sheetsUpdate(`ARTICULOS!E${rowNum}`, [[nuevaDisp]])
+  await registrarLog({
+    accion: 'ARTICULO_DISPONIBILIDAD',
+    detalle: `${artId} → ${nuevaDisp}`,
+    idReferencia: artId,
+    empleado,
+    resultado: 'OK',
+  })
 }

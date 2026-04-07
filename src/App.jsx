@@ -4,12 +4,13 @@ import NuevaVenta from './pages/NuevaVenta.jsx'
 import VentasDelDia from './pages/VentasDelDia.jsx'
 import LogVentas from './pages/LogVentas.jsx'
 import Estadisticas from './pages/Estadisticas.jsx'
-import { getArticulos, getUsuarios } from './api/sheets.js'
+import Articulos from './pages/Articulos.jsx'
+import { getArticulos, getUsuarios, registrarLog } from './api/sheets.js'
 
 const PERFILES = ['Admin', 'Caja', 'Empleado']
 
 const TABS_POR_PERFIL = {
-  Admin:    [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }, { id:'log', label:'Historial', icon:'📋' }, { id:'stats', label:'Stats', icon:'📈' }],
+  Admin:    [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }, { id:'log', label:'Historial', icon:'📋' }, { id:'stats', label:'Stats', icon:'📈' }, { id:'arts', label:'Arts.', icon:'📦' }],
   Caja:     [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }],
   Empleado: [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }],
 }
@@ -28,11 +29,40 @@ export default function App() {
 
   useEffect(() => { cargarArticulos(); cargarUsuarios() }, [])
 
+  // Log de apertura de sesión al cargar la app con perfil ya configurado
+  useEffect(() => {
+    if (perfilDispositivo) {
+      registrarLog({
+        accion: 'SESION_INICIADA',
+        detalle: `App abierta con perfil ${perfilDispositivo}`,
+        empleado: perfilDispositivo,
+        resultado: 'OK',
+      })
+    }
+  }, [])
+
   async function cargarArticulos() {
     setLoadingArticulos(true)
-    try { setArticulos(await getArticulos()) }
-    catch (e) { console.error(e) }
-    finally { setLoadingArticulos(false) }
+    try {
+      const arts = await getArticulos()
+      setArticulos(arts)
+      await registrarLog({
+        accion: 'ARTICULOS_CARGADOS',
+        detalle: `${arts.length} artículos cargados`,
+        empleado: localStorage.getItem('tb_perfil') || '',
+        resultado: 'OK',
+      })
+    } catch (e) {
+      console.error(e)
+      await registrarLog({
+        accion: 'ERROR_CARGA_ARTICULOS',
+        detalle: e?.message || 'Error desconocido al cargar artículos',
+        empleado: localStorage.getItem('tb_perfil') || '',
+        resultado: 'ERROR',
+      })
+    } finally {
+      setLoadingArticulos(false)
+    }
   }
 
   async function cargarUsuarios() {
@@ -44,6 +74,12 @@ export default function App() {
     localStorage.setItem('tb_perfil', perfil)
     setPerfilDispositivo(perfil)
     setTab('venta')
+    registrarLog({
+      accion: 'PERFIL_CONFIGURADO',
+      detalle: `Dispositivo configurado con perfil ${perfil}`,
+      empleado: perfil,
+      resultado: 'OK',
+    })
   }
 
   function handleLogoTap() {
@@ -52,6 +88,12 @@ export default function App() {
     if (logoTapTimer) clearTimeout(logoTapTimer)
     if (newCount >= 5) {
       setLogoTaps(0)
+      registrarLog({
+        accion: 'PERFIL_RESETEADO',
+        detalle: `Perfil ${perfilDispositivo} reseteado manualmente desde el logo`,
+        empleado: perfilDispositivo || '',
+        resultado: 'OK',
+      })
       localStorage.removeItem('tb_perfil')
       setPerfilDispositivo(null)
       setTab('venta')
@@ -61,10 +103,20 @@ export default function App() {
     setLogoTapTimer(t)
   }
 
+  function handleTabChange(newTab) {
+    setTab(newTab)
+    const tabNames = { venta:'VENDER', hoy:'HOY', log:'HISTORIAL', stats:'ESTADÍSTICAS' }
+    registrarLog({
+      accion: 'NAVEGACION',
+      detalle: `Navegó a ${tabNames[newTab] || newTab}`,
+      empleado: perfilDispositivo || '',
+      resultado: 'OK',
+    })
+  }
+
   const tabs = TABS_POR_PERFIL[perfilDispositivo] || []
   const esAdmin = perfilDispositivo === 'Admin'
 
-  // Si no hay perfil configurado, mostrar pantalla de setup
   if (!perfilDispositivo) {
     return (
       <>
@@ -134,6 +186,7 @@ export default function App() {
           )}
           {tab === 'log' && esAdmin && <LogVentas />}
           {tab === 'stats' && esAdmin && <Estadisticas />}
+          {tab === 'arts' && esAdmin && <Articulos empleado={usuarios[0]?.nombre || ''} />}
         </div>
 
         {/* Bottom nav */}
@@ -142,7 +195,7 @@ export default function App() {
             <button
               key={t.id}
               style={{ ...S.navBtn, ...(tab === t.id ? S.navBtnActive : {}) }}
-              onClick={() => setTab(t.id)}
+              onClick={() => handleTabChange(t.id)}
             >
               {tab === t.id && <div style={S.navBar} />}
               <span style={S.navIcon}>{t.icon}</span>
@@ -193,7 +246,6 @@ const S = {
   navBar: { position:'absolute', top:0, left:'50%', transform:'translateX(-50%)', width:32, height:2, background:'var(--accent)', borderRadius:'0 0 3px 3px' },
   navIcon: { fontSize:20 },
   navLabel: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:11, textTransform:'uppercase', letterSpacing:1 },
-  // Setup
   setupOverlay: { height:'100%', display:'flex', alignItems:'center', justifyContent:'center', background:'var(--bg)' },
   setupBox: { display:'flex', flexDirection:'column', alignItems:'center', gap:20, padding:32, maxWidth:380, width:'100%' },
   setupLogo: { display:'flex', alignItems:'baseline', gap:6 },

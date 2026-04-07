@@ -1,6 +1,6 @@
 // src/components/DetalleVentaModal.jsx
 import { useState } from 'react'
-import { anularItemVenta } from '../api/sheets.js'
+import { anularItemVenta, registrarLog } from '../api/sheets.js'
 
 export default function DetalleVentaModal({ venta, onClose, onActualizar }) {
   const [confirmItem, setConfirmItem] = useState(null)
@@ -24,6 +24,7 @@ export default function DetalleVentaModal({ venta, onClose, onActualizar }) {
   async function confirmarAnulacionItem() {
     setAnulando(true)
     try {
+      await registrarLog({ accion: 'ITEM_ANULACION_INICIADA', detalle: `Anulando item ${confirmItem} de venta ${venta.idVenta}`, idReferencia: confirmItem, empleado: venta.items?.[0]?.empleado || '', resultado: 'OK' })
       await anularItemVenta(confirmItem, venta.items)
       showToast('Producto anulado', 'success')
       setConfirmItem(null)

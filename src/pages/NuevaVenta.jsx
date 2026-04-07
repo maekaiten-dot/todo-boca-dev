@@ -1,6 +1,6 @@
 // src/pages/NuevaVenta.jsx
 import { useState, useEffect } from 'react'
-import { registrarVenta } from '../api/sheets.js'
+import { registrarVenta, registrarLog } from '../api/sheets.js'
 import BarcodeScanner from '../components/BarcodeScanner.jsx'
 
 const METODOS_PAGO = [
@@ -16,11 +16,9 @@ const METODOS_PAGO = [
 
 const DESCUENTOS = [0, 5, 10, 15, 20, 25, 30, 40, 50]
 
-// ── Descuentos por volumen de imanes ─────────────────────────────────────────
 const IMANES_A = new Set(['TB00049','TB00050','TB00051','TB00052','TB00053','TB00054','TB00055','TB00056','TB00058','TB00359','TB01011','TB01043','TB01044'])
 const IMANES_B = new Set(['TB00399','TB00433','TB00587','TB00741','TB00805','TB00059'])
 
-// Retorna el precio unitario con descuento según cantidad total del grupo
 function precioImanConDescuento(grupo, cantidadTotal) {
   if (grupo === 'A') {
     if (cantidadTotal >= 3) return 6000
@@ -35,23 +33,19 @@ function precioImanConDescuento(grupo, cantidadTotal) {
   return null
 }
 
-// Calcula totales con descuentos de imanes aplicados
 function calcularTotalesConDescuento(carrito, descCarrito) {
-  // Contar total de unidades por grupo
   let cantA = 0, cantB = 0
   carrito.forEach(item => {
     if (IMANES_A.has(item.id)) cantA += item.cantidad
     else if (IMANES_B.has(item.id)) cantB += item.cantidad
   })
 
-  // Calcular subtotal con precios ajustados
   let subtotalBruto = 0
   let descuentoImanes = 0
 
   carrito.forEach(item => {
     const subtotalItem = item.precioUnitario * item.cantidad
     subtotalBruto += subtotalItem
-
     if (IMANES_A.has(item.id) && cantA > 1) {
       const precioDesc = precioImanConDescuento('A', cantA)
       descuentoImanes += (item.precioUnitario - precioDesc) * item.cantidad
@@ -65,15 +59,7 @@ function calcularTotalesConDescuento(carrito, descCarrito) {
   const descCarritoMonto = subtotalConImanes * (descCarrito / 100)
   const totalNeto = subtotalConImanes - descCarritoMonto
 
-  return {
-    totalBruto: subtotalBruto,
-    descuentoImanes,
-    subtotalConImanes,
-    descCarritoMonto,
-    totalNeto,
-    cantA,
-    cantB,
-  }
+  return { totalBruto: subtotalBruto, descuentoImanes, subtotalConImanes, descCarritoMonto, totalNeto, cantA, cantB }
 }
 
 export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistrada, usuarios: usuariosProp }) {
@@ -124,29 +110,55 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
         cantidad: 1, descuento: 0, articulo: art.id,
       }]
     })
+    registrarLog({
+      accion: 'PRODUCTO_AGREGADO',
+      detalle: `${art.nombre} (${art.id}) · $${art.precioUnitario.toLocaleString('es-AR')}`,
+      empleado,
+      resultado: 'OK',
+    })
   }
 
   function cambiarCantidad(idx, delta) {
     setCarrito(prev => {
       const updated = [...prev]
       const nueva = updated[idx].cantidad + delta
-      if (nueva <= 0) return updated.filter((_, i) => i !== idx)
+      if (nueva <= 0) {
+        registrarLog({
+          accion: 'PRODUCTO_QUITADO',
+          detalle: `${updated[idx].nombre} (${updated[idx].id}) eliminado del carrito`,
+          empleado,
+          resultado: 'OK',
+        })
+        return updated.filter((_, i) => i !== idx)
+      }
       updated[idx] = { ...updated[idx], cantidad: nueva }
       return updated
     })
   }
 
   function quitarDelCarrito(idx) {
+    const item = carrito[idx]
+    registrarLog({
+      accion: 'PRODUCTO_QUITADO',
+      detalle: `${item?.nombre} (${item?.id}) eliminado del carrito`,
+      empleado,
+      resultado: 'OK',
+    })
     setCarrito(prev => prev.filter((_, i) => i !== idx))
   }
 
   function reiniciarCarrito() {
+    registrarLog({
+      accion: 'CARRITO_REINICIADO',
+      detalle: `Carrito reiniciado con ${carrito.length} producto(s)`,
+      empleado,
+      resultado: 'OK',
+    })
     setCarrito([])
     setDescCarrito(0)
     setConfirmarReinicio(false)
   }
 
-  // Calcular totales con descuentos automáticos
   const totales = calcularTotalesConDescuento(carrito, descCarrito)
 
   async function cerrarVenta() {
@@ -154,7 +166,6 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
     setSaving(true)
     try {
       const notas = divisaActual && montoDivisa ? `${divisaActual.code} ${montoDivisa}` : ''
-      // Pasamos descuentoImanes para que quede registrado
       const idVenta = await registrarVenta({
         items: carrito,
         metodoPago,
@@ -170,6 +181,12 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
       onVentaRegistrada?.()
     } catch (e) {
       showToast('Error al guardar. Revisá la conexión.', 'error')
+      registrarLog({
+        accion: 'ERROR_CERRAR_VENTA',
+        detalle: e?.message || 'Error desconocido al cerrar venta',
+        empleado,
+        resultado: 'ERROR',
+      })
       console.error(e)
     } finally {
       setSaving(false)
@@ -180,10 +197,32 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
     const art = articulos.find(a => a.id === codigo || a.id === codigo.trim())
     if (art) {
       agregarAlCarrito(art)
+      registrarLog({
+        accion: 'SCAN_EXITOSO',
+        detalle: `QR escaneado: ${art.nombre} (${art.id})`,
+        empleado,
+        resultado: 'OK',
+      })
       return { ok: true, nombre: art.nombre }
     } else {
+      registrarLog({
+        accion: 'SCAN_NO_ENCONTRADO',
+        detalle: `QR escaneado no encontrado: ${codigo}`,
+        empleado,
+        resultado: 'ERROR',
+      })
       return { ok: false, nombre: `No encontrado: ${codigo}` }
     }
+  }
+
+  function abrirScanner() {
+    setScannerAbierto(true)
+    registrarLog({
+      accion: 'SCANNER_ABIERTO',
+      detalle: 'Escáner QR abierto',
+      empleado,
+      resultado: 'OK',
+    })
   }
 
   function showToast(msg, type) {
@@ -191,14 +230,9 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
     setTimeout(() => setToast(null), 3500)
   }
 
-  // Precio efectivo de un item considerando descuento de imanes
   function precioEfectivoItem(item) {
-    if (IMANES_A.has(item.id) && totales.cantA > 1) {
-      return precioImanConDescuento('A', totales.cantA)
-    }
-    if (IMANES_B.has(item.id) && totales.cantB > 1) {
-      return precioImanConDescuento('B', totales.cantB)
-    }
+    if (IMANES_A.has(item.id) && totales.cantA > 1) return precioImanConDescuento('A', totales.cantA)
+    if (IMANES_B.has(item.id) && totales.cantB > 1) return precioImanConDescuento('B', totales.cantB)
     return item.precioUnitario
   }
 
@@ -226,7 +260,7 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
             disabled={loadingArticulos}
           />
           {busqueda && <button style={S.clearBtn} onClick={() => setBusqueda('')}>✕</button>}
-          <button style={S.scanBtn} onClick={() => setScannerAbierto(true)} title="Escanear código">📷</button>
+          <button style={S.scanBtn} onClick={abrirScanner} title="Escanear código">📷</button>
         </div>
         <div style={S.scrollList}>
           {articulosFiltrados.map(art => (

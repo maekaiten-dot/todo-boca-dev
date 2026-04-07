@@ -1,16 +1,23 @@
 // src/pages/LogVentas.jsx
-import { useState, useEffect } from 'react'
-import { getHistoricoVentas } from '../api/sheets.js'
+import { useState } from 'react'
+import { getHistoricoVentas, registrarLog } from '../api/sheets.js'
 import DetalleVentaModal from '../components/DetalleVentaModal.jsx'
+
+const METODO_ICONS = {
+  'Efectivo Pesos':'💵','Efectivo ARS':'💵',
+  'Tarjeta de Crédito':'💳','Tarjeta de Débito':'💳','Tarjeta':'💳',
+  'QR':'📱','Transferencia':'🏦',
+  'Efectivo Dólares':'🇺🇸','Efectivo USD':'🇺🇸',
+  'Efectivo Reales':'🇧🇷','Efectivo BRL':'🇧🇷',
+  'Efectivo Euros':'🇪🇺','Efectivo EUR':'🇪🇺',
+}
 
 export default function LogVentas() {
   const [ventas, setVentas] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [busqueda, setBusqueda] = useState('')
   const [ventaSeleccionada, setVentaSeleccionada] = useState(null)
-
-  useEffect(() => { cargar() }, [])
 
   async function cargar() {
     setLoading(true)
@@ -18,7 +25,9 @@ export default function LogVentas() {
     try {
       const data = await getHistoricoVentas()
       setVentas(data)
+      await registrarLog({ accion: 'HISTORIAL_CARGADO', detalle: `${data.length} registros`, resultado: 'OK' })
     } catch (e) {
+      await registrarLog({ accion: 'ERROR_CARGA_HISTORIAL', detalle: e?.message || 'Error desconocido', resultado: 'ERROR' })
       setError('No se pudo cargar el historial.')
     } finally {
       setLoading(false)
@@ -66,14 +75,14 @@ export default function LogVentas() {
   const cantTotal = todasVentas.filter(v => !v.anulado).length
   const cantAnuladas = todasVentas.filter(v => v.anulado).length
 
-  const METODO_ICONS = {
-    'Efectivo Pesos':'💵','Efectivo ARS':'💵',
-    'Tarjeta de Crédito':'💳','Tarjeta de Débito':'💳','Tarjeta':'💳',
-    'QR':'📱','Transferencia':'🏦',
-    'Efectivo Dólares':'🇺🇸','Efectivo USD':'🇺🇸',
-    'Efectivo Reales':'🇧🇷','Efectivo BRL':'🇧🇷',
-    'Efectivo Euros':'🇪🇺','Efectivo EUR':'🇪🇺',
-  }
+  if (ventas.length === 0 && !loading && !error) return (
+    <div style={S.center}>
+      <button style={S.loadBtn} onClick={cargar}>Cargar historial</button>
+      <div style={{fontFamily:'Barlow, sans-serif', fontSize:14, color:'var(--muted)', marginTop:8}}>
+        Puede tardar unos segundos
+      </div>
+    </div>
+  )
 
   if (loading) return (
     <div style={S.center}>
@@ -122,67 +131,90 @@ export default function LogVentas() {
         {busqueda && <button style={S.clearBtn} onClick={() => setBusqueda('')}>✕</button>}
       </div>
 
-      <div style={S.lista}>
-        {Object.entries(porFecha).map(([fecha, ventasDelDia]) => (
-          <div key={fecha}>
-            <div style={S.fechaHeader}>
-              <span>{fecha}</span>
-              <span style={S.fechaTotal}>
-                ${Math.round(ventasDelDia.filter(v=>!v.anulado).reduce((s,v)=>s+v.total,0)).toLocaleString('es-AR')}
-                · {ventasDelDia.filter(v=>!v.anulado).length} ventas
-              </span>
-            </div>
-            {ventasDelDia.map(v => {
-              const tieneParcial = !v.anulado && v.items.some(i => i.anulado)
-              return (
-                <div key={v.idVenta} style={{...S.ventaCard, ...(v.anulado ? S.ventaCardAnulada : {}), cursor:'pointer'}} onClick={() => setVentaSeleccionada(v)}>
-                  {v.anulado && <div style={S.anuladoBanner}>⚠ ANULADA</div>}
-                  {tieneParcial && <div style={S.parcialBanner}>⚠ Tiene productos anulados</div>}
-                  <div style={S.ventaTop}>
-                    <div style={{...S.ventaId, ...(v.anulado ? S.textAnulado : {})}}>{v.idVenta}</div>
-                    <div style={{...S.ventaHora, ...(v.anulado ? S.textAnulado : {})}}>{v.hora}</div>
-                  </div>
-                  <div style={S.ventaBottom}>
-                    <div style={{...S.ventaMetodo, ...(v.anulado ? S.textAnulado : {})}}>
-                      {METODO_ICONS[v.metodoPago] || '💰'} {v.metodoPago}
-                      · {v.items.length} producto{v.items.length !== 1 ? 's' : ''}
-                      {v.empleado ? ` · ${v.empleado}` : ''}
-                    </div>
-                    <div style={S.ventaTotal}>
-                      {v.anulado ? (
-                        <span style={{textDecoration:'line-through', color:'var(--muted)', opacity:0.6}}>
-                          ${Math.round(v.totalOriginal).toLocaleString('es-AR')}
-                        </span>
-                      ) : tieneParcial ? (
-                        <span style={{display:'flex', alignItems:'center', gap:6}}>
-                          <span style={{textDecoration:'line-through', opacity:0.4, fontSize:21, color:'var(--muted)'}}>
-                            ${Math.round(v.totalOriginal).toLocaleString('es-AR')}
-                          </span>
-                          <span>${Math.round(v.total).toLocaleString('es-AR')}</span>
-                        </span>
-                      ) : (
-                        `$${Math.round(v.total).toLocaleString('es-AR')}`
-                      )}
-                    </div>
-                  </div>
-                  <div style={S.ventaItems}>
-                    {v.items.map((item, i) => (
-                      <div key={item.idDetalle || item.articulo || i} style={{...S.ventaItem, ...(item.anulado ? S.ventaItemAnulado : {})}}>
-                        {item.foto
-                          ? <img src={item.foto} alt="" style={S.ventaItemThumb} onError={e => e.target.style.display='none'} />
-                          : <div style={S.ventaItemThumbPH}>📦</div>
-                        }
-                        <span>{item.nombre} ×{item.cantidad}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        ))}
-        {ventasFiltradas.length === 0 && (
+      <div style={S.tableWrap}>
+        {ventasFiltradas.length === 0 ? (
           <div style={S.emptyText}>Sin resultados para "{busqueda}"</div>
+        ) : (
+          <table style={S.table}>
+            <thead>
+              <tr>
+                <th style={S.th}>Fecha</th>
+                <th style={S.th}>Hora</th>
+                <th style={S.th}>Artículo</th>
+                <th style={S.th}>Cant.</th>
+                <th style={S.th}>P. Unit.</th>
+                <th style={S.th}>Total</th>
+                <th style={S.th}>Método</th>
+                <th style={S.th}>Empleado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(porFecha).map(([fecha, ventasDelDia]) => (
+                <>
+                  {/* Separador de fecha */}
+                  <tr key={`fecha-${fecha}`}>
+                    <td colSpan={8} style={S.fechaSep}>
+                      <span>{fecha}</span>
+                      <span style={S.fechaSepTotal}>
+                        ${Math.round(ventasDelDia.filter(v=>!v.anulado).reduce((s,v)=>s+v.total,0)).toLocaleString('es-AR')}
+                        {' · '}{ventasDelDia.filter(v=>!v.anulado).length} ventas
+                      </span>
+                    </td>
+                  </tr>
+                  {ventasDelDia.map(v => {
+                    const tieneParcial = !v.anulado && v.items.some(i => i.anulado)
+                    return (
+                      <>
+                        {/* Header de venta */}
+                        <tr key={`h-${v.idVenta}`} style={{...S.ventaHeaderRow, ...(v.anulado ? S.ventaHeaderAnulada : {})}} onClick={() => { setVentaSeleccionada(v); registrarLog({ accion: 'MODAL_HISTORIAL_ABIERTO', detalle: `Venta ${v.idVenta} · ${v.fecha}`, idReferencia: v.idVenta, resultado: 'OK' }) }}>
+                          <td colSpan={6} style={S.ventaHeaderId}>
+                            {v.anulado && <span style={S.badge_anulada}>ANULADA</span>}
+                            {tieneParcial && <span style={S.badge_parcial}>PARCIAL</span>}
+                            <span>{v.idVenta}</span>
+                          </td>
+                          <td colSpan={2} style={S.ventaHeaderTotal}>
+                            {v.anulado ? (
+                              <span style={{textDecoration:'line-through', opacity:0.5}}>${Math.round(v.totalOriginal).toLocaleString('es-AR')}</span>
+                            ) : tieneParcial ? (
+                              <span>
+                                <span style={{textDecoration:'line-through', opacity:0.4, fontSize:13, marginRight:6}}>${Math.round(v.totalOriginal).toLocaleString('es-AR')}</span>
+                                ${Math.round(v.total).toLocaleString('es-AR')}
+                              </span>
+                            ) : (
+                              `$${Math.round(v.total).toLocaleString('es-AR')}`
+                            )}
+                          </td>
+                        </tr>
+                        {/* Items */}
+                        {v.items.map((item, i) => (
+                          <tr key={`${v.idVenta}-${i}`} style={{...S.itemRow, ...(item.anulado ? S.itemRowAnulado : {})}} onClick={() => { setVentaSeleccionada(v); registrarLog({ accion: 'MODAL_HISTORIAL_ABIERTO', detalle: `Venta ${v.idVenta}`, idReferencia: v.idVenta, resultado: 'OK' }) }}>
+                            <td style={S.td}>{item.fecha}</td>
+                            <td style={S.td}>{item.hora}</td>
+                            <td style={{...S.td, ...S.tdArticulo}}>
+                              <div style={S.articuloCell}>
+                                <div style={S.fotoBox}>
+                                  <span style={{fontSize:14}}>📦</span>
+                                  {item.foto && <img src={item.foto} alt="" style={S.foto} onError={e => e.currentTarget.style.display='none'} />}
+                                </div>
+                                <span style={{...(item.anulado ? {textDecoration:'line-through', opacity:0.5} : {})}}>{item.nombre}</span>
+                              </div>
+                            </td>
+                            <td style={{...S.td, textAlign:'center'}}>{item.cantidad}</td>
+                            <td style={S.td}>${(item.precioUnitario || 0).toLocaleString('es-AR')}</td>
+                            <td style={{...S.td, color: item.anulado ? 'var(--muted)' : 'var(--accent)', fontWeight:700, textDecoration: item.anulado ? 'line-through' : 'none'}}>
+                              ${Math.round(item.precioTotalFinal || item.precioTotal || 0).toLocaleString('es-AR')}
+                            </td>
+                            <td style={S.td}>{METODO_ICONS[item.metodoPago] || '💰'} {item.metodoPago}</td>
+                            <td style={S.td}>{item.empleado}</td>
+                          </tr>
+                        ))}
+                      </>
+                    )
+                  })}
+                </>
+              ))}
+            </tbody>
+          </table>
         )}
       </div>
 
@@ -204,11 +236,12 @@ const S = {
   page: { display:'flex', flexDirection:'column', height:'100%', overflowY:'auto', position:'relative' },
   center: { display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', height:'100%', gap:12 },
   loadingText: { fontFamily:'Barlow Condensed, sans-serif', fontSize:22, color:'var(--muted)' },
-  loadingSub: { fontFamily:'Barlow, sans-serif', fontSize:13, color:'var(--muted)' },
+  loadingSub: { fontFamily:'Barlow, sans-serif', fontSize:14, color:'var(--muted)' },
   errorText: { fontFamily:'Barlow, sans-serif', fontSize:16, color:'#ef4444', textAlign:'center' },
   retryBtn: { background:'var(--surface)', border:'1.5px solid var(--border)', borderRadius:10, color:'var(--text)', fontFamily:'Barlow, sans-serif', fontSize:15, padding:'10px 24px', cursor:'pointer' },
+  loadBtn: { background:'var(--accent)', border:'none', borderRadius:12, color:'#000', fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:20, padding:'16px 40px', cursor:'pointer', letterSpacing:1 },
   header: { display:'flex', alignItems:'center', justifyContent:'space-between', padding:'16px 20px 12px', borderBottom:'2px solid var(--accent)', flexShrink:0 },
-  headerTitle: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:28, color:'var(--accent)', textTransform:'uppercase', letterSpacing:2 },
+  headerTitle: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:24, color:'var(--accent)', textTransform:'uppercase', letterSpacing:2 },
   refreshBtn: { background:'var(--surface)', border:'1.5px solid var(--border)', borderRadius:10, color:'var(--text)', fontSize:24, width:44, height:44, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' },
   statsRow: { display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10, padding:'14px 20px 10px' },
   statCard: { background:'var(--surface)', borderRadius:12, padding:'12px 14px', border:'1.5px solid var(--border)' },
@@ -218,24 +251,23 @@ const S = {
   searchIcon: { fontSize:20, color:'var(--muted)' },
   searchInput: { flex:1, background:'none', border:'none', outline:'none', color:'var(--text)', fontFamily:'Barlow, sans-serif', fontSize:15, padding:'10px 6px' },
   clearBtn: { background:'none', border:'none', color:'var(--muted)', cursor:'pointer', fontSize:14 },
-  lista: { padding:'0 20px 20px', display:'flex', flexDirection:'column', gap:0 },
-  fechaHeader: { display:'flex', justifyContent:'space-between', alignItems:'center', padding:'10px 4px 6px', fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:15, color:'var(--muted)', letterSpacing:1, textTransform:'uppercase', borderBottom:'1px solid var(--border)', marginBottom:6, marginTop:10 },
-  fechaTotal: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:14, color:'var(--accent)' },
-  emptyText: { fontFamily:'Barlow, sans-serif', color:'var(--muted)', textAlign:'center', padding:40, fontSize:15 },
-  ventaCard: { background:'var(--surface)', borderRadius:10, border:'1px solid var(--border)', padding:'12px 14px', marginBottom:6 },
-  ventaCardAnulada: { background:'rgba(239,68,68,0.05)', border:'1px solid rgba(239,68,68,0.25)', opacity:0.7 },
-  anuladoBanner: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:12, color:'#ef4444', letterSpacing:1, marginBottom:4 },
-  parcialBanner: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:12, color:'#f59e0b', letterSpacing:0.5, marginBottom:4 },
-  ventaTop: { display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:4 },
-  ventaId: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:23, color:'var(--muted)', letterSpacing:1 },
-  ventaHora: { fontFamily:'Barlow Condensed, sans-serif', fontSize:21, color:'var(--muted)' },
-  ventaBottom: { display:'flex', justifyContent:'space-between', alignItems:'center' },
-  ventaMetodo: { fontFamily:'Barlow, sans-serif', fontSize:21, color:'var(--text)' },
-  ventaTotal: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:30, color:'var(--accent)' },
-  textAnulado: { color:'var(--muted)', opacity:0.5 },
-  ventaItems: { marginTop:6, display:'flex', flexWrap:'wrap', gap:7 },
-  ventaItem: { fontFamily:'Barlow, sans-serif', fontSize:18, color:'var(--muted)', background:'var(--border)', borderRadius:5, padding:'3px 9px', display:'flex', alignItems:'center', gap:6 },
-  ventaItemAnulado: { textDecoration:'line-through', opacity:0.4 },
-  ventaItemThumb: { width:48, height:48, objectFit:'cover', borderRadius:4, flexShrink:0 },
-  ventaItemThumbPH: { width:48, height:48, display:'flex', alignItems:'center', justifyContent:'center', fontSize:22, flexShrink:0 },
+  tableWrap: { flex:1, overflowX:'auto', padding:'0 20px 20px' },
+  table: { width:'100%', borderCollapse:'collapse' },
+  th: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:12, color:'var(--muted)', letterSpacing:1, textTransform:'uppercase', padding:'8px 10px', borderBottom:'2px solid var(--border)', textAlign:'left', background:'var(--surface)', position:'sticky', top:0, zIndex:1, whiteSpace:'nowrap' },
+  td: { fontFamily:'Barlow, sans-serif', fontSize:13, color:'var(--text)', padding:'7px 10px', borderBottom:'1px solid rgba(13,48,128,0.3)', verticalAlign:'middle', whiteSpace:'nowrap' },
+  tdArticulo: { maxWidth:200, whiteSpace:'normal' },
+  articuloCell: { display:'flex', alignItems:'center', gap:8 },
+  fotoBox: { width:32, height:32, borderRadius:5, overflow:'hidden', flexShrink:0, background:'var(--surface2)', border:'1px solid var(--border)', position:'relative', display:'flex', alignItems:'center', justifyContent:'center' },
+  foto: { position:'absolute', inset:0, width:'100%', height:'100%', objectFit:'cover' },
+  fechaSep: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:13, color:'var(--muted)', letterSpacing:1, textTransform:'uppercase', padding:'14px 10px 6px', borderTop:'2px solid var(--border)', display:'flex', justifyContent:'space-between' },
+  fechaSepTotal: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:13, color:'var(--accent)', float:'right' },
+  ventaHeaderRow: { background:'var(--surface2)', cursor:'pointer' },
+  ventaHeaderAnulada: { background:'rgba(239,68,68,0.08)' },
+  ventaHeaderId: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:13, color:'var(--muted)', letterSpacing:1, padding:'8px 10px 5px', borderTop:'1.5px solid var(--border)' },
+  ventaHeaderTotal: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:16, color:'var(--accent)', padding:'8px 10px 5px', borderTop:'1.5px solid var(--border)', textAlign:'right' },
+  badge_anulada: { fontFamily:'Barlow Condensed, sans-serif', fontSize:10, fontWeight:800, color:'#ef4444', background:'rgba(239,68,68,0.15)', borderRadius:4, padding:'2px 5px', marginRight:7, letterSpacing:1 },
+  badge_parcial: { fontFamily:'Barlow Condensed, sans-serif', fontSize:10, fontWeight:800, color:'#f59e0b', background:'rgba(245,158,11,0.15)', borderRadius:4, padding:'2px 5px', marginRight:7, letterSpacing:1 },
+  itemRow: { cursor:'pointer' },
+  itemRowAnulado: { opacity:0.4 },
+  emptyText: { fontFamily:'Barlow, sans-serif', color:'var(--muted)', textAlign:'center', padding:40, fontSize:16 },
 }

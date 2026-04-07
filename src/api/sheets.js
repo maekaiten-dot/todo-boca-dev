@@ -496,20 +496,20 @@ export async function generarIdArticulo() {
  * Agrega un artículo nuevo al sheet
  */
 export async function agregarArticulo(art, empleado = '') {
+  // Buscar la última fila con datos en columna A
+  const data = await sheetsGet('ARTICULOS!A:A')
+  const rows = data.values || []
+  const nextRow = rows.length + 1
+
   const row = [
-    art.id,
-    art.nombre,
-    art.stockInicial || '0',
-    art.info || '',
-    art.disponibilidad || 'ACTIVO',
-    art.foto || '',
-    art.precioUnitario || '0',
-    art.costoUnitario || '0',
-    art.cantidadReponer || '0',
-    art.stockCierre || '0',
-    art.stockActual || '0',
+    art.id, art.nombre, art.stockInicial || '0', art.info || '',
+    art.disponibilidad || 'ACTIVO', art.foto || '',
+    art.precioUnitario || '0', art.costoUnitario || '0',
+    art.cantidadReponer || '0', art.stockCierre || '0', art.stockActual || '0',
   ]
-  await sheetsAppend('ARTICULOS!A1', [row])
+
+  await sheetsUpdate(`ARTICULOS!A${nextRow}:K${nextRow}`, [row])
+
   await registrarLog({
     accion: 'ARTICULO_CREADO',
     detalle: `${art.id} · ${art.nombre} · $${art.precioUnitario}`,

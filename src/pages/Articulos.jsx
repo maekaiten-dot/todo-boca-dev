@@ -25,7 +25,7 @@ async function subirFotoCloudinary(file) {
   return data.secure_url
 }
 
-export default function Articulos({ empleado = '' }) {
+export default function Articulos({ empleado = '', esAdmin = false }) {
   const [articulos, setArticulos] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -130,6 +130,7 @@ export default function Articulos({ empleado = '' }) {
 
   const normalizr = str => str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
   const articulosFiltrados = articulos
+    .filter(a => esAdmin || a.disponibilidad?.toUpperCase() === 'ACTIVO')
     .filter(a => {
       if (filtroDisp === 'ACTIVO') return a.disponibilidad?.toUpperCase() === 'ACTIVO'
       if (filtroDisp === 'INACTIVO') return a.disponibilidad?.toUpperCase() !== 'ACTIVO'
@@ -164,7 +165,7 @@ export default function Articulos({ empleado = '' }) {
         <div style={S.headerTitle}>ARTÍCULOS</div>
         <div style={{display:'flex', gap:8}}>
           <button style={S.refreshBtn} onClick={cargar}>↻</button>
-          <button style={S.newBtn} onClick={abrirNuevo}>+ Nuevo</button>
+          {esAdmin && <button style={S.newBtn} onClick={abrirNuevo}>+ Nuevo</button>}
         </div>
       </div>
 
@@ -174,11 +175,11 @@ export default function Articulos({ empleado = '' }) {
           <input style={S.searchInput} value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="Buscar nombre o SKU..." />
           {busqueda && <button style={S.clearBtn} onClick={() => setBusqueda('')}>✕</button>}
         </div>
-        <div style={S.dispTabs}>
+        {esAdmin && <div style={S.dispTabs}>
           {['TODOS','ACTIVO','INACTIVO'].map(f => (
             <button key={f} style={{...S.dispTab, ...(filtroDisp===f ? S.dispTabActive : {})}} onClick={() => setFiltroDisp(f)}>{f}</button>
           ))}
-        </div>
+        </div>}
       </div>
 
       <div style={S.conteo}>{articulosFiltrados.length} artículos</div>
@@ -191,10 +192,10 @@ export default function Articulos({ empleado = '' }) {
               <th style={S.th}>SKU</th>
               <th style={S.th}>Nombre</th>
               <th style={S.th}>Precio</th>
-              <th style={S.th}>Costo</th>
+              {esAdmin && <th style={S.th}>Costo</th>}
               <th style={S.th}>Stock</th>
               <th style={S.th}>Estado</th>
-              <th style={S.th}></th>
+              {esAdmin && <th style={S.th}></th>}
             </tr>
           </thead>
           <tbody>
@@ -211,16 +212,17 @@ export default function Articulos({ empleado = '' }) {
                   <td style={{...S.td, ...S.tdSku}}>{art.id}</td>
                   <td style={{...S.td, ...S.tdNombre}}>{art.nombre}</td>
                   <td style={S.td}>${Number(String(art.precioUnitario).replace(/[$\s.]/g,'').replace(',','.')||0).toLocaleString('es-AR')}</td>
-                  <td style={{...S.td, color:'var(--muted)'}}>${Number(String(art.costoUnitario).replace(/[$\s.]/g,'').replace(',','.')||0).toLocaleString('es-AR')}</td>
+                  {esAdmin && <td style={{...S.td, color:'var(--muted)'}}>${Number(String(art.costoUnitario).replace(/[$\s.]/g,'').replace(',','.')||0).toLocaleString('es-AR')}</td>}
                   <td style={{...S.td, textAlign:'center'}}>{art.stockActual}</td>
                   <td style={S.td}>
-                    <button style={{...S.toggleBtn, ...(activo ? S.toggleActivo : S.toggleInactivo)}} onClick={() => handleToggle(art)}>
-                      {activo ? 'ACTIVO' : 'INACTIVO'}
-                    </button>
+                    {esAdmin
+                      ? <button style={{...S.toggleBtn, ...(activo ? S.toggleActivo : S.toggleInactivo)}} onClick={() => handleToggle(art)}>{activo ? 'ACTIVO' : 'INACTIVO'}</button>
+                      : <span style={{...S.toggleBtn, ...(activo ? S.toggleActivo : S.toggleInactivo)}}>{activo ? 'ACTIVO' : 'INACTIVO'}</span>
+                    }
                   </td>
-                  <td style={S.td}>
+                  {esAdmin && <td style={S.td}>
                     <button style={S.editBtn} onClick={() => abrirEditar(art)}>✏️</button>
-                  </td>
+                  </td>}
                 </tr>
               )
             })}

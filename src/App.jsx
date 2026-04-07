@@ -11,6 +11,8 @@ const PERFILES = ['Admin', 'Caja', 'Empleado']
 
 const TABS_POR_PERFIL = {
   Admin:    [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }, { id:'log', label:'Historial', icon:'📋' }, { id:'stats', label:'Stats', icon:'📈' }, { id:'arts', label:'Arts.', icon:'📦' }],
+  Caja:     [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }, { id:'arts', label:'Arts.', icon:'📦' }],
+  Empleado: [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }, { id:'arts', label:'Arts.', icon:'📦' }],
   Caja:     [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }],
   Empleado: [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }],
 }
@@ -186,7 +188,7 @@ export default function App() {
           )}
           {tab === 'log' && esAdmin && <LogVentas />}
           {tab === 'stats' && esAdmin && <Estadisticas />}
-          {tab === 'arts' && esAdmin && <Articulos empleado={usuarios[0]?.nombre || ''} />}
+          {tab === 'arts' && <Articulos empleado={usuarios[0]?.nombre || ''} esAdmin={esAdmin} />}
         </div>
 
         {/* Bottom nav */}

@@ -16,6 +16,115 @@ const TABS_POR_PERFIL = {
   Empleado: [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }, { id:'arts', label:'Arts.', icon:'📦' }],
 }
 
+// ── PIN Modal ────────────────────────────────────────────────────────────────
+function PinModal({ onConfirm, onCancel, usuarios }) {
+  const [pin, setPin] = useState('')
+  const [error, setError] = useState(false)
+  const [shake, setShake] = useState(false)
+
+  const adminCodigos = usuarios
+    .filter(u => u.tipo?.toLowerCase() === 'admin')
+    .map(u => String(u.codigo).trim())
+    .filter(Boolean)
+
+  function presionar(digit) {
+    if (pin.length >= 6) return
+    const nuevo = pin + digit
+    setPin(nuevo)
+    setError(false)
+  }
+
+  function borrar() {
+    setPin(p => p.slice(0, -1))
+    setError(false)
+  }
+
+  function confirmar() {
+    if (adminCodigos.includes(pin.trim())) {
+      onConfirm()
+    } else {
+      setError(true)
+      setShake(true)
+      setPin('')
+      setTimeout(() => setShake(false), 500)
+    }
+  }
+
+  function handleKey(e) {
+    if (e.key >= '0' && e.key <= '9') presionar(e.key)
+    else if (e.key === 'Backspace') borrar()
+    else if (e.key === 'Enter') confirmar()
+    else if (e.key === 'Escape') onCancel()
+  }
+
+  useEffect(() => {
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [pin, adminCodigos])
+
+  return (
+    <div style={P.overlay} onClick={onCancel}>
+      <div style={{...P.box, ...(shake ? P.shake : {})}} onClick={e => e.stopPropagation()}>
+        <div style={P.title}>CÓDIGO ADMIN</div>
+        <div style={P.subtitle}>Ingresá tu código de acceso</div>
+
+        {/* Dots */}
+        <div style={P.dots}>
+          {[0,1,2,3,4,5].map(i => (
+            <div key={i} style={{...P.dot, ...(i < pin.length ? P.dotFilled : {}), ...(error ? P.dotError : {})}} />
+          ))}
+        </div>
+
+        {error && <div style={P.errorMsg}>Código incorrecto</div>}
+
+        {/* Teclado numérico */}
+        <div style={P.grid}>
+          {['1','2','3','4','5','6','7','8','9','','0','⌫'].map((k, i) => (
+            <button
+              key={i}
+              style={{...P.key, ...(k === '' ? P.keyEmpty : {}), ...(k === '⌫' ? P.keyDel : {})}}
+              onClick={() => {
+                if (k === '⌫') borrar()
+                else if (k !== '') presionar(k)
+              }}
+              disabled={k === ''}
+            >
+              {k}
+            </button>
+          ))}
+        </div>
+
+        <div style={{display:'flex', gap:10, width:'100%'}}>
+          <button style={P.cancelBtn} onClick={onCancel}>Cancelar</button>
+          <button style={{...P.confirmBtn, opacity: pin.length === 0 ? 0.5 : 1}} onClick={confirmar} disabled={pin.length === 0}>
+            Ingresar
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const P = {
+  overlay: { position:'fixed', inset:0, background:'rgba(0,0,10,0.9)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:500, backdropFilter:'blur(8px)' },
+  box: { background:'var(--surface)', border:'2px solid var(--border)', borderRadius:20, padding:'32px 28px', width:320, display:'flex', flexDirection:'column', alignItems:'center', gap:16 },
+  shake: { animation:'none', transform:'translateX(0)' },
+  title: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:26, color:'var(--accent)', letterSpacing:2, textTransform:'uppercase' },
+  subtitle: { fontFamily:'Barlow, sans-serif', fontSize:14, color:'var(--muted)', marginTop:-8 },
+  dots: { display:'flex', gap:12, margin:'8px 0' },
+  dot: { width:14, height:14, borderRadius:'50%', border:'2px solid var(--border)', background:'transparent', transition:'all 0.15s' },
+  dotFilled: { background:'var(--accent)', border:'2px solid var(--accent)' },
+  dotError: { border:'2px solid #ef4444' },
+  errorMsg: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:15, color:'#ef4444', marginTop:-8 },
+  grid: { display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:10, width:'100%' },
+  key: { height:60, background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:12, color:'var(--text)', fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:24, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' },
+  keyEmpty: { background:'transparent', border:'none', cursor:'default' },
+  keyDel: { color:'var(--muted)', fontSize:20 },
+  cancelBtn: { flex:1, padding:'13px', background:'none', border:'1.5px solid var(--border)', borderRadius:10, color:'var(--muted)', fontFamily:'Barlow, sans-serif', fontSize:15, cursor:'pointer' },
+  confirmBtn: { flex:2, padding:'13px', background:'var(--accent)', border:'none', borderRadius:10, color:'#000', fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:17, cursor:'pointer', letterSpacing:1 },
+}
+
+// ── App principal ────────────────────────────────────────────────────────────
 export default function App() {
   const [tab, setTab] = useState('venta')
   const [refreshKey, setRefreshKey] = useState(0)
@@ -28,10 +137,10 @@ export default function App() {
   const [stockMap, setStockMap] = useState({})
   const [logoTaps, setLogoTaps] = useState(0)
   const [logoTapTimer, setLogoTapTimer] = useState(null)
+  const [pinPendiente, setPinPendiente] = useState(null) // perfil pendiente de confirmación
 
   useEffect(() => { cargarArticulos(); cargarUsuarios() }, [])
 
-  // Log de apertura de sesión al cargar la app con perfil ya configurado
   useEffect(() => {
     if (perfilDispositivo) {
       registrarLog({
@@ -48,7 +157,6 @@ export default function App() {
     try {
       const arts = await getArticulos()
       setArticulos(arts)
-      // Calcular stock dinámico en background
       calcularStockTodos(arts).then(conStock => {
         const map = {}
         conStock.forEach(a => { map[a.id] = a.stockActualCalculado })
@@ -79,9 +187,19 @@ export default function App() {
   }
 
   function elegirPerfil(perfil) {
+    if (perfil === 'Admin') {
+      // Si usuarios ya cargaron, pedir PIN
+      setPinPendiente(perfil)
+      return
+    }
+    confirmarPerfil(perfil)
+  }
+
+  function confirmarPerfil(perfil) {
     localStorage.setItem('tb_perfil', perfil)
     setPerfilDispositivo(perfil)
     setTab('venta')
+    setPinPendiente(null)
     registrarLog({
       accion: 'PERFIL_CONFIGURADO',
       detalle: `Dispositivo configurado con perfil ${perfil}`,
@@ -142,15 +260,22 @@ export default function App() {
                 <button key={p} style={S.setupBtn} onClick={() => elegirPerfil(p)}>
                   <span style={S.setupBtnLabel}>{p}</span>
                   <span style={S.setupBtnDesc}>{
-                    p === 'Admin' ? 'Vender · Hoy · Log completo' :
-                    p === 'Caja'  ? 'Vender · Hoy' :
-                                    'Vender · Hoy'
+                    p === 'Admin' ? 'Acceso completo · requiere código' :
+                    p === 'Caja'  ? 'Vender · Hoy · Artículos' :
+                                    'Vender · Hoy · Artículos'
                   }</span>
                 </button>
               ))}
             </div>
           </div>
         </div>
+        {pinPendiente && (
+          <PinModal
+            usuarios={usuarios}
+            onConfirm={() => confirmarPerfil(pinPendiente)}
+            onCancel={() => setPinPendiente(null)}
+          />
+        )}
       </>
     )
   }
@@ -159,8 +284,6 @@ export default function App() {
     <>
       <style>{CSS_GLOBAL}</style>
       <div style={S.app}>
-
-        {/* Header */}
         <div style={S.header}>
           <div style={S.logo} onClick={handleLogoTap} role="button">
             <span style={S.logoTodo}>TODO</span>
@@ -176,7 +299,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* Content */}
         <div style={S.content}>
           {tab === 'venta' && (
             <NuevaVenta
@@ -187,19 +309,13 @@ export default function App() {
               onVentaRegistrada={() => setRefreshKey(k => k + 1)}
             />
           )}
-          {tab === 'hoy' && (
-            <VentasDelDia
-              refreshKey={refreshKey}
-              puedeAnular={true}
-            />
-          )}
+          {tab === 'hoy' && <VentasDelDia refreshKey={refreshKey} puedeAnular={true} />}
           {tab === 'log' && esAdmin && <LogVentas />}
           {tab === 'stats' && esAdmin && <Estadisticas />}
-          {tab === 'arts' && <Articulos empleado={usuarios[0]?.nombre || ''} esAdmin={esAdmin} />
-          }{tab === 'ing' && esAdmin && <Ingresos empleado={usuarios[0]?.nombre || ''} usuarios={usuarios} />}
+          {tab === 'arts' && <Articulos empleado={usuarios[0]?.nombre || ''} esAdmin={esAdmin} />}
+          {tab === 'ing' && esAdmin && <Ingresos empleado={usuarios[0]?.nombre || ''} usuarios={usuarios} />}
         </div>
 
-        {/* Bottom nav */}
         <nav style={S.nav}>
           {tabs.map(t => (
             <button

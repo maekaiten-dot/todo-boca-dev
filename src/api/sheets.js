@@ -255,6 +255,7 @@ export async function getUsuarios() {
     .map(r => ({
       id: r[0] || '',
       nombre: r[1] || '',
+      codigo: r[2] || '',
       tipo: r[3] || '',
     }))
 }

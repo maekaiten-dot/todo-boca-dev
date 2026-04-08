@@ -496,24 +496,20 @@ export async function generarIdArticulo() {
  * Agrega un artículo nuevo al sheet
  */
 export async function agregarArticulo(art, empleado = '') {
-  const data = await sheetsGet('ARTICULOS!A:A')
-  const rows = data.values || []
-  
-  // Encontrar el índice real de la última fila con ID
-  let lastRow = 1
-  rows.forEach((r, i) => {
-    if (r[0] && r[0].toString().trim() !== '') lastRow = i + 1
-  })
-  const nextRow = lastRow + 1
-
   const row = [
-    art.id, art.nombre, art.stockInicial || '0', art.info || '',
-    art.disponibilidad || 'ACTIVO', art.foto || '',
-    art.precioUnitario || '0', art.costoUnitario || '0',
-    art.cantidadReponer || '0', art.stockCierre || '0', art.stockActual || '0',
+    art.id,
+    art.nombre,
+    art.stockInicial || '0',
+    art.info || '',
+    art.disponibilidad || 'ACTIVO',
+    art.foto || '',
+    art.precioUnitario || '0',
+    art.costoUnitario || '0',
+    art.cantidadReponer || '0',
+    art.stockCierre || '0',
+    art.stockActual || '0',
   ]
-
-  await sheetsUpdate(`ARTICULOS!A${nextRow}:K${nextRow}`, [row])
+  await sheetsAppend('ARTICULOS!A:K', [row])
   await registrarLog({
     accion: 'ARTICULO_CREADO',
     detalle: `${art.id} · ${art.nombre} · $${art.precioUnitario}`,
@@ -562,4 +558,129 @@ export async function toggleDisponibilidad(rowNum, artId, nuevaDisp, empleado = 
     empleado,
     resultado: 'OK',
   })
+}
+
+// ── Ingresos de mercadería ────────────────────────────────────────────────────
+
+export async function getIngresos() {
+  const data = await sheetsGet('INGRESOS!A2:K')
+  const rows = data.values || []
+  return rows
+    .filter(r => r[0])
+    .map((r, idx) => ({
+      rowNum:        idx + 2,
+      idIngreso:     r[0]  || '',
+      fecha:         r[1]  || '',
+      hora:          r[2]  || '',
+      articuloId:    r[3]  || '',
+      articuloNombre:r[4]  || '',
+      cantidad:      Number(r[5]) || 0,
+      costoUnitario: parsePrecio(r[6]),
+      costoTotal:    parsePrecio(r[7]),
+      proveedor:     r[8]  || '',
+      empleado:      r[9]  || '',
+      anulado:       r[10] === 'TRUE' || r[10] === true,
+    }))
+}
+
+export async function registrarIngreso({ articuloId, articuloNombre, cantidad, costoUnitario, proveedor, empleado }) {
+  const dt = getArgentinaDate()
+
+  // Generar ID ingreso
+  const data = await sheetsGet('INGRESOS!A2:A')
+  const rows = data.values || []
+  const prefix = `I${String(dt.raw.getFullYear()).slice(2)}${String(dt.raw.getMonth()+1).padStart(2,'0')}${String(dt.raw.getDate()).padStart(2,'0')}`
+  const hoy = rows.filter(r => r[0]?.startsWith(prefix))
+  const idIngreso = `${prefix}-${String(hoy.length + 1).padStart(3, '0')}`
+
+  const costoTotal = cantidad * (Number(costoUnitario) || 0)
+
+  const row = [
+    idIngreso,
+    `'${dt.fecha}`,
+    `'${dt.hora}`,
+    articuloId,
+    articuloNombre,
+    cantidad,
+    costoUnitario || 0,
+    costoTotal,
+    proveedor || '',
+    empleado || '',
+    false,
+  ]
+
+  await sheetsAppend('INGRESOS!A:K', [row])
+
+  await registrarLog({
+    accion: 'INGRESO_REGISTRADO',
+    detalle: `${articuloId} · ${articuloNombre} · x${cantidad} · Proveedor: ${proveedor}`,
+    idReferencia: idIngreso,
+    empleado,
+    resultado: 'OK',
+  })
+
+  return idIngreso
+}
+
+export async function anularIngreso(rowNum, idIngreso, empleado = '') {
+  await sheetsUpdate(`INGRESOS!K${rowNum}`, [['TRUE']])
+  await registrarLog({
+    accion: 'INGRESO_ANULADO',
+    detalle: `Ingreso ${idIngreso} anulado`,
+    idReferencia: idIngreso,
+    empleado,
+    resultado: 'OK',
+  })
+}
+
+/**
+ * Calcula el stock actual de un artículo:
+ * STOCK ACTUAL = STOCK INICIAL + ingresos no anulados - ventas no anuladas
+ */
+export async function calcularStockActual(articuloId, stockInicial) {
+  const [dataIngresos, dataVentas] = await Promise.all([
+    sheetsGet('INGRESOS!A2:K'),
+    sheetsGet('DETALLE DE VENTAS!A2:U'),
+  ])
+
+  const ingresos = (dataIngresos.values || [])
+    .filter(r => r[3] === articuloId && r[10] !== 'TRUE')
+    .reduce((s, r) => s + (Number(r[5]) || 0), 0)
+
+  const ventas = (dataVentas.values || [])
+    .filter(r => r[6] === articuloId && r[20] !== 'TRUE')
+    .reduce((s, r) => s + (Number(r[9]) || 0), 0)
+
+  return (Number(stockInicial) || 0) + ingresos - ventas
+}
+
+/**
+ * Calcula el stock de todos los artículos de una vez (más eficiente)
+ */
+export async function calcularStockTodos(articulos) {
+  const [dataIngresos, dataVentas] = await Promise.all([
+    sheetsGet('INGRESOS!A2:K'),
+    sheetsGet('DETALLE DE VENTAS!A2:U'),
+  ])
+
+  const ingresosPorArt = {}
+  ;(dataIngresos.values || [])
+    .filter(r => r[0] && r[10] !== 'TRUE')
+    .forEach(r => {
+      const id = r[3]
+      if (id) ingresosPorArt[id] = (ingresosPorArt[id] || 0) + (Number(r[5]) || 0)
+    })
+
+  const ventasPorArt = {}
+  ;(dataVentas.values || [])
+    .filter(r => r[0] && r[20] !== 'TRUE')
+    .forEach(r => {
+      const id = r[6]
+      if (id) ventasPorArt[id] = (ventasPorArt[id] || 0) + (Number(r[9]) || 0)
+    })
+
+  return articulos.map(art => ({
+    ...art,
+    stockActualCalculado: (Number(art.stockInicial) || 0) + (ingresosPorArt[art.id] || 0) - (ventasPorArt[art.id] || 0),
+  }))
 }

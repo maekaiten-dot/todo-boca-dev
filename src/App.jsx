@@ -5,14 +5,17 @@ import VentasDelDia from './pages/VentasDelDia.jsx'
 import LogVentas from './pages/LogVentas.jsx'
 import Estadisticas from './pages/Estadisticas.jsx'
 import Articulos from './pages/Articulos.jsx'
+import Ingresos from './pages/Ingresos.jsx'
 import { getArticulos, getUsuarios, registrarLog } from './api/sheets.js'
 
 const PERFILES = ['Admin', 'Caja', 'Empleado']
 
 const TABS_POR_PERFIL = {
-  Admin:    [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }, { id:'log', label:'Historial', icon:'📋' }, { id:'stats', label:'Stats', icon:'📈' }, { id:'arts', label:'Arts.', icon:'📦' }],
+  Admin:    [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }, { id:'log', label:'Historial', icon:'📋' }, { id:'stats', label:'Stats', icon:'📈' }, { id:'arts', label:'Arts.', icon:'📦' }, { id:'ing', label:'Ingreso', icon:'📥' }],
   Caja:     [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }, { id:'arts', label:'Arts.', icon:'📦' }],
   Empleado: [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }, { id:'arts', label:'Arts.', icon:'📦' }],
+  Caja:     [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }],
+  Empleado: [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }],
 }
 
 export default function App() {
@@ -186,7 +189,8 @@ export default function App() {
           )}
           {tab === 'log' && esAdmin && <LogVentas />}
           {tab === 'stats' && esAdmin && <Estadisticas />}
-          {tab === 'arts' && <Articulos empleado={usuarios[0]?.nombre || ''} esAdmin={esAdmin} />}
+          {tab === 'arts' && <Articulos empleado={usuarios[0]?.nombre || ''} esAdmin={esAdmin} />
+          }{tab === 'ing' && esAdmin && <Ingresos empleado={usuarios[0]?.nombre || ''} usuarios={usuarios} />}
         </div>
 
         {/* Bottom nav */}

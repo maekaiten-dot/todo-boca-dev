@@ -1,6 +1,6 @@
 // src/pages/Articulos.jsx
 import { useState, useEffect, useRef } from 'react'
-import { getArticulosAdmin, generarIdArticulo, agregarArticulo, editarArticulo, toggleDisponibilidad } from '../api/sheets.js'
+import { getArticulosAdmin, generarIdArticulo, agregarArticulo, editarArticulo, toggleDisponibilidad, calcularStockTodos } from '../api/sheets.js'
 
 const CLOUDINARY_CLOUD = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
 const CLOUDINARY_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET
@@ -37,6 +37,8 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
   const [saving, setSaving] = useState(false)
   const [uploadingFoto, setUploadingFoto] = useState(false)
   const [toast, setToast] = useState(null)
+  const [stockMap, setStockMap] = useState({}) // articuloId -> stockActualCalculado
+  const [loadingStock, setLoadingStock] = useState(false)
   const fileInputCamara = useRef(null)
   const fileInputGaleria = useRef(null)
 
@@ -48,6 +50,14 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
     try {
       const data = await getArticulosAdmin()
       setArticulos(data)
+      // Calcular stock dinámico en background
+      setLoadingStock(true)
+      calcularStockTodos(data).then(conStock => {
+        const map = {}
+        conStock.forEach(a => { map[a.id] = a.stockActualCalculado })
+        setStockMap(map)
+        setLoadingStock(false)
+      }).catch(() => setLoadingStock(false))
     } catch (e) {
       setError('No se pudo cargar los artículos.')
     } finally {
@@ -193,7 +203,7 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
               <th style={S.th}>Nombre</th>
               <th style={S.th}>Precio</th>
               {esAdmin && <th style={S.th}>Costo</th>}
-              <th style={S.th}>Stock</th>
+              <th style={S.th}>Stock actual</th>
               <th style={S.th}>Estado</th>
               {esAdmin && <th style={S.th}></th>}
             </tr>
@@ -213,7 +223,19 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
                   <td style={{...S.td, ...S.tdNombre}}>{art.nombre}</td>
                   <td style={S.td}>${Number(String(art.precioUnitario).replace(/[$\s.]/g,'').replace(',','.')||0).toLocaleString('es-AR')}</td>
                   {esAdmin && <td style={{...S.td, color:'var(--muted)'}}>${Number(String(art.costoUnitario).replace(/[$\s.]/g,'').replace(',','.')||0).toLocaleString('es-AR')}</td>}
-                  <td style={{...S.td, textAlign:'center'}}>{art.stockActual}</td>
+                  <td style={{...S.td, textAlign:'center'}}>
+                    {loadingStock
+                      ? <span style={{color:'var(--muted)', fontSize:12}}>...</span>
+                      : <span style={{
+                          fontFamily:'Barlow Condensed, sans-serif',
+                          fontWeight:700,
+                          fontSize:16,
+                          color: (stockMap[art.id] ?? 0) <= 0 ? '#ef4444' : (stockMap[art.id] ?? 0) <= 3 ? '#f59e0b' : '#22c55e'
+                        }}>
+                          {stockMap[art.id] ?? '—'}
+                        </span>
+                    }
+                  </td>
                   <td style={S.td}>
                     {esAdmin
                       ? <button style={{...S.toggleBtn, ...(activo ? S.toggleActivo : S.toggleInactivo)}} onClick={() => handleToggle(art)}>{activo ? 'ACTIVO' : 'INACTIVO'}</button>

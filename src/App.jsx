@@ -6,7 +6,7 @@ import LogVentas from './pages/LogVentas.jsx'
 import Estadisticas from './pages/Estadisticas.jsx'
 import Articulos from './pages/Articulos.jsx'
 import Ingresos from './pages/Ingresos.jsx'
-import { getArticulos, getUsuarios, registrarLog } from './api/sheets.js'
+import { getArticulos, getUsuarios, registrarLog, calcularStockTodos } from './api/sheets.js'
 
 const PERFILES = ['Admin', 'Caja', 'Empleado']
 
@@ -14,8 +14,6 @@ const TABS_POR_PERFIL = {
   Admin:    [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }, { id:'log', label:'Historial', icon:'📋' }, { id:'stats', label:'Stats', icon:'📈' }, { id:'arts', label:'Arts.', icon:'📦' }, { id:'ing', label:'Ingreso', icon:'📥' }],
   Caja:     [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }, { id:'arts', label:'Arts.', icon:'📦' }],
   Empleado: [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }, { id:'arts', label:'Arts.', icon:'📦' }],
-  Caja:     [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }],
-  Empleado: [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }],
 }
 
 export default function App() {
@@ -27,6 +25,7 @@ export default function App() {
   const [perfilDispositivo, setPerfilDispositivo] = useState(() => {
     return localStorage.getItem('tb_perfil') || null
   })
+  const [stockMap, setStockMap] = useState({})
   const [logoTaps, setLogoTaps] = useState(0)
   const [logoTapTimer, setLogoTapTimer] = useState(null)
 
@@ -49,6 +48,12 @@ export default function App() {
     try {
       const arts = await getArticulos()
       setArticulos(arts)
+      // Calcular stock dinámico en background
+      calcularStockTodos(arts).then(conStock => {
+        const map = {}
+        conStock.forEach(a => { map[a.id] = a.stockActualCalculado })
+        setStockMap(map)
+      }).catch(() => {})
       await registrarLog({
         accion: 'ARTICULOS_CARGADOS',
         detalle: `${arts.length} artículos cargados`,
@@ -178,6 +183,7 @@ export default function App() {
               articulos={articulos}
               loadingArticulos={loadingArticulos}
               usuarios={usuarios}
+              stockMap={stockMap}
               onVentaRegistrada={() => setRefreshKey(k => k + 1)}
             />
           )}

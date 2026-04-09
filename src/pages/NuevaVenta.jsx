@@ -265,7 +265,15 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
               <div style={{width:1, alignSelf:'stretch', background:'var(--border)', margin:'8px 0'}} />
             </>
           )}
-          <button style={S.scanBtn} onClick={abrirScanner} title="Escanear código">📷</button>
+          <button style={S.scanBtn} onClick={abrirScanner} title="Escanear código">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 7V5a2 2 0 0 1 2-2h2"/>
+              <path d="M17 3h2a2 2 0 0 1 2 2v2"/>
+              <path d="M21 17v2a2 2 0 0 1-2 2h-2"/>
+              <path d="M7 21H5a2 2 0 0 1-2-2v-2"/>
+              <rect x="7" y="7" width="10" height="10" rx="1"/>
+            </svg>
+          </button>
         </div>
         <div style={S.scrollList}>
           {articulosFiltrados.map(art => {
@@ -485,7 +493,7 @@ const S = {
   searchIcon: { fontSize:20, color:'var(--muted)', display:'flex', alignItems:'center' },
   searchInput: { flex:1, background:'none', border:'none', outline:'none', color:'var(--text)', fontFamily:'Barlow,sans-serif', fontSize:16, padding:'10px 6px' },
   clearBtn: { background:'none', border:'none', color:'var(--muted)', cursor:'pointer', fontSize:16, padding:'0 10px', display:'flex', alignItems:'center' },
-  scanBtn: { background:'none', border:'none', borderLeft:'1.5px solid var(--border)', color:'var(--accent)', cursor:'pointer', fontSize:28, padding:'0 14px', display:'flex', alignItems:'center', justifyContent:'center' },
+  scanBtn: { background:'none', border:'none', borderLeft:'1.5px solid var(--border)', color:'var(--accent)', cursor:'pointer', padding:'0 14px', display:'flex', alignItems:'center', justifyContent:'center' },
   scrollList: { flex:1, overflowY:'auto' },
   artRow: { width:'100%', display:'flex', alignItems:'center', gap:12, padding:'10px 14px', background:'none', border:'none', borderBottom:'1px solid var(--border)', cursor:'pointer', color:'var(--text)', textAlign:'left' },
   thumb: { width:88, height:88, objectFit:'cover', borderRadius:8, flexShrink:0, border:'1px solid var(--border)' },

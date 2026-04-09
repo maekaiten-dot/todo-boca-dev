@@ -485,7 +485,7 @@ const S = {
   searchIcon: { fontSize:20, color:'var(--muted)', display:'flex', alignItems:'center' },
   searchInput: { flex:1, background:'none', border:'none', outline:'none', color:'var(--text)', fontFamily:'Barlow,sans-serif', fontSize:16, padding:'10px 6px' },
   clearBtn: { background:'none', border:'none', color:'var(--muted)', cursor:'pointer', fontSize:16, padding:'0 10px', display:'flex', alignItems:'center' },
-  scanBtn: { background:'none', border:'none', borderLeft:'1.5px solid var(--border)', color:'var(--accent)', cursor:'pointer', fontSize:22, padding:'0 14px', display:'flex', alignItems:'center', justifyContent:'center' },
+  scanBtn: { background:'none', border:'none', borderLeft:'1.5px solid var(--border)', color:'var(--accent)', cursor:'pointer', fontSize:28, padding:'0 14px', display:'flex', alignItems:'center', justifyContent:'center' },
   scrollList: { flex:1, overflowY:'auto' },
   artRow: { width:'100%', display:'flex', alignItems:'center', gap:12, padding:'10px 14px', background:'none', border:'none', borderBottom:'1px solid var(--border)', cursor:'pointer', color:'var(--text)', textAlign:'left' },
   thumb: { width:88, height:88, objectFit:'cover', borderRadius:8, flexShrink:0, border:'1px solid var(--border)' },

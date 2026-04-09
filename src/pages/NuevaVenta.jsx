@@ -266,12 +266,15 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
             </>
           )}
           <button style={S.scanBtn} onClick={abrirScanner} title="Escanear código">
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M3 7V5a2 2 0 0 1 2-2h2"/>
-              <path d="M17 3h2a2 2 0 0 1 2 2v2"/>
-              <path d="M21 17v2a2 2 0 0 1-2 2h-2"/>
-              <path d="M7 21H5a2 2 0 0 1-2-2v-2"/>
-              <rect x="7" y="7" width="10" height="10" rx="1"/>
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 5v14"/>
+              <path d="M6 5v14"/>
+              <path d="M9 5v14"/>
+              <path d="M12 5v14"/>
+              <path d="M15 5v14"/>
+              <path d="M18 5v14"/>
+              <path d="M21 5v14"/>
+              <rect x="1" y="3" width="22" height="18" rx="2" strokeWidth="1.5"/>
             </svg>
           </button>
         </div>

@@ -338,13 +338,13 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
             const precioEfectivo = precioEfectivoItem(item)
             const tieneDescIman = precioEfectivo < item.precioUnitario
             return (
-              <div key={item.id+idx} style={S.cartItem}>
+              <div key={item.id+idx} style={isMobile ? S.artRowMobile : S.cartItem}>
                 {item.foto
-                  ? <img src={item.foto} alt="" style={S.thumb} onError={e=>e.target.style.display='none'} />
-                  : <div style={S.thumbPH}>📦</div>
+                  ? <img src={item.foto} alt="" style={isMobile ? S.thumbMobile : S.thumb} onError={e=>e.target.style.display='none'} />
+                  : <div style={isMobile ? S.thumbPHMobile : S.thumbPH}>📦</div>
                 }
                 <div style={S.artInfo}>
-                  <div style={S.artNombre}>{item.nombre}</div>
+                  <div style={isMobile ? S.artNombreMobile : S.artNombre}>{item.nombre}</div>
                   <div style={S.artSku}>{item.id}</div>
                   <div style={{display:'flex', alignItems:'center', gap:6, marginTop:2}}>
                     {tieneDescIman && (

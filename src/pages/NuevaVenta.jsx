@@ -62,7 +62,7 @@ function calcularTotalesConDescuento(carrito, descCarrito) {
   return { totalBruto: subtotalBruto, descuentoImanes, subtotalConImanes, descCarritoMonto, totalNeto, cantA, cantB }
 }
 
-export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistrada, usuarios: usuariosProp }) {
+export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistrada, usuarios: usuariosProp, stockMap = {} }) {
   const [carrito, setCarrito] = useState([])
   const [busqueda, setBusqueda] = useState('')
   const [metodoPago, setMetodoPago] = useState('Efectivo Pesos')
@@ -262,25 +262,40 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
           {busqueda && (
             <>
               <button style={S.clearBtn} onClick={() => setBusqueda('')}>✕</button>
-              <div style={{width:1, height:24, background:'var(--border)', margin:'0 4px'}} />
+              <div style={{width:1, alignSelf:'stretch', background:'var(--border)', margin:'8px 0'}} />
             </>
           )}
           <button style={S.scanBtn} onClick={abrirScanner} title="Escanear código">📷</button>
         </div>
         <div style={S.scrollList}>
-          {articulosFiltrados.map(art => (
-            <button key={art.id} style={S.artRow} onClick={() => agregarAlCarrito(art)}>
-              {art.foto
-                ? <img src={art.foto} alt="" style={S.thumb} onError={e => e.target.style.display='none'} />
-                : <div style={S.thumbPH}>📦</div>
-              }
-              <div style={S.artInfo}>
-                <div style={S.artNombre}>{art.nombre}</div>
-                <div style={S.artSku}>{art.id}</div>
-              </div>
-              <div style={S.artPrecio}>${art.precioUnitario.toLocaleString('es-AR')}</div>
-            </button>
-          ))}
+          {articulosFiltrados.map(art => {
+            const stock = stockMap[art.id]
+            return (
+              <button key={art.id} style={S.artRow} onClick={() => agregarAlCarrito(art)}>
+                {art.foto
+                  ? <img src={art.foto} alt="" style={S.thumb} onError={e => e.target.style.display='none'} />
+                  : <div style={S.thumbPH}>📦</div>
+                }
+                <div style={S.artInfo}>
+                  <div style={S.artNombre}>{art.nombre}</div>
+                  <div style={{display:'flex', alignItems:'center', gap:8}}>
+                    <div style={S.artSku}>{art.id}</div>
+                    {stock !== undefined && (
+                      <span style={{
+                        fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:13,
+                        color: stock <= 0 ? '#ef4444' : stock <= 3 ? '#f59e0b' : '#22c55e',
+                        background: stock <= 0 ? 'rgba(239,68,68,0.1)' : stock <= 3 ? 'rgba(245,158,11,0.1)' : 'rgba(34,197,94,0.1)',
+                        borderRadius:4, padding:'1px 6px',
+                      }}>
+                        stock: {stock}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div style={S.artPrecio}>${art.precioUnitario.toLocaleString('es-AR')}</div>
+              </button>
+            )
+          })}
           {!loadingArticulos && articulosFiltrados.length === 0 && (
             <div style={S.emptyMsg}>Sin resultados</div>
           )}
@@ -466,11 +481,11 @@ const S = {
   colHeader: { display:'flex', alignItems:'center', gap:8, padding:'12px 16px 10px', borderBottom:'2px solid var(--accent)', background:'var(--surface2)', flexShrink:0 },
   colTitle: { fontFamily:'Barlow Condensed,sans-serif', fontWeight:800, fontSize:16, color:'var(--accent)', textTransform:'uppercase', letterSpacing:2 },
   badge: { background:'var(--accent)', color:'#000', fontFamily:'Barlow Condensed,sans-serif', fontWeight:800, fontSize:14, borderRadius:20, padding:'2px 10px' },
-  searchWrap: { display:'flex', alignItems:'center', margin:'10px 12px 4px', background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, padding:'0 8px 0 12px', flexShrink:0 },
-  searchIcon: { fontSize:20, color:'var(--muted)' },
+  searchWrap: { display:'flex', alignItems:'stretch', margin:'10px 12px 4px', background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, padding:'0 0 0 12px', flexShrink:0 },
+  searchIcon: { fontSize:20, color:'var(--muted)', display:'flex', alignItems:'center' },
   searchInput: { flex:1, background:'none', border:'none', outline:'none', color:'var(--text)', fontFamily:'Barlow,sans-serif', fontSize:16, padding:'10px 6px' },
-  clearBtn: { background:'none', border:'none', color:'var(--muted)', cursor:'pointer', fontSize:16, padding:'8px 10px' },
-  scanBtn: { background:'none', border:'none', color:'var(--accent)', cursor:'pointer', fontSize:22, padding:'10px 10px', display:'flex', alignItems:'center', justifyContent:'center' },
+  clearBtn: { background:'none', border:'none', color:'var(--muted)', cursor:'pointer', fontSize:16, padding:'0 10px', display:'flex', alignItems:'center' },
+  scanBtn: { background:'none', border:'none', borderLeft:'1.5px solid var(--border)', color:'var(--accent)', cursor:'pointer', fontSize:22, padding:'0 14px', display:'flex', alignItems:'center', justifyContent:'center' },
   scrollList: { flex:1, overflowY:'auto' },
   artRow: { width:'100%', display:'flex', alignItems:'center', gap:12, padding:'10px 14px', background:'none', border:'none', borderBottom:'1px solid var(--border)', cursor:'pointer', color:'var(--text)', textAlign:'left' },
   thumb: { width:88, height:88, objectFit:'cover', borderRadius:8, flexShrink:0, border:'1px solid var(--border)' },

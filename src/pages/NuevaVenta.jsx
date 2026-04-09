@@ -62,7 +62,7 @@ function calcularTotalesConDescuento(carrito, descCarrito) {
   return { totalBruto: subtotalBruto, descuentoImanes, subtotalConImanes, descCarritoMonto, totalNeto, cantA, cantB }
 }
 
-export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistrada, usuarios: usuariosProp, stockMap = {} }) {
+export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistrada, usuarios: usuariosProp }) {
   const [carrito, setCarrito] = useState([])
   const [busqueda, setBusqueda] = useState('')
   const [metodoPago, setMetodoPago] = useState('Efectivo Pesos')
@@ -259,7 +259,12 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
             placeholder="Buscar nombre o SKU..."
             disabled={loadingArticulos}
           />
-          {busqueda && <button style={S.clearBtn} onClick={() => setBusqueda('')}>✕</button>}
+          {busqueda && (
+            <>
+              <button style={S.clearBtn} onClick={() => setBusqueda('')}>✕</button>
+              <div style={{width:1, height:24, background:'var(--border)', margin:'0 4px'}} />
+            </>
+          )}
           <button style={S.scanBtn} onClick={abrirScanner} title="Escanear código">📷</button>
         </div>
         <div style={S.scrollList}>
@@ -271,19 +276,7 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
               }
               <div style={S.artInfo}>
                 <div style={S.artNombre}>{art.nombre}</div>
-                <div style={{display:'flex', alignItems:'center', gap:8}}>
-                  <div style={S.artSku}>{art.id}</div>
-                  {stockMap[art.id] !== undefined && (
-                    <span style={{
-                      fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:13,
-                      color: stockMap[art.id] <= 0 ? '#ef4444' : stockMap[art.id] <= 3 ? '#f59e0b' : '#22c55e',
-                      background: stockMap[art.id] <= 0 ? 'rgba(239,68,68,0.1)' : stockMap[art.id] <= 3 ? 'rgba(245,158,11,0.1)' : 'rgba(34,197,94,0.1)',
-                      borderRadius:4, padding:'1px 6px'
-                    }}>
-                      stock: {stockMap[art.id]}
-                    </span>
-                  )}
-                </div>
+                <div style={S.artSku}>{art.id}</div>
               </div>
               <div style={S.artPrecio}>${art.precioUnitario.toLocaleString('es-AR')}</div>
             </button>
@@ -476,8 +469,8 @@ const S = {
   searchWrap: { display:'flex', alignItems:'center', margin:'10px 12px 4px', background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, padding:'0 12px', flexShrink:0 },
   searchIcon: { fontSize:20, color:'var(--muted)' },
   searchInput: { flex:1, background:'none', border:'none', outline:'none', color:'var(--text)', fontFamily:'Barlow,sans-serif', fontSize:16, padding:'10px 6px' },
-  clearBtn: { background:'none', border:'none', color:'var(--muted)', cursor:'pointer', fontSize:14 },
-  scanBtn: { background:'none', border:'none', color:'var(--accent)', cursor:'pointer', fontSize:22, padding:'0 6px', display:'flex', alignItems:'center' },
+  clearBtn: { background:'none', border:'none', color:'var(--muted)', cursor:'pointer', fontSize:16, padding:'8px 10px' },
+  scanBtn: { background:'none', border:'none', color:'var(--accent)', cursor:'pointer', fontSize:24, padding:'8px 12px', display:'flex', alignItems:'center' },
   scrollList: { flex:1, overflowY:'auto' },
   artRow: { width:'100%', display:'flex', alignItems:'center', gap:12, padding:'10px 14px', background:'none', border:'none', borderBottom:'1px solid var(--border)', cursor:'pointer', color:'var(--text)', textAlign:'left' },
   thumb: { width:88, height:88, objectFit:'cover', borderRadius:8, flexShrink:0, border:'1px solid var(--border)' },

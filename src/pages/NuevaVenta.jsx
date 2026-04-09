@@ -74,6 +74,13 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
   const [confirmarReinicio, setConfirmarReinicio] = useState(false)
   const [scannerAbierto, setScannerAbierto] = useState(false)
   const [montoDivisa, setMontoDivisa] = useState('')
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 600)
+
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth < 600)
+    window.addEventListener('resize', handler)
+    return () => window.removeEventListener('resize', handler)
+  }, [])
 
   const DIVISA_INFO = {
     'Efectivo Dólares': { code: 'USD', simbolo: 'US$', label: 'MONTO EN DÓLARES' },
@@ -237,15 +244,15 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
   }
 
   return (
-    <div style={S.layout}>
+    <div style={isMobile ? S.layoutMobile : S.layout}>
       {toast && (
         <div style={{...S.toast, ...(toast.type==='error' ? S.toastError : S.toastSuccess)}}>
           {toast.msg}
         </div>
       )}
 
-      {/* COLUMNA 1: PRODUCTOS */}
-      <div style={S.col}>
+      {/* COLUMNA/BLOQUE 1: PRODUCTOS */}
+      <div style={isMobile ? S.blockMobile : S.col}>
         <div style={S.colHeader}>
           <span style={S.colTitle}>PRODUCTOS</span>
           {loadingArticulos && <span style={{color:'var(--accent)',fontSize:12}}>●</span>}
@@ -278,17 +285,17 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
             </svg>
           </button>
         </div>
-        <div style={S.scrollList}>
+        <div style={isMobile ? S.scrollListMobile : S.scrollList}>
           {articulosFiltrados.map(art => {
             const stock = stockMap[art.id]
             return (
-              <button key={art.id} style={S.artRow} onClick={() => agregarAlCarrito(art)}>
+              <button key={art.id} style={isMobile ? S.artRowMobile : S.artRow} onClick={() => agregarAlCarrito(art)}>
                 {art.foto
-                  ? <img src={art.foto} alt="" style={S.thumb} onError={e => e.target.style.display='none'} />
-                  : <div style={S.thumbPH}>📦</div>
+                  ? <img src={art.foto} alt="" style={isMobile ? S.thumbMobile : S.thumb} onError={e => e.target.style.display='none'} />
+                  : <div style={isMobile ? S.thumbPHMobile : S.thumbPH}>📦</div>
                 }
                 <div style={S.artInfo}>
-                  <div style={S.artNombre}>{art.nombre}</div>
+                  <div style={isMobile ? S.artNombreMobile : S.artNombre}>{art.nombre}</div>
                   <div style={{display:'flex', alignItems:'center', gap:8}}>
                     <div style={S.artSku}>{art.id}</div>
                     {stock !== undefined && (
@@ -313,15 +320,15 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
         </div>
       </div>
 
-      {/* COLUMNA 2: DETALLE ÚLTIMA VENTA */}
-      <div style={S.col}>
+      {/* COLUMNA/BLOQUE 2: DETALLE ÚLTIMA VENTA */}
+      <div style={isMobile ? S.blockMobile : S.col}>
         <div style={S.colHeader}>
           <span style={S.colTitle}>DETALLE ÚLTIMA VENTA</span>
           {carrito.length > 0 && (
             <span style={S.badge}>{carrito.reduce((s,i)=>s+i.cantidad,0)}</span>
           )}
         </div>
-        <div style={S.scrollList}>
+        <div style={isMobile ? S.scrollListMobile : S.scrollList}>
           {carrito.length === 0 ? (
             <div style={S.emptyCarrito}>
               <div style={{fontSize:48}}>🛒</div>
@@ -367,8 +374,8 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
         </div>
       </div>
 
-      {/* COLUMNA 3: TOTAL VENTA */}
-      <div style={{...S.col, borderRight:'none'}}>
+      {/* COLUMNA/BLOQUE 3: TOTAL VENTA */}
+      <div style={{...(isMobile ? S.blockMobile : S.col), borderRight:'none'}}>
         <div style={S.colHeader}>
           <span style={S.colTitle}>TOTAL VENTA</span>
         </div>
@@ -485,6 +492,8 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
 
 const S = {
   layout: { display:'grid', gridTemplateColumns:'1fr 1fr 1fr', height:'100%', width:'100%', overflow:'hidden', position:'relative' },
+  layoutMobile: { display:'flex', flexDirection:'column', height:'100%', width:'100%', overflowY:'auto', position:'relative' },
+  blockMobile: { display:'flex', flexDirection:'column', borderBottom:'2px solid var(--border)', flexShrink:0 },
   toast: { position:'fixed', top:16, left:'50%', transform:'translateX(-50%)', zIndex:300, padding:'12px 28px', borderRadius:10, fontFamily:'Barlow Condensed,sans-serif', fontWeight:700, fontSize:18, whiteSpace:'nowrap', boxShadow:'0 4px 20px rgba(0,0,0,0.5)' },
   toastSuccess: { background:'#22c55e', color:'#000' },
   toastError: { background:'#ef4444', color:'#fff' },
@@ -498,11 +507,16 @@ const S = {
   clearBtn: { background:'none', border:'none', color:'var(--muted)', cursor:'pointer', fontSize:16, padding:'0 10px', display:'flex', alignItems:'center' },
   scanBtn: { background:'none', border:'none', borderLeft:'1.5px solid var(--border)', color:'var(--accent)', cursor:'pointer', padding:'0 14px', display:'flex', alignItems:'center', justifyContent:'center' },
   scrollList: { flex:1, overflowY:'auto' },
+  scrollListMobile: { maxHeight:280, overflowY:'auto' },
   artRow: { width:'100%', display:'flex', alignItems:'center', gap:12, padding:'10px 14px', background:'none', border:'none', borderBottom:'1px solid var(--border)', cursor:'pointer', color:'var(--text)', textAlign:'left' },
+  artRowMobile: { width:'100%', display:'flex', alignItems:'center', gap:10, padding:'8px 12px', background:'none', border:'none', borderBottom:'1px solid var(--border)', cursor:'pointer', color:'var(--text)', textAlign:'left' },
   thumb: { width:88, height:88, objectFit:'cover', borderRadius:8, flexShrink:0, border:'1px solid var(--border)' },
+  thumbMobile: { width:52, height:52, objectFit:'cover', borderRadius:6, flexShrink:0, border:'1px solid var(--border)' },
   thumbPH: { width:88, height:88, display:'flex', alignItems:'center', justifyContent:'center', background:'var(--surface2)', borderRadius:8, fontSize:32, flexShrink:0, border:'1px solid var(--border)' },
+  thumbPHMobile: { width:52, height:52, display:'flex', alignItems:'center', justifyContent:'center', background:'var(--surface2)', borderRadius:6, fontSize:22, flexShrink:0, border:'1px solid var(--border)' },
   artInfo: { flex:1, minWidth:0 },
   artNombre: { fontFamily:'Barlow,sans-serif', fontWeight:600, fontSize:20, color:'var(--text)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' },
+  artNombreMobile: { fontFamily:'Barlow,sans-serif', fontWeight:600, fontSize:15, color:'var(--text)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' },
   artSku: { fontFamily:'Barlow Condensed,sans-serif', fontSize:17, color:'var(--muted)' },
   artPrecio: { fontFamily:'Barlow Condensed,sans-serif', fontWeight:800, fontSize:22, color:'var(--accent)', flexShrink:0 },
   emptyMsg: { padding:28, textAlign:'center', color:'var(--muted)', fontFamily:'Barlow,sans-serif', fontSize:16 },

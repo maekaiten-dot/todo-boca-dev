@@ -177,8 +177,19 @@ export default function Ingresos({ empleado = '', usuarios = [] }) {
                   <td style={{...S.td, ...S.tdId}}>{ing.idIngreso}</td>
                   <td style={S.td}>{ing.fecha}</td>
                   <td style={{...S.td, ...S.tdNombre}}>
-                    {ing.anulado && <span style={S.badgeAnulado}>ANULADO</span>}
-                    {ing.articuloNombre || ing.articuloId}
+                    <div style={{display:'flex', alignItems:'center', gap:8}}>
+                      <div style={S.fotoBox}>
+                        <span style={{fontSize:14}}>📦</span>
+                        {(() => {
+                          const art = articulos.find(a => a.id === ing.articuloId)
+                          return art?.foto ? <img src={art.foto} alt="" style={S.foto} onError={e => e.currentTarget.style.display='none'} /> : null
+                        })()}
+                      </div>
+                      <span>
+                        {ing.anulado && <span style={S.badgeAnulado}>ANULADO</span>}
+                        {ing.articuloNombre || ing.articuloId}
+                      </span>
+                    </div>
                   </td>
                   <td style={{...S.td, textAlign:'center', fontWeight:700}}>{ing.cantidad}</td>
                   <td style={S.td}>${(ing.costoUnitario||0).toLocaleString('es-AR')}</td>
@@ -382,4 +393,6 @@ const S = {
   confirmSub: { fontFamily:'Barlow, sans-serif', fontSize:14, color:'var(--muted)', lineHeight:1.6 },
   confirmCancel: { flex:1, padding:'11px', background:'none', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--muted)', fontFamily:'Barlow, sans-serif', fontSize:14, cursor:'pointer' },
   confirmOk: { flex:1, padding:'11px', background:'#ef4444', border:'none', borderRadius:8, color:'#fff', fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:15, cursor:'pointer' },
+  fotoBox: { width:36, height:36, borderRadius:6, overflow:'hidden', background:'var(--surface2)', border:'1px solid var(--border)', position:'relative', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 },
+  foto: { position:'absolute', inset:0, width:'100%', height:'100%', objectFit:'cover' },
 }

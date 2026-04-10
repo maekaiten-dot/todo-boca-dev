@@ -8,7 +8,7 @@ import Articulos from './pages/Articulos.jsx'
 import Ingresos from './pages/Ingresos.jsx'
 import { getArticulos, getUsuarios, registrarLog, calcularStockTodos } from './api/sheets.js'
 
-const PERFILES = ['Admin', 'Caja', 'Empleado']
+const PERFILES = ['Admin', 'Caja']
 
 const TABS_POR_PERFIL = {
   Admin:    [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }, { id:'log', label:'Historial', icon:'📋' }, { id:'stats', label:'Stats', icon:'📈' }, { id:'arts', label:'Arts.', icon:'📦' }, { id:'ing', label:'Ingreso', icon:'📥' }],

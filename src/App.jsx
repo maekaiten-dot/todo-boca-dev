@@ -6,12 +6,13 @@ import LogVentas from './pages/LogVentas.jsx'
 import Estadisticas from './pages/Estadisticas.jsx'
 import Articulos from './pages/Articulos.jsx'
 import Ingresos from './pages/Ingresos.jsx'
+import Pagos from './pages/Pagos.jsx'
 import { getArticulos, getUsuarios, registrarLog, calcularStockTodos } from './api/sheets.js'
 
-const PERFILES = ['Admin', 'Caja']
+const PERFILES = ['Admin', 'Caja', 'Empleado']
 
 const TABS_POR_PERFIL = {
-  Admin:    [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }, { id:'log', label:'Historial', icon:'📋' }, { id:'stats', label:'Stats', icon:'📈' }, { id:'arts', label:'Arts.', icon:'📦' }, { id:'ing', label:'Ingreso', icon:'📥' }],
+  Admin:    [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }, { id:'log', label:'Historial', icon:'📋' }, { id:'stats', label:'Stats', icon:'📈' }, { id:'arts', label:'Arts.', icon:'📦' }, { id:'ing', label:'Ingreso', icon:'📥' }, { id:'pagos', label:'Pagos', icon:'💳' }],
   Caja:     [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }, { id:'arts', label:'Arts.', icon:'📦' }],
   Empleado: [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }, { id:'arts', label:'Arts.', icon:'📦' }],
 }
@@ -314,6 +315,7 @@ export default function App() {
           {tab === 'stats' && esAdmin && <Estadisticas />}
           {tab === 'arts' && <Articulos empleado={usuarios[0]?.nombre || ''} esAdmin={esAdmin} />}
           {tab === 'ing' && esAdmin && <Ingresos empleado={usuarios[0]?.nombre || ''} usuarios={usuarios} />}
+          {tab === 'pagos' && esAdmin && <Pagos empleado={usuarios[0]?.nombre || ''} usuarios={usuarios} />}
         </div>
 
         <nav style={S.nav}>

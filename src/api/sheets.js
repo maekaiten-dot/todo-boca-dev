@@ -685,3 +685,162 @@ export async function calcularStockTodos(articulos) {
     stockActualCalculado: (Number(art.stockInicial) || 0) + (ingresosPorArt[art.id] || 0) - (ventasPorArt[art.id] || 0),
   }))
 }
+
+// ── Pagos ────────────────────────────────────────────────────────────────────
+
+export async function getPagos() {
+  const data = await sheetsGet('PAGOS!A2:O')
+  const rows = data.values || []
+  return rows
+    .filter(r => r[0])
+    .map((r, idx) => ({
+      rowNum:         idx + 2,
+      idPago:         r[0]  || '',
+      tipo:           r[1]  || '',        // MERCADERÍA | GASTO
+      fechaIngreso:   r[2]  || '',
+      fechaPago:      r[3]  || '',
+      articuloId:     r[4]  || '',
+      articuloNombre: r[5]  || '',
+      cantidad:       Number(r[6]) || 0,
+      costoUnitario:  parsePrecio(r[7]),
+      costoTotal:     parsePrecio(r[8]),
+      descripcion:    r[9]  || '',
+      proveedor:      r[10] || '',
+      montoPagado:    parsePrecio(r[11]),
+      pagado:         r[12] === 'TRUE' || r[12] === true,
+      empleado:       r[13] || '',
+      anulado:        r[14] === 'TRUE' || r[14] === true,
+    }))
+}
+
+export async function registrarPago({
+  tipo, fechaIngreso, fechaPago,
+  articuloId, articuloNombre, cantidad, costoUnitario,
+  descripcion, proveedor, montoPagado, pagado, empleado
+}) {
+  const dt = getArgentinaDate()
+
+  // Generar ID pago
+  const data = await sheetsGet('PAGOS!A2:A')
+  const rows = data.values || []
+  const prefix = `P${String(dt.raw.getFullYear()).slice(2)}${String(dt.raw.getMonth()+1).padStart(2,'0')}${String(dt.raw.getDate()).padStart(2,'0')}`
+  const hoy = rows.filter(r => r[0]?.startsWith(prefix))
+  const idPago = `${prefix}-${String(hoy.length + 1).padStart(3, '0')}`
+
+  const costoTotal = (Number(cantidad) || 0) * (Number(costoUnitario) || 0)
+
+  const row = [
+    idPago,
+    tipo || 'GASTO',
+    fechaIngreso ? `'${fechaIngreso}` : '',
+    fechaPago    ? `'${fechaPago}`    : '',
+    articuloId     || '',
+    articuloNombre || '',
+    cantidad       || 0,
+    costoUnitario  || 0,
+    costoTotal,
+    descripcion    || '',
+    proveedor      || '',
+    montoPagado    || 0,
+    pagado ? 'TRUE' : 'FALSE',
+    empleado       || '',
+    'FALSE',
+  ]
+
+  await sheetsAppend('PAGOS!A:O', [row])
+
+  // Si es MERCADERÍA con fecha de ingreso → crear en INGRESOS automáticamente
+  if (tipo === 'MERCADERÍA' && fechaIngreso && articuloId) {
+    const dtIngreso = fechaIngreso
+    const dataIng = await sheetsGet('INGRESOS!A2:A')
+    const rowsIng = dataIng.values || []
+    const prefixI = `I${idPago.slice(1)}` // mismo sufijo que el pago
+    const idIngreso = `${prefixI}`
+
+    const rowIngreso = [
+      idIngreso,
+      `'${fechaIngreso}`,
+      `'${dt.hora}`,
+      articuloId,
+      articuloNombre,
+      cantidad || 0,
+      costoUnitario || 0,
+      costoTotal,
+      proveedor || '',
+      empleado || '',
+      false,
+    ]
+    await sheetsAppend('INGRESOS!A:K', [rowIngreso])
+  }
+
+  await registrarLog({
+    accion: 'PAGO_REGISTRADO',
+    detalle: `${tipo} · ${articuloNombre || descripcion} · $${montoPagado}`,
+    idReferencia: idPago,
+    empleado,
+    resultado: 'OK',
+  })
+
+  return idPago
+}
+
+export async function actualizarPago(rowNum, campos, empleado = '') {
+  // campos: objeto con los valores a actualizar (fila completa)
+  const costoTotal = (Number(campos.cantidad) || 0) * (Number(campos.costoUnitario) || 0)
+  const row = [
+    campos.idPago,
+    campos.tipo || 'GASTO',
+    campos.fechaIngreso ? `'${campos.fechaIngreso}` : '',
+    campos.fechaPago    ? `'${campos.fechaPago}`    : '',
+    campos.articuloId     || '',
+    campos.articuloNombre || '',
+    campos.cantidad       || 0,
+    campos.costoUnitario  || 0,
+    costoTotal,
+    campos.descripcion    || '',
+    campos.proveedor      || '',
+    campos.montoPagado    || 0,
+    campos.pagado ? 'TRUE' : 'FALSE',
+    campos.empleado       || '',
+    campos.anulado ? 'TRUE' : 'FALSE',
+  ]
+  await sheetsUpdate(`PAGOS!A${rowNum}:O${rowNum}`, [row])
+
+  // Si se actualizó a mercadería recibida y antes no tenía ingreso → crear en INGRESOS
+  if (campos.tipo === 'MERCADERÍA' && campos.fechaIngreso && campos.articuloId && campos.crearIngreso) {
+    const costoTotalIng = (Number(campos.cantidad) || 0) * (Number(campos.costoUnitario) || 0)
+    const rowIngreso = [
+      `I${campos.idPago.slice(1)}`,
+      `'${campos.fechaIngreso}`,
+      `'${new Date().toLocaleString('es-AR', { timeZone:'America/Argentina/Buenos_Aires', hour12:false }).split(', ')[1]}`,
+      campos.articuloId,
+      campos.articuloNombre,
+      campos.cantidad || 0,
+      campos.costoUnitario || 0,
+      costoTotalIng,
+      campos.proveedor || '',
+      empleado || '',
+      false,
+    ]
+    await sheetsAppend('INGRESOS!A:K', [rowIngreso])
+  }
+
+  await registrarLog({
+    accion: 'PAGO_ACTUALIZADO',
+    detalle: `${campos.idPago} actualizado`,
+    idReferencia: campos.idPago,
+    empleado,
+    resultado: 'OK',
+  })
+}
+
+export async function anularPago(rowNum, idPago, empleado = '') {
+  await sheetsUpdate(`PAGOS!O${rowNum}`, [['TRUE']])
+  await registrarLog({
+    accion: 'PAGO_ANULADO',
+    detalle: `Pago ${idPago} anulado`,
+    idReferencia: idPago,
+    empleado,
+    resultado: 'OK',
+  })
+}

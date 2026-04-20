@@ -130,7 +130,6 @@ export default function VentasDelDia({ refreshKey }) {
         </div>
       )}
 
-      {/* Tabla */}
       <div style={S.tableWrap}>
         {listaVentas.length === 0 ? (
           <div style={S.emptyText}>Sin ventas registradas hoy</div>
@@ -152,7 +151,6 @@ export default function VentasDelDia({ refreshKey }) {
                 const tieneParcial = !v.anulado && v.items.some(i => i.anulado)
                 return (
                   <>
-                    {/* Header de venta */}
                     <tr key={`h-${v.idVenta}`} style={{...S.ventaHeaderRow, ...(v.anulado ? S.ventaHeaderAnulada : {})}} onClick={() => { setVentaSeleccionada(v); registrarLog({ accion: 'MODAL_VENTA_ABIERTO', detalle: `Venta ${v.idVenta}`, idReferencia: v.idVenta, resultado: 'OK' }) }}>
                       <td colSpan={5} style={S.ventaHeaderId}>
                         {v.anulado && <span style={S.badge_anulada}>ANULADA</span>}
@@ -177,28 +175,49 @@ export default function VentasDelDia({ refreshKey }) {
                         )}
                       </td>
                     </tr>
-                    {/* Filas de items */}
-                    {v.items.map((item, i) => (
-                      <tr key={`${v.idVenta}-${i}`} style={{...S.itemRow, ...(item.anulado ? S.itemRowAnulado : {})}} onClick={() => { setVentaSeleccionada(v); registrarLog({ accion: 'MODAL_VENTA_ABIERTO', detalle: `Venta ${v.idVenta}`, idReferencia: v.idVenta, resultado: 'OK' }) }}>
-                        <td style={S.td}>{v.hora}</td>
-                        <td style={{...S.td, ...S.tdArticulo}}>
-                          <div style={S.articuloCell}>
-                            <div style={S.fotoBox}>
-                              <span style={{fontSize:16}}>📦</span>
-                              {item.foto && <img src={item.foto} alt="" style={S.foto} onError={e => e.currentTarget.style.display='none'} />}
+                    {v.items.map((item, i) => {
+                      const ptf = Math.round(item.precioTotalFinal || 0)
+                      const pt  = Math.round(item.precioTotal || 0)
+                      const tieneDto = ptf > 0 && ptf < pt
+                      return (
+                        <tr key={`${v.idVenta}-${i}`} style={{...S.itemRow, ...(item.anulado ? S.itemRowAnulado : {})}} onClick={() => { setVentaSeleccionada(v); registrarLog({ accion: 'MODAL_VENTA_ABIERTO', detalle: `Venta ${v.idVenta}`, idReferencia: v.idVenta, resultado: 'OK' }) }}>
+                          <td style={S.td}>{v.hora}</td>
+                          <td style={{...S.td, ...S.tdArticulo}}>
+                            <div style={S.articuloCell}>
+                              <div style={S.fotoBox}>
+                                <span style={{fontSize:16}}>📦</span>
+                                {item.foto && <img src={item.foto} alt="" style={S.foto} onError={e => e.currentTarget.style.display='none'} />}
+                              </div>
+                              <span style={{...(item.anulado ? {textDecoration:'line-through', opacity:0.5} : {})}}>{item.nombre}</span>
                             </div>
-                            <span style={{...(item.anulado ? {textDecoration:'line-through', opacity:0.5} : {})}}>{item.nombre}</span>
-                          </div>
-                        </td>
-                        <td style={{...S.td, textAlign:'center'}}>{item.cantidad}</td>
-                        <td style={S.td}>${(item.precioUnitario || 0).toLocaleString('es-AR')}</td>
-                        <td style={{...S.td, color: item.anulado ? 'var(--muted)' : 'var(--accent)', fontWeight:700, textDecoration: item.anulado ? 'line-through' : 'none'}}>
-                          ${Math.round(item.precioTotalFinal || item.precioTotal || 0).toLocaleString('es-AR')}
-                        </td>
-                        <td style={S.td}>{METODO_ICONS[item.metodoPago] || '💰'} {item.metodoPago}</td>
-                        <td style={S.td}>{item.empleado}</td>
-                      </tr>
-                    ))}
+                          </td>
+                          <td style={{...S.td, textAlign:'center'}}>{item.cantidad}</td>
+                          <td style={S.td}>${(item.precioUnitario || 0).toLocaleString('es-AR')}</td>
+                          <td style={{...S.td, verticalAlign:'middle'}}>
+                            {item.anulado ? (
+                              <span style={{textDecoration:'line-through', opacity:0.5, color:'var(--muted)', fontWeight:700}}>
+                                ${pt.toLocaleString('es-AR')}
+                              </span>
+                            ) : tieneDto ? (
+                              <span style={{display:'flex', alignItems:'center', gap:6}}>
+                                <span style={{textDecoration:'line-through', opacity:0.45, color:'var(--muted)', fontWeight:600, fontSize:12}}>
+                                  ${pt.toLocaleString('es-AR')}
+                                </span>
+                                <span style={{color:'#22c55e', fontWeight:700, fontFamily:'Barlow Condensed, sans-serif', fontSize:15}}>
+                                  ${ptf.toLocaleString('es-AR')}
+                                </span>
+                              </span>
+                            ) : (
+                              <span style={{color:'var(--accent)', fontWeight:700}}>
+                                ${ptf > 0 ? ptf.toLocaleString('es-AR') : pt.toLocaleString('es-AR')}
+                              </span>
+                            )}
+                          </td>
+                          <td style={S.td}>{METODO_ICONS[item.metodoPago] || '💰'} {item.metodoPago}</td>
+                          <td style={S.td}>{item.empleado}</td>
+                        </tr>
+                      )
+                    })}
                   </>
                 )
               })}

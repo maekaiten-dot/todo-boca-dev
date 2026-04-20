@@ -52,7 +52,7 @@ function fromInputDate(yyyymmdd) {
   return `${d}/${m}/${y}`
 }
 
-export default function Pagos({ empleado = '', usuarios = [] }) {
+export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [] }) {
   const [pagos, setPagos] = useState([])
   const [articulos, setArticulos] = useState([])
   const [loading, setLoading] = useState(true)
@@ -500,7 +500,9 @@ export default function Pagos({ empleado = '', usuarios = [] }) {
               <div style={S.fieldGroup}>
                 <label style={S.label}>EMPLEADO</label>
                 <div style={S.empBtns}>
-                  {usuarios.filter(u => u.nombre !== 'Tablet').map(u => (
+                  {empleadoFijo ? (
+                    <div style={{...S.empBtn, ...S.empBtnActive, gridColumn:'span 4'}}>{empleadoFijo}</div>
+                  ) : usuarios.filter(u => u.nombre !== 'Tablet').map(u => (
                     <button key={u.id} style={{...S.empBtn, ...(form.empleado===u.nombre ? S.empBtnActive : {})}} onClick={() => setForm(f => ({...f, empleado: u.nombre}))}>
                       {u.nombre}
                     </button>

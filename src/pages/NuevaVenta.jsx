@@ -62,7 +62,7 @@ function calcularTotalesConDescuento(carrito, descCarrito) {
   return { totalBruto: subtotalBruto, descuentoImanes, subtotalConImanes, descCarritoMonto, totalNeto, cantA, cantB }
 }
 
-export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistrada, usuarios: usuariosProp, stockMap = {} }) {
+export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistrada, usuarios: usuariosProp, stockMap = {}, empleadoFijo = null }) {
   const [carrito, setCarrito] = useState([])
   const [busqueda, setBusqueda] = useState('')
   const [metodoPago, setMetodoPago] = useState('Efectivo Pesos')
@@ -92,9 +92,9 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
   useEffect(() => {
     if (usuariosProp && usuariosProp.length > 0) {
       setUsuarios(usuariosProp)
-      setEmpleado(usuariosProp[0].nombre)
+      setEmpleado(empleadoFijo || usuariosProp[0].nombre)
     }
-  }, [usuariosProp])
+  }, [usuariosProp, empleadoFijo])
 
   const normalizr = str => str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
   const articulosFiltrados = articulos.filter(a => {
@@ -437,16 +437,22 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
 
           <div style={S.fieldLabel}>EMPLEADO</div>
           <div style={S.metodosGrid}>
-            {usuarios.filter(u => u.nombre !== 'Tablet').map(u => (
-              <button
-                key={u.id}
-                style={{...S.empleadoBtn, ...(empleado === u.nombre ? S.metodoBtnActive : {})}}
-                onClick={() => setEmpleado(u.nombre)}
-              >
-                {u.nombre}
-              </button>
-            ))}
-            {usuarios.length === 0 && <span style={{color:'var(--muted)', fontSize:13}}>Sin usuarios</span>}
+            {empleadoFijo ? (
+              <div style={{...S.empleadoBtn, ...S.metodoBtnActive, gridColumn:'span 4'}}>
+                {empleadoFijo}
+              </div>
+            ) : (
+              usuarios.filter(u => u.nombre !== 'Tablet').map(u => (
+                <button
+                  key={u.id}
+                  style={{...S.empleadoBtn, ...(empleado === u.nombre ? S.metodoBtnActive : {})}}
+                  onClick={() => setEmpleado(u.nombre)}
+                >
+                  {u.nombre}
+                </button>
+              ))
+            )}
+            {!empleadoFijo && usuarios.length === 0 && <span style={{color:'var(--muted)', fontSize:13}}>Sin usuarios</span>}
           </div>
 
           <div style={S.fieldLabel}>DTO</div>

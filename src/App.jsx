@@ -7,14 +7,17 @@ import Estadisticas from './pages/Estadisticas.jsx'
 import Articulos from './pages/Articulos.jsx'
 import Ingresos from './pages/Ingresos.jsx'
 import Pagos from './pages/Pagos.jsx'
+import GastosFijos from './pages/GastosFijos.jsx'
 import { getArticulos, getUsuarios, registrarLog, calcularStockTodos } from './api/sheets.js'
 
 const TABS_POR_TIPO = {
   Admin: [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }, { id:'log', label:'Historial', icon:'📋' }, { id:'stats', label:'Stats', icon:'📈' }, { id:'arts', label:'Arts.', icon:'📦' }, { id:'ing', label:'Ingresos', icon:'📋' }, { id:'pagos', label:'Pagos', icon:'💳' }],
   Caja:  [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }, { id:'arts', label:'Arts.', icon:'📦' }],
 }
+// Tab extra solo para Adrián
+const TAB_GASTOS = { id:'gastos', label:'Gastos', icon:'📌' }
 
-function PinModal({ onConfirm, onCancel, usuario, usuarios }) {
+function PinModal({ onConfirm, onCancel, usuario }) {
   const [pin, setPin] = useState('')
   const [error, setError] = useState(false)
   const [shake, setShake] = useState(false)
@@ -95,11 +98,8 @@ export default function App() {
   })
 
   useEffect(() => { cargarArticulos(); cargarUsuarios() }, [])
-
   useEffect(() => {
-    if (perfilGuardado) {
-      registrarLog({ accion:'SESION_INICIADA', detalle:`App abierta · ${perfilGuardado.nombre} (${perfilGuardado.tipo})`, empleado:perfilGuardado.nombre, resultado:'OK' })
-    }
+    if (perfilGuardado) registrarLog({ accion:'SESION_INICIADA', detalle:`App abierta · ${perfilGuardado.nombre} (${perfilGuardado.tipo})`, empleado:perfilGuardado.nombre, resultado:'OK' })
   }, [])
 
   async function cargarArticulos() {
@@ -162,8 +162,11 @@ export default function App() {
   }
 
   const esAdmin = perfilGuardado?.tipo?.toLowerCase() === 'admin'
+  const esAdrian = perfilGuardado?.nombre?.toLowerCase() === 'adrián' || perfilGuardado?.nombre?.toLowerCase() === 'adrian'
   const tipoKey = esAdmin ? 'Admin' : 'Caja'
-  const tabs = TABS_POR_TIPO[tipoKey] || TABS_POR_TIPO['Caja']
+  const tabsBase = TABS_POR_TIPO[tipoKey] || TABS_POR_TIPO['Caja']
+  // Tab Gastos Fijos visible para todos los Admin, editable solo por Adrián
+  const tabs = esAdmin ? [...tabsBase, TAB_GASTOS] : tabsBase
   const empleadoActual = perfilGuardado?.nombre || ''
   const usuariosLogin = usuarios.filter(u => u.tipo?.toLowerCase() === 'admin' || u.nombre === 'Tablet')
 
@@ -193,7 +196,7 @@ export default function App() {
             </div>
           </div>
         </div>
-        {pinPendiente && <PinModal usuario={pinPendiente} usuarios={usuarios} onConfirm={() => confirmarPerfil(pinPendiente)} onCancel={() => setPinPendiente(null)} />}
+        {pinPendiente && <PinModal usuario={pinPendiente} onConfirm={() => confirmarPerfil(pinPendiente)} onCancel={() => setPinPendiente(null)} />}
       </>
     )
   }
@@ -233,6 +236,9 @@ export default function App() {
           )}
           {esAdmin && tabsVisitadas.has('pagos') && (
             <div style={tabStyle('pagos')}><Pagos empleado={empleadoActual} empleadoFijo={empleadoActual} usuarios={usuarios} /></div>
+          )}
+          {esAdmin && tabsVisitadas.has('gastos') && (
+            <div style={tabStyle('gastos')}><GastosFijos soloLectura={!esAdrian} /></div>
           )}
         </div>
 

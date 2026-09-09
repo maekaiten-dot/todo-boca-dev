@@ -255,7 +255,7 @@ const S = {
   totalLabel: { fontFamily:'Barlow Condensed, sans-serif', fontSize:13, color:'var(--muted)', letterSpacing:1 },
   totalMonto: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:32, color:'var(--accent)' },
   scrollArea: { flex:1, overflowY:'auto', padding:'14px 20px 20px', display:'flex', flexDirection:'column', gap:16 },
-  semanaBlock: { background:'var(--surface)', border:'1.5px solid var(--border)', borderRadius:12, overflow:'hidden' },
+  semanaBlock: { background:'var(--surface)', border:'1.5px solid var(--border)', borderRadius:12, overflow:'visible' },
   semanaHeader: { display:'flex', justifyContent:'space-between', alignItems:'center', padding:'10px 16px', background:'var(--surface2)', borderBottom:'1.5px solid var(--border)' },
   semanaLabel: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:14, color:'var(--accent)', letterSpacing:2 },
   semanadTotal: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:18, color:'var(--text)' },

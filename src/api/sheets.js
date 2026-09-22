@@ -152,19 +152,31 @@ function calcularDescuentoPromoItem(item, items) {
   return 0
 }
 
+// Reparte el combo en el orden en que los items vienen en el carrito: las primeras
+// unidades hasta completar cada grupo de 6 van al precio de combo, el resto queda
+// a precio de lista de su propio item. Debe coincidir con el mismo criterio del
+// front-end (NuevaVenta.jsx) para que lo cobrado coincida con lo mostrado en pantalla.
 function calcularDescuentoAlfajorItem(item, items) {
   const sku = item.articulo || item.id
   if (!ALFAJORES_PROMO.has(sku)) return 0
   const itemsAlf = items.filter(i => ALFAJORES_PROMO.has(i.articulo || i.id))
   const cantTotal = itemsAlf.reduce((s, i) => s + i.cantidad, 0)
-  const totalPrecio = itemsAlf.reduce((s, i) => s + i.precioUnitario * i.cantidad, 0)
   const grupos = Math.floor(cantTotal / ALFAJORES_CANT_GRUPO)
-  if (grupos === 0 || totalPrecio <= 0) return 0
-  const sueltas = cantTotal - grupos * ALFAJORES_CANT_GRUPO
-  const totalConDescuento = grupos * ALFAJORES_PRECIO_GRUPO + sueltas * (totalPrecio / cantTotal)
-  const descuentoTotal = totalPrecio - totalConDescuento
-  const precioItem = item.precioUnitario * item.cantidad
-  return descuentoTotal * (precioItem / totalPrecio)
+  if (grupos === 0) return 0
+  const unidadesEnCombo = grupos * ALFAJORES_CANT_GRUPO
+  const precioPorUnidadCombo = ALFAJORES_PRECIO_GRUPO / ALFAJORES_CANT_GRUPO
+
+  let acumulado = 0
+  let enComboDeEsteItem = 0
+  for (const i of itemsAlf) {
+    const skuI = i.articulo || i.id
+    const desde = acumulado
+    const hasta = acumulado + i.cantidad
+    const enCombo = Math.max(0, Math.min(hasta, unidadesEnCombo) - desde)
+    if (skuI === sku) enComboDeEsteItem = enCombo
+    acumulado = hasta
+  }
+  return enComboDeEsteItem * (item.precioUnitario - precioPorUnidadCombo)
 }
 
 // ── Exports ───────────────────────────────────────────────────────────────────

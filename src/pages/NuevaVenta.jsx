@@ -52,16 +52,34 @@ const ALFAJORES_PROMO = new Set(['TB01118','TB01117','TB01098'])
 const ALFAJORES_PRECIO_GRUPO = 13000
 const ALFAJORES_CANT_GRUPO = 6
 
+// Reparte el combo en el orden en que los alfajores fueron agregados al carrito:
+// las primeras unidades hasta completar cada grupo de 6 van al precio de combo,
+// el resto (sueltas) queda al precio de lista de su propio renglón.
 function calcularComboAlfajores(carrito) {
   const itemsAlf = carrito.filter(i => ALFAJORES_PROMO.has(i.id))
   const cantTotal = itemsAlf.reduce((s, i) => s + i.cantidad, 0)
-  const totalPrecio = itemsAlf.reduce((s, i) => s + i.precioUnitario * i.cantidad, 0)
   const grupos = Math.floor(cantTotal / ALFAJORES_CANT_GRUPO)
-  const sueltas = cantTotal - grupos * ALFAJORES_CANT_GRUPO
-  const totalConDescuento = grupos * ALFAJORES_PRECIO_GRUPO + (cantTotal > 0 ? sueltas * (totalPrecio / cantTotal) : 0)
-  const descuento = grupos > 0 ? totalPrecio - totalConDescuento : 0
-  const precioPromedioEfectivo = cantTotal > 0 ? totalConDescuento / cantTotal : 0
-  return { cantTotal, totalPrecio, grupos, sueltas, descuento, precioPromedioEfectivo }
+  const unidadesEnCombo = grupos * ALFAJORES_CANT_GRUPO
+  const precioPorUnidadCombo = ALFAJORES_PRECIO_GRUPO / ALFAJORES_CANT_GRUPO
+
+  let acumulado = 0
+  let descuento = 0
+  const detallePorId = {}
+  itemsAlf.forEach(item => {
+    const desde = acumulado
+    const hasta = acumulado + item.cantidad
+    const enCombo = Math.max(0, Math.min(hasta, unidadesEnCombo) - desde)
+    const sueltas = item.cantidad - enCombo
+    const totalLinea = enCombo * precioPorUnidadCombo + sueltas * item.precioUnitario
+    detallePorId[item.id] = {
+      enCombo, sueltas, totalLinea,
+      precioPromedioLinea: item.cantidad > 0 ? totalLinea / item.cantidad : item.precioUnitario,
+    }
+    descuento += enCombo * (item.precioUnitario - precioPorUnidadCombo)
+    acumulado = hasta
+  })
+
+  return { cantTotal, grupos, unidadesEnCombo, descuento, detallePorId }
 }
 
 function promosActivas() {
@@ -124,7 +142,10 @@ function precioEfectivoItem(item, totales) {
   const activo = promosActivas()
   if (IMANES_A.has(item.id) && totales.cantA > 1) return precioImanConDescuento('A', totales.cantA)
   if (IMANES_B.has(item.id) && totales.cantB > 1) return precioImanConDescuento('B', totales.cantB)
-  if (ALFAJORES_PROMO.has(item.id) && totales.comboAlfajores?.grupos > 0) return totales.comboAlfajores.precioPromedioEfectivo
+  if (ALFAJORES_PROMO.has(item.id) && totales.comboAlfajores?.grupos > 0) {
+    const detalle = totales.comboAlfajores.detallePorId?.[item.id]
+    if (detalle) return detalle.precioPromedioLinea
+  }
   if (activo) {
     if (LLAVEROS_PROMO.has(item.id)) return precioLlaveroPromo(totales.cantLlaveros)
     if (REMERAS_PROMO.has(item.id)) return 11500
@@ -360,7 +381,7 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
                   <div style={S.artSku}>{item.id}</div>
                   <div style={{display:'flex', alignItems:'center', gap:6, marginTop:2}}>
                     {tieneDesc && <span style={{...S.artSku, textDecoration:'line-through', opacity:0.5}}>${item.precioUnitario.toLocaleString('es-AR')}</span>}
-                    <span style={{...S.artSku, color: tieneDesc ? '#22c55e' : 'var(--muted)'}}>${precioEfectivo.toLocaleString('es-AR')} c/u</span>
+                    <span style={{...S.artSku, color: tieneDesc ? '#22c55e' : 'var(--muted)'}}>${Math.round(precioEfectivo).toLocaleString('es-AR')} c/u</span>
                   </div>
                 </div>
                 <div style={S.cartRight}>

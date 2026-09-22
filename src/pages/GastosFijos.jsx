@@ -1,21 +1,31 @@
 // src/pages/GastosFijos.jsx
 import { useState, useEffect } from 'react'
-import { getGastosFijos, agregarGastoFijo, editarGastoFijo, eliminarGastoFijo } from '../api/sheets.js'
+import {
+  getGastosFijos, agregarGastoFijo, editarGastoFijo, eliminarGastoFijo,
+  togglePagoGastoFijo, cerrarMesGastosFijos
+} from '../api/sheets.js'
 
 const SEMANAS = ['1ra semana', '2da semana', '3ra semana', '4ta semana']
-
 const FORM_VACIO = { concepto: '', monto: '', semana: '1ra semana' }
+
+function getMesActual() {
+  const now = new Date()
+  const y = now.toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', year: 'numeric' })
+  const m = now.toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', month: '2-digit' })
+  return `${y}-${m}`
+}
 
 export default function GastosFijos({ soloLectura = false }) {
   const [gastos, setGastos] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [modalAbierto, setModalAbierto] = useState(false)
-  const [editando, setEditando] = useState(null) // { rowNum, ...gasto } o null
+  const [editando, setEditando] = useState(null)
   const [form, setForm] = useState(FORM_VACIO)
   const [saving, setSaving] = useState(false)
   const [confirmEliminar, setConfirmEliminar] = useState(null)
   const [eliminando, setEliminando] = useState(false)
+  const [toggling, setToggling] = useState(null) // rowNum en proceso
   const [toast, setToast] = useState(null)
 
   useEffect(() => { cargar() }, [])
@@ -25,11 +35,39 @@ export default function GastosFijos({ soloLectura = false }) {
     setError(null)
     try {
       const data = await getGastosFijos()
-      setGastos(data)
+      const mesActual = getMesActual()
+
+      // Detectar si hay gastos de un mes anterior → cerrar mes automáticamente
+      const hayMesAnterior = data.some(g => g.mesActivo && g.mesActivo !== mesActual)
+      if (hayMesAnterior) {
+        await cerrarMesGastosFijos(data, mesActual)
+        const fresco = await getGastosFijos()
+        setGastos(fresco)
+      } else {
+        setGastos(data)
+      }
     } catch (e) {
       setError('No se pudo cargar.')
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function togglePago(gasto) {
+    if (soloLectura) return
+    setToggling(gasto.rowNum)
+    try {
+      const mesActual = getMesActual()
+      await togglePagoGastoFijo(gasto.rowNum, !gasto.pagado, mesActual)
+      setGastos(prev => prev.map(g =>
+        g.rowNum === gasto.rowNum
+          ? { ...g, pagado: !g.pagado, fechaPago: !g.pagado ? new Date().toLocaleDateString('es-AR') : '', mesActivo: mesActual }
+          : g
+      ))
+    } catch (e) {
+      showToast('Error al actualizar', 'error')
+    } finally {
+      setToggling(null)
     }
   }
 
@@ -85,13 +123,14 @@ export default function GastosFijos({ soloLectura = false }) {
     setTimeout(() => setToast(null), 3000)
   }
 
-  // Agrupar por semana
   const porSemana = SEMANAS.map(semana => ({
     semana,
     items: gastos.filter(g => g.semana === semana),
     total: gastos.filter(g => g.semana === semana).reduce((s, g) => s + g.monto, 0),
+    totalPagado: gastos.filter(g => g.semana === semana && g.pagado).reduce((s, g) => s + g.monto, 0),
   }))
   const totalMensual = gastos.reduce((s, g) => s + g.monto, 0)
+  const totalPagado = gastos.filter(g => g.pagado).reduce((s, g) => s + g.monto, 0)
 
   if (loading) return <div style={S.center}><div style={S.loadingText}>Cargando gastos fijos...</div></div>
   if (error) return (
@@ -123,26 +162,61 @@ export default function GastosFijos({ soloLectura = false }) {
         </div>
       )}
 
-      {/* Total mensual */}
-      <div style={S.totalCard}>
-        <div style={S.totalLabel}>TOTAL MENSUAL ESTIMADO</div>
-        <div style={S.totalMonto}>${totalMensual.toLocaleString('es-AR')}</div>
+      {/* Totales */}
+      <div style={S.totalesRow}>
+        <div style={S.totalCard}>
+          <div style={S.totalLabel}>TOTAL MENSUAL</div>
+          <div style={S.totalMonto}>${totalMensual.toLocaleString('es-AR')}</div>
+        </div>
+        <div style={{...S.totalCard, border:'2px solid #22c55e'}}>
+          <div style={S.totalLabel}>PAGADO</div>
+          <div style={{...S.totalMonto, color:'#22c55e'}}>${totalPagado.toLocaleString('es-AR')}</div>
+        </div>
+        <div style={{...S.totalCard, border:'2px solid #ef4444'}}>
+          <div style={S.totalLabel}>PENDIENTE</div>
+          <div style={{...S.totalMonto, color:'#ef4444'}}>${(totalMensual - totalPagado).toLocaleString('es-AR')}</div>
+        </div>
       </div>
 
       {/* Por semana */}
       <div style={S.scrollArea}>
-        {porSemana.map(({ semana, items, total }) => (
+        {porSemana.map(({ semana, items, total, totalPagado: pagadoSemana }) => (
           <div key={semana} style={S.semanaBlock}>
             <div style={S.semanaHeader}>
               <span style={S.semanaLabel}>{semana.toUpperCase()}</span>
-              <span style={S.semanadTotal}>${total.toLocaleString('es-AR')}</span>
+              <div style={{display:'flex', alignItems:'center', gap:12}}>
+                {pagadoSemana > 0 && (
+                  <span style={{fontFamily:'Barlow Condensed, sans-serif', fontSize:14, color:'#22c55e'}}>
+                    ✓ ${pagadoSemana.toLocaleString('es-AR')}
+                  </span>
+                )}
+                <span style={S.semanadTotal}>${total.toLocaleString('es-AR')}</span>
+              </div>
             </div>
             {items.length === 0 ? (
               <div style={S.emptyRow}>Sin gastos cargados para esta semana</div>
             ) : items.map(g => (
-              <div key={g.rowNum} style={S.gastoRow}>
-                <div style={S.gastoConcepto}>{g.concepto}</div>
-                <div style={S.gastoMonto}>${g.monto.toLocaleString('es-AR')}</div>
+              <div key={g.rowNum} style={{...S.gastoRow, ...(g.pagado ? S.gastoRowPagado : {})}}>
+                {/* Botón tilde */}
+                <button
+                  style={{...S.tildeBtn, ...(g.pagado ? S.tildeBtnActivo : {})}}
+                  onClick={() => togglePago(g)}
+                  disabled={toggling === g.rowNum || soloLectura}
+                  title={g.pagado ? `Pagado el ${g.fechaPago}` : 'Marcar como pagado'}
+                >
+                  {toggling === g.rowNum ? '…' : g.pagado ? '✓' : '○'}
+                </button>
+                <div style={{flex:1}}>
+                  <div style={{...S.gastoConcepto, ...(g.pagado ? {color:'#22c55e'} : {})}}>
+                    {g.concepto}
+                  </div>
+                  {g.pagado && g.fechaPago && (
+                    <div style={S.fechaPago}>pagado el {g.fechaPago}</div>
+                  )}
+                </div>
+                <div style={{...S.gastoMonto, ...(g.pagado ? {color:'#22c55e'} : {})}}>
+                  ${g.monto.toLocaleString('es-AR')}
+                </div>
                 {!soloLectura && (
                   <div style={S.gastoBtns}>
                     <button style={S.editBtn} onClick={() => abrirEditar(g)}>✏️</button>
@@ -163,47 +237,31 @@ export default function GastosFijos({ soloLectura = false }) {
               <div style={S.modalTitle}>{editando ? 'EDITAR GASTO' : 'NUEVO GASTO'}</div>
               <button style={S.closeBtn} onClick={() => setModalAbierto(false)}>✕</button>
             </div>
-
             <div style={S.formBody}>
               <div style={S.fieldGroup}>
                 <label style={S.label}>CONCEPTO *</label>
-                <input
-                  style={S.input}
-                  value={form.concepto}
+                <input style={S.input} value={form.concepto}
                   onChange={e => setForm(f => ({...f, concepto: e.target.value}))}
-                  placeholder="Ej: Alquiler, Sueldo Jorge, Monotributo..."
-                  autoFocus
-                />
+                  placeholder="Ej: Alquiler, Sueldo Jorge, Monotributo..." autoFocus />
               </div>
-
               <div style={S.fieldGroup}>
                 <label style={S.label}>MONTO *</label>
-                <input
-                  style={S.input}
-                  type="text"
-                  inputMode="numeric"
-                  value={form.monto}
-                  onChange={e => setForm(f => ({...f, monto: e.target.value}))}
-                  placeholder="0"
-                />
+                <input style={S.input} type="text" inputMode="numeric" value={form.monto}
+                  onChange={e => setForm(f => ({...f, monto: e.target.value}))} placeholder="0" />
               </div>
-
               <div style={S.fieldGroup}>
                 <label style={S.label}>SEMANA DEL MES</label>
                 <div style={S.semanaBtns}>
                   {SEMANAS.map(s => (
-                    <button
-                      key={s}
+                    <button key={s}
                       style={{...S.semanaBtn, ...(form.semana === s ? S.semanaBtnActive : {})}}
-                      onClick={() => setForm(f => ({...f, semana: s}))}
-                    >
+                      onClick={() => setForm(f => ({...f, semana: s}))}>
                       {s}
                     </button>
                   ))}
                 </div>
               </div>
             </div>
-
             <div style={S.modalFooter}>
               <button style={S.cancelBtn} onClick={() => setModalAbierto(false)} disabled={saving}>Cancelar</button>
               <button style={{...S.saveBtn, opacity: saving ? 0.6 : 1}} onClick={guardar} disabled={saving}>
@@ -251,16 +309,21 @@ const S = {
   newBtn: { background:'var(--accent)', border:'none', borderRadius:10, color:'#000', fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:15, padding:'0 16px', height:40, cursor:'pointer', letterSpacing:1 },
   infoBar: { margin:'10px 20px 0', background:'rgba(59,130,246,0.1)', border:'1px solid rgba(59,130,246,0.3)', borderRadius:8, padding:'8px 14px' },
   infoText: { fontFamily:'Barlow, sans-serif', fontSize:13, color:'#93c5fd' },
-  totalCard: { margin:'14px 20px 0', background:'var(--surface)', border:'2px solid var(--accent)', borderRadius:12, padding:'14px 20px', display:'flex', justifyContent:'space-between', alignItems:'center', flexShrink:0 },
-  totalLabel: { fontFamily:'Barlow Condensed, sans-serif', fontSize:13, color:'var(--muted)', letterSpacing:1 },
-  totalMonto: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:32, color:'var(--accent)' },
+  totalesRow: { display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10, margin:'14px 20px 0', flexShrink:0 },
+  totalCard: { background:'var(--surface)', border:'2px solid var(--accent)', borderRadius:12, padding:'12px 16px', display:'flex', flexDirection:'column', gap:4 },
+  totalLabel: { fontFamily:'Barlow Condensed, sans-serif', fontSize:11, color:'var(--muted)', letterSpacing:1 },
+  totalMonto: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:24, color:'var(--accent)' },
   scrollArea: { flex:1, overflowY:'auto', padding:'14px 20px 20px', display:'flex', flexDirection:'column', gap:16 },
   semanaBlock: { background:'var(--surface)', border:'1.5px solid var(--border)', borderRadius:12, overflow:'visible' },
-  semanaHeader: { display:'flex', justifyContent:'space-between', alignItems:'center', padding:'10px 16px', background:'var(--surface2)', borderBottom:'1.5px solid var(--border)' },
+  semanaHeader: { display:'flex', justifyContent:'space-between', alignItems:'center', padding:'10px 16px', background:'var(--surface2)', borderBottom:'1.5px solid var(--border)', borderRadius:'12px 12px 0 0' },
   semanaLabel: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:14, color:'var(--accent)', letterSpacing:2 },
   semanadTotal: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:18, color:'var(--text)' },
-  gastoRow: { display:'flex', alignItems:'center', gap:12, padding:'10px 16px', borderBottom:'1px solid rgba(13,48,128,0.3)' },
-  gastoConcepto: { flex:1, fontFamily:'Barlow, sans-serif', fontSize:15, color:'var(--text)' },
+  gastoRow: { display:'flex', alignItems:'center', gap:10, padding:'10px 16px', borderBottom:'1px solid rgba(13,48,128,0.3)' },
+  gastoRowPagado: { background:'rgba(34,197,94,0.05)' },
+  tildeBtn: { width:32, height:32, borderRadius:'50%', border:'2px solid var(--border)', background:'none', color:'var(--muted)', fontSize:16, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, fontWeight:700, transition:'all 0.15s' },
+  tildeBtnActivo: { border:'2px solid #22c55e', background:'rgba(34,197,94,0.15)', color:'#22c55e' },
+  gastoConcepto: { fontFamily:'Barlow, sans-serif', fontSize:15, color:'var(--text)' },
+  fechaPago: { fontFamily:'Barlow Condensed, sans-serif', fontSize:12, color:'#22c55e', opacity:0.7, marginTop:2 },
   gastoMonto: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:17, color:'var(--accent)', flexShrink:0 },
   gastoBtns: { display:'flex', gap:6, flexShrink:0 },
   editBtn: { background:'none', border:'1px solid var(--border)', borderRadius:6, fontSize:15, padding:'4px 8px', cursor:'pointer' },

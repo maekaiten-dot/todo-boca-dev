@@ -15,7 +15,7 @@ const TABS_POR_TIPO = {
   Caja:  [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }, { id:'arts', label:'Arts.', icon:'📦' }],
 }
 // Tab extra solo para Adrián
-const TAB_GASTOS = { id:'gastos', label:'Gastos', icon:'📌' }
+const TAB_GASTOS = { id:'gastos', label:'G.Fijos', icon:'📌' }
 
 function PinModal({ onConfirm, onCancel, usuario }) {
   const [pin, setPin] = useState('')

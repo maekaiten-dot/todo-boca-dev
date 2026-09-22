@@ -471,33 +471,6 @@ export async function anularPago(rowNum, idPago, empleado = '') {
 // ── Gastos Fijos ─────────────────────────────────────────────────────────────
 
 export async function getGastosFijos() {
-  const data = await sheetsGet('GASTOS FIJOS!A2:C')
-  const rows = data.values || []
-  return rows
-    .filter(r => r[0])
-    .map((r, idx) => ({
-      rowNum: idx + 2,
-      concepto: r[0] || '',
-      monto: parsePrecio(r[1]),
-      semana: r[2] || '1ra semana',
-    }))
-}
-
-export async function agregarGastoFijo({ concepto, monto, semana }) {
-  await sheetsAppend('GASTOS FIJOS!A1', [[concepto, monto, semana]])
-}
-
-export async function editarGastoFijo(rowNum, { concepto, monto, semana }) {
-  await sheetsUpdate(`GASTOS FIJOS!A${rowNum}:C${rowNum}`, [[concepto, monto, semana]])
-}
-
-export async function eliminarGastoFijo(rowNum) {
-  await sheetsUpdate(`GASTOS FIJOS!A${rowNum}:C${rowNum}`, [['', '', '']])
-}
-
-// ── Gastos Fijos ─────────────────────────────────────────────────────────────
-
-export async function getGastosFijos() {
   const data = await sheetsGet('GASTOS FIJOS!A2:F')
   const rows = data.values || []
   return rows
@@ -546,7 +519,6 @@ export async function togglePagoGastoFijo(rowNum, pagado, mesActivo) {
 
 export async function cerrarMesGastosFijos(gastos, mesNuevo) {
   // 1. Guardar snapshot en GASTOS FIJOS LOG
-  const now = new Date()
   const mesAnterior = gastos[0]?.mesActivo || ''
   const filas = gastos.map(g => [
     mesAnterior,

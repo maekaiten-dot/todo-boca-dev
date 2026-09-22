@@ -94,6 +94,11 @@ const LLAVEROS_PROMO = new Set([
 const REMERAS_PROMO = new Set(['TB00708','TB00714'])
 const CHOMBAS_PROMO = new Set(['TB00969','TB00970'])
 
+// ── Combo Alfajores (sin vencimiento): 6 unidades combinadas = $13.000 ──────
+const ALFAJORES_PROMO = new Set(['TB01118','TB01117','TB01098'])
+const ALFAJORES_PRECIO_GRUPO = 13000
+const ALFAJORES_CANT_GRUPO = 6
+
 function _promosActivas() { return Date.now() < PROMO_EXPIRY.getTime() }
 function _precioLlaveroPromo(cantTotal) {
   if (cantTotal >= 6) return 4667
@@ -145,6 +150,21 @@ function calcularDescuentoPromoItem(item, items) {
   if (REMERAS_PROMO.has(sku)) return (item.precioUnitario - 11500) * item.cantidad
   if (CHOMBAS_PROMO.has(sku)) return (item.precioUnitario - 18000) * item.cantidad
   return 0
+}
+
+function calcularDescuentoAlfajorItem(item, items) {
+  const sku = item.articulo || item.id
+  if (!ALFAJORES_PROMO.has(sku)) return 0
+  const itemsAlf = items.filter(i => ALFAJORES_PROMO.has(i.articulo || i.id))
+  const cantTotal = itemsAlf.reduce((s, i) => s + i.cantidad, 0)
+  const totalPrecio = itemsAlf.reduce((s, i) => s + i.precioUnitario * i.cantidad, 0)
+  const grupos = Math.floor(cantTotal / ALFAJORES_CANT_GRUPO)
+  if (grupos === 0 || totalPrecio <= 0) return 0
+  const sueltas = cantTotal - grupos * ALFAJORES_CANT_GRUPO
+  const totalConDescuento = grupos * ALFAJORES_PRECIO_GRUPO + sueltas * (totalPrecio / cantTotal)
+  const descuentoTotal = totalPrecio - totalConDescuento
+  const precioItem = item.precioUnitario * item.cantidad
+  return descuentoTotal * (precioItem / totalPrecio)
 }
 
 // ── Exports ───────────────────────────────────────────────────────────────────
@@ -271,7 +291,8 @@ export async function registrarVenta({ items, metodoPago, descCarrito = 0, emple
     const descuentoItem = item.descuento || 0
     const dto = dtosPorItem[idx]
     const dtoPromoItem = calcularDescuentoPromoItem(item, items)
-    const baseConDtos = precioTotal - dto.descuentoImanes - dtoPromoItem
+    const dtoAlfajorItem = calcularDescuentoAlfajorItem(item, items)
+    const baseConDtos = precioTotal - dto.descuentoImanes - dtoPromoItem - dtoAlfajorItem
     let precioTotalFinal
     if (descuentoItem > 0) {
       precioTotalFinal = baseConDtos - (baseConDtos * descuentoItem / 100)
@@ -302,9 +323,10 @@ export async function registrarVenta({ items, metodoPago, descCarrito = 0, emple
 
   const totalVenta = rows.reduce((s, r) => s+(r[18]||0), 0)
   const totalDtoImanes = dtosPorItem.reduce((s, d) => s+d.descuentoImanes, 0)
+  const totalDtoAlfajores = items.reduce((s, item) => s + calcularDescuentoAlfajorItem(item, items), 0)
   await registrarLog({
     accion:'VENTA_REGISTRADA',
-    detalle:`${items.length} producto(s) · ${metodoPago}${descCarrito>0?` · DTO ${descCarrito}%`:''}${totalDtoImanes>0?` · DTO imanes $${totalDtoImanes}`:''}${descuentoPromo>0?` · DTO promos $${Math.round(descuentoPromo)}`:''} · Total $${Math.round(totalVenta).toLocaleString('es-AR')}`,
+    detalle:`${items.length} producto(s) · ${metodoPago}${descCarrito>0?` · DTO ${descCarrito}%`:''}${totalDtoImanes>0?` · DTO imanes $${totalDtoImanes}`:''}${descuentoPromo>0?` · DTO promos $${Math.round(descuentoPromo)}`:''}${totalDtoAlfajores>0?` · DTO alfajores $${Math.round(totalDtoAlfajores)}`:''} · Total $${Math.round(totalVenta).toLocaleString('es-AR')}`,
     idReferencia:idVenta, empleado, resultado:'OK',
   })
   return idVenta

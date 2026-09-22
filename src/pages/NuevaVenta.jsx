@@ -47,6 +47,23 @@ const LLAVEROS_PROMO = new Set([
 const REMERAS_PROMO = new Set(['TB00708','TB00714'])
 const CHOMBAS_PROMO = new Set(['TB00969','TB00970'])
 
+// ── Combo Alfajores (sin vencimiento): 6 unidades combinadas = $13.000 ──────
+const ALFAJORES_PROMO = new Set(['TB01118','TB01117','TB01098'])
+const ALFAJORES_PRECIO_GRUPO = 13000
+const ALFAJORES_CANT_GRUPO = 6
+
+function calcularComboAlfajores(carrito) {
+  const itemsAlf = carrito.filter(i => ALFAJORES_PROMO.has(i.id))
+  const cantTotal = itemsAlf.reduce((s, i) => s + i.cantidad, 0)
+  const totalPrecio = itemsAlf.reduce((s, i) => s + i.precioUnitario * i.cantidad, 0)
+  const grupos = Math.floor(cantTotal / ALFAJORES_CANT_GRUPO)
+  const sueltas = cantTotal - grupos * ALFAJORES_CANT_GRUPO
+  const totalConDescuento = grupos * ALFAJORES_PRECIO_GRUPO + (cantTotal > 0 ? sueltas * (totalPrecio / cantTotal) : 0)
+  const descuento = grupos > 0 ? totalPrecio - totalConDescuento : 0
+  const precioPromedioEfectivo = cantTotal > 0 ? totalConDescuento / cantTotal : 0
+  return { cantTotal, totalPrecio, grupos, sueltas, descuento, precioPromedioEfectivo }
+}
+
 function promosActivas() {
   return Date.now() < PROMO_EXPIRY.getTime()
 }
@@ -93,17 +110,21 @@ function calcularTotalesConDescuento(carrito, descCarrito) {
     }
   })
 
-  const subtotalConDesc = subtotalBruto - descuentoImanes - descuentoPromo
+  const comboAlfajores = calcularComboAlfajores(carrito)
+  const descuentoAlfajores = comboAlfajores.descuento
+
+  const subtotalConDesc = subtotalBruto - descuentoImanes - descuentoPromo - descuentoAlfajores
   const descCarritoMonto = subtotalConDesc * (descCarrito / 100)
   const totalNeto = subtotalConDesc - descCarritoMonto
 
-  return { totalBruto: subtotalBruto, descuentoImanes, descuentoPromo, subtotalConDesc, descCarritoMonto, totalNeto, cantA, cantB, cantLlaveros }
+  return { totalBruto: subtotalBruto, descuentoImanes, descuentoPromo, descuentoAlfajores, subtotalConDesc, descCarritoMonto, totalNeto, cantA, cantB, cantLlaveros, comboAlfajores }
 }
 
 function precioEfectivoItem(item, totales) {
   const activo = promosActivas()
   if (IMANES_A.has(item.id) && totales.cantA > 1) return precioImanConDescuento('A', totales.cantA)
   if (IMANES_B.has(item.id) && totales.cantB > 1) return precioImanConDescuento('B', totales.cantB)
+  if (ALFAJORES_PROMO.has(item.id) && totales.comboAlfajores?.grupos > 0) return totales.comboAlfajores.precioPromedioEfectivo
   if (activo) {
     if (LLAVEROS_PROMO.has(item.id)) return precioLlaveroPromo(totales.cantLlaveros)
     if (REMERAS_PROMO.has(item.id)) return 11500
@@ -113,6 +134,7 @@ function precioEfectivoItem(item, totales) {
 }
 
 function badgePromo(artId, cantLlaveros) {
+  if (ALFAJORES_PROMO.has(artId)) return '🥮 6× combinados $13.000'
   if (!promosActivas()) return null
   if (LLAVEROS_PROMO.has(artId)) {
     if (cantLlaveros >= 6) return '🏷️ $4.667 c/u'
@@ -284,7 +306,7 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
         <div style={isMobile ? S.scrollListMobile : S.scrollList}>
           {articulosFiltrados.map(art => {
             const stock = stockMap[art.id]
-            const promo = promoVigente ? badgePromo(art.id, cantLlavCarrito) : null
+            const promo = (promoVigente || ALFAJORES_PROMO.has(art.id)) ? badgePromo(art.id, cantLlavCarrito) : null
             return (
               <button key={art.id} style={isMobile ? S.artRowMobile : S.artRow} onClick={() => agregarAlCarrito(art)}>
                 {art.foto
@@ -379,6 +401,12 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
             <div style={S.totalBrutoRow}>
               <span style={{fontFamily:'Barlow,sans-serif',fontSize:14,color:'#f59e0b'}}>🏷️ Descuento promos</span>
               <span style={{fontFamily:'Barlow Condensed,sans-serif',fontWeight:700,fontSize:15,color:'#f59e0b'}}>−${Math.round(totales.descuentoPromo).toLocaleString('es-AR')}</span>
+            </div>
+          )}
+          {totales.descuentoAlfajores > 0 && (
+            <div style={S.totalBrutoRow}>
+              <span style={{fontFamily:'Barlow,sans-serif',fontSize:14,color:'#f59e0b'}}>🥮 Descuento alfajores</span>
+              <span style={{fontFamily:'Barlow Condensed,sans-serif',fontWeight:700,fontSize:15,color:'#f59e0b'}}>−${Math.round(totales.descuentoAlfajores).toLocaleString('es-AR')}</span>
             </div>
           )}
           {descCarrito > 0 && (

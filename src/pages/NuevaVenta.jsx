@@ -17,7 +17,7 @@ const METODOS_PAGO = [
 const DESCUENTOS = [0, 5, 10, 15, 20, 25, 30, 40, 50]
 
 // ── Imanes ───────────────────────────────────────────────────────────────────
-const IMANES_A = new Set(['TB00049','TB00050','TB00051','TB00052','TB00053','TB00054','TB00055','TB00056','TB00058','TB00359','TB01011','TB01043','TB01044'])
+const IMANES_A = new Set(['TB00049','TB00050','TB00051','TB00052','TB00053','TB00054','TB00055','TB00056','TB00058','TB00359','TB01011','TB01043','TB01044','TB01089','TB01090','TB01127'])
 const IMANES_B = new Set(['TB00399','TB00433','TB00587','TB00741','TB00805','TB00059'])
 
 function precioImanConDescuento(grupo, cantidadTotal) {
@@ -158,7 +158,7 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
     }
   }, [usuariosProp, empleadoFijo])
 
-  const normalizr = str => str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  const normalizr = str => str.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
   const articulosFiltrados = articulos.filter(a => {
     if (!busqueda.trim()) return true
     const q = normalizr(busqueda)

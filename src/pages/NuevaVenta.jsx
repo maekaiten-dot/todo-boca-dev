@@ -1,6 +1,6 @@
 // src/pages/NuevaVenta.jsx
 import { useState, useEffect } from 'react'
-import { registrarVenta, registrarLog } from '../api/sheets.js'
+import { registrarVenta, registrarLog, REMERAS_XXXL, calcularPromoXXXL, getPromoXXXLEstado } from '../api/sheets.js'
 import BarcodeScanner from '../components/BarcodeScanner.jsx'
 
 const METODOS_PAGO = [
@@ -15,6 +15,7 @@ const METODOS_PAGO = [
 ]
 
 const DESCUENTOS = [0, 5, 10, 15, 20, 25, 30, 40, 50]
+const DTO_SOCIO = 10 // % de descuento para socios del Club Atlético Boca Juniors
 
 // ── Imanes ───────────────────────────────────────────────────────────────────
 const IMANES_A = new Set(['TB00049','TB00050','TB00051','TB00052','TB00053','TB00054','TB00055','TB00056','TB00058','TB00359','TB01011','TB01043','TB01044','TB01089','TB01090','TB01127'])
@@ -93,7 +94,7 @@ function precioLlaveroPromo(cantTotal) {
 }
 
 // ── Cálculo de totales ────────────────────────────────────────────────────────
-function calcularTotalesConDescuento(carrito, descCarrito) {
+function calcularTotalesConDescuento(carrito, descCarrito, xxxlDisponibles = 0) {
   const activo = promosActivas()
 
   let cantA = 0, cantB = 0, cantLlaveros = 0
@@ -131,11 +132,17 @@ function calcularTotalesConDescuento(carrito, descCarrito) {
   const comboAlfajores = calcularComboAlfajores(carrito)
   const descuentoAlfajores = comboAlfajores.descuento
 
-  const subtotalConDesc = subtotalBruto - descuentoImanes - descuentoPromo - descuentoAlfajores
+  // Promo 2x1 remeras XXXL: se aplica antes de los descuentos de socio / manuales
+  const promoXXXL = calcularPromoXXXL(carrito, xxxlDisponibles)
+  const descuentoXXXL = promoXXXL.descuento
+  const xxxlPorId = {}
+  carrito.forEach((item, idx) => { xxxlPorId[item.id] = promoXXXL.porItem[idx] })
+
+  const subtotalConDesc = subtotalBruto - descuentoImanes - descuentoPromo - descuentoAlfajores - descuentoXXXL
   const descCarritoMonto = subtotalConDesc * (descCarrito / 100)
   const totalNeto = subtotalConDesc - descCarritoMonto
 
-  return { totalBruto: subtotalBruto, descuentoImanes, descuentoPromo, descuentoAlfajores, subtotalConDesc, descCarritoMonto, totalNeto, cantA, cantB, cantLlaveros, comboAlfajores }
+  return { totalBruto: subtotalBruto, descuentoImanes, descuentoPromo, descuentoAlfajores, descuentoXXXL, promoXXXL, xxxlPorId, subtotalConDesc, descCarritoMonto, totalNeto, cantA, cantB, cantLlaveros, comboAlfajores }
 }
 
 function precioEfectivoItem(item, totales) {
@@ -146,6 +153,8 @@ function precioEfectivoItem(item, totales) {
     const detalle = totales.comboAlfajores.detallePorId?.[item.id]
     if (detalle) return detalle.precioPromedioLinea
   }
+  const xxxl = totales.xxxlPorId?.[item.id]
+  if (xxxl?.descuento > 0) return item.precioUnitario - xxxl.descuento / item.cantidad
   if (activo) {
     if (LLAVEROS_PROMO.has(item.id)) return precioLlaveroPromo(totales.cantLlaveros)
     if (REMERAS_PROMO.has(item.id)) return 11500
@@ -167,12 +176,44 @@ function badgePromo(artId, cantLlaveros) {
   return null
 }
 
+// Control para marcar cuántas unidades de una remera de la promo son talle XXXL
+function XXXLControl({ item, estado, onCambiar }) {
+  const n = item.xxxl || 0
+  if (!estado) return <div style={S.xxxlInfo}>Consultando promo XXXL…</div>
+  if (estado.error) return <div style={S.xxxlInfo}>No se pudo consultar la promo XXXL</div>
+  if (!estado.activa && n === 0) return <div style={S.xxxlInfo}>{estado.vencida ? 'Promo 2x1 XXXL terminada (31/12)' : 'Promo 2x1 XXXL agotada'}</div>
+  const leyenda = `2x1 · quedan ${estado.disponibles}`
+  if (item.cantidad === 1) {
+    return (
+      <div style={S.xxxlWrap}>
+        <button style={{...S.xxxlBtn, ...(n > 0 ? S.xxxlBtnActivo : {})}} onClick={() => onCambiar(n > 0 ? -1 : 1)} aria-pressed={n > 0}>
+          {n > 0 ? '✓ XXXL' : 'XXXL'}
+        </button>
+        <span style={S.xxxlSub}>{leyenda}</span>
+      </div>
+    )
+  }
+  return (
+    <div style={S.xxxlWrap}>
+      <div style={{...S.xxxlBtn, ...(n > 0 ? S.xxxlBtnActivo : {}), cursor:'default'}}>
+        <button style={{...S.xxxlStep, opacity: n === 0 ? 0.4 : 1}} onClick={() => onCambiar(-1)} disabled={n === 0} aria-label="Una XXXL menos">−</button>
+        <span>XXXL: {n} de {item.cantidad}</span>
+        <button style={{...S.xxxlStep, opacity: n >= item.cantidad ? 0.4 : 1}} onClick={() => onCambiar(1)} disabled={n >= item.cantidad} aria-label="Una XXXL más">+</button>
+      </div>
+      <span style={S.xxxlSub}>{leyenda}</span>
+    </div>
+  )
+}
+
 export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistrada, usuarios: usuariosProp, stockMap = {}, empleadoFijo = null }) {
   const [carrito, setCarrito] = useState([])
   const [busqueda, setBusqueda] = useState('')
   const [metodoPago, setMetodoPago] = useState('Efectivo Pesos')
   const [empleado, setEmpleado] = useState('')
   const [descCarrito, setDescCarrito] = useState(0)
+  const [socio, setSocio] = useState(false)
+  // El descuento socio reemplaza al DTO manual (no se suman)
+  const descAplicado = socio ? DTO_SOCIO : descCarrito
   const [usuarios, setUsuarios] = useState([])
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState(null)
@@ -180,6 +221,8 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
   const [scannerAbierto, setScannerAbierto] = useState(false)
   const [montoDivisa, setMontoDivisa] = useState('')
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 600)
+  // Estado de la promo 2x1 XXXL (unidades que le quedan). null = todavía no se consultó
+  const [promoXXXLEstado, setPromoXXXLEstado] = useState(null)
 
   useEffect(() => {
     const handler = () => setIsMobile(window.innerWidth < 600)
@@ -208,6 +251,24 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
     return normalizr(a.nombre).includes(q) || normalizr(a.id).includes(q)
   })
 
+  const hayRemeraXXXL = carrito.some(i => REMERAS_XXXL.has(i.id))
+  async function actualizarPromoXXXL() {
+    try { setPromoXXXLEstado(await getPromoXXXLEstado()) }
+    catch (e) { console.error(e); setPromoXXXLEstado({ error: true, disponibles: 0, activa: false }) }
+  }
+  // Se consulta la primera vez que entra al carrito una remera de la promo
+  useEffect(() => { if (hayRemeraXXXL && !promoXXXLEstado) actualizarPromoXXXL() }, [hayRemeraXXXL])
+
+  function cambiarXXXL(idx, delta) {
+    setCarrito(prev => {
+      const updated = [...prev]
+      const item = updated[idx]
+      const nuevo = Math.max(0, Math.min(item.cantidad, (item.xxxl || 0) + delta))
+      updated[idx] = { ...item, xxxl: nuevo }
+      return updated
+    })
+  }
+
   function agregarAlCarrito(art) {
     setCarrito(prev => {
       const idx = prev.findIndex(i => i.id === art.id)
@@ -216,7 +277,7 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
         updated[idx] = { ...updated[idx], cantidad: updated[idx].cantidad + 1 }
         return updated
       }
-      return [...prev, { id: art.id, nombre: art.nombre, foto: art.foto, precioUnitario: art.precioUnitario, costoUnitario: art.costoUnitario, cantidad: 1, descuento: 0, articulo: art.id }]
+      return [...prev, { id: art.id, nombre: art.nombre, foto: art.foto, precioUnitario: art.precioUnitario, costoUnitario: art.costoUnitario, cantidad: 1, descuento: 0, articulo: art.id, xxxl: 0 }]
     })
     registrarLog({ accion:'PRODUCTO_AGREGADO', detalle:`${art.nombre} (${art.id}) · $${art.precioUnitario.toLocaleString('es-AR')}`, empleado, resultado:'OK' })
   }
@@ -229,7 +290,8 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
         registrarLog({ accion:'PRODUCTO_QUITADO', detalle:`${updated[idx].nombre} eliminado`, empleado, resultado:'OK' })
         return updated.filter((_, i) => i !== idx)
       }
-      updated[idx] = { ...updated[idx], cantidad: nueva }
+      // Las unidades marcadas XXXL nunca pueden superar la cantidad de la línea
+      updated[idx] = { ...updated[idx], cantidad: nueva, xxxl: Math.min(updated[idx].xxxl || 0, nueva) }
       return updated
     })
   }
@@ -243,10 +305,17 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
     registrarLog({ accion:'CARRITO_REINICIADO', detalle:`${carrito.length} producto(s)`, empleado, resultado:'OK' })
     setCarrito([])
     setDescCarrito(0)
+    setSocio(false)
     setConfirmarReinicio(false)
   }
 
-  const totales = calcularTotalesConDescuento(carrito, descCarrito)
+  const totales = calcularTotalesConDescuento(carrito, descAplicado, promoXXXLEstado?.disponibles || 0)
+
+  function toggleSocio() {
+    const nuevo = !socio
+    setSocio(nuevo)
+    registrarLog({ accion: nuevo ? 'DTO_SOCIO_ACTIVADO' : 'DTO_SOCIO_DESACTIVADO', detalle: `Descuento socio ${DTO_SOCIO}%`, empleado, resultado:'OK' })
+  }
 
   async function cerrarVenta() {
     if (carrito.length === 0) return
@@ -256,7 +325,9 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
       const idVenta = await registrarVenta({
         items: carrito,
         metodoPago,
-        descCarrito,
+        descCarrito: descAplicado,
+        socio,
+        descuentoXXXLEsperado: totales.descuentoXXXL,
         empleado,
         notas,
         descuentoImanes: totales.descuentoImanes,
@@ -265,9 +336,18 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
       showToast('Venta ' + idVenta + ' registrada ✓', 'success')
       setCarrito([])
       setDescCarrito(0)
+      setSocio(false)
       setMontoDivisa('')
+      if (totales.promoXXXL.totalMarcadas > 0) actualizarPromoXXXL()
       onVentaRegistrada?.()
     } catch (e) {
+      if (e?.message === 'PROMO_XXXL_CAMBIO') {
+        // Otra venta usó unidades de la promo mientras tanto: se actualiza el total y no se guarda
+        setPromoXXXLEstado(e.estadoPromoXXXL)
+        showToast(`La promo XXXL cambió (quedan ${e.estadoPromoXXXL.disponibles}). Revisá el total y cerrá de nuevo.`, 'error')
+        setSaving(false)
+        return
+      }
       showToast('Error al guardar. Revisá la conexión.', 'error')
       registrarLog({ accion:'ERROR_CERRAR_VENTA', detalle:e?.message||'Error desconocido', empleado, resultado:'ERROR' })
       console.error(e)
@@ -371,7 +451,7 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
             const precioEfectivo = precioEfectivoItem(item, totales)
             const tieneDesc = precioEfectivo < item.precioUnitario
             return (
-              <div key={item.id+idx} style={isMobile ? S.artRowMobile : S.cartItem}>
+              <div key={item.id+idx} style={{...(isMobile ? S.artRowMobile : S.cartItem), flexWrap:'wrap'}}>
                 {item.foto
                   ? <img src={item.foto} alt="" style={isMobile ? S.thumbMobile : S.thumb} onError={e=>e.target.style.display='none'} />
                   : <div style={isMobile ? S.thumbPHMobile : S.thumbPH}>📦</div>
@@ -395,6 +475,16 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
                   </div>
                   <button style={S.removeBtn} onClick={()=>quitarDelCarrito(idx)}>✕</button>
                 </div>
+                {/* Control XXXL en su propio renglón, debajo del artículo, para que tenga lugar */}
+                {REMERAS_XXXL.has(item.id) && (
+                  <div style={{ flexBasis:'100%', paddingLeft: isMobile ? 62 : 100 }}>
+                    <XXXLControl
+                      item={item}
+                      estado={promoXXXLEstado}
+                      onCambiar={delta => cambiarXXXL(idx, delta)}
+                    />
+                  </div>
+                )}
               </div>
             )
           })}
@@ -430,9 +520,24 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
               <span style={{fontFamily:'Barlow Condensed,sans-serif',fontWeight:700,fontSize:15,color:'#f59e0b'}}>−${Math.round(totales.descuentoAlfajores).toLocaleString('es-AR')}</span>
             </div>
           )}
-          {descCarrito > 0 && (
+          {totales.promoXXXL.totalMarcadas > 0 && (
             <div style={S.totalBrutoRow}>
-              <span style={{fontFamily:'Barlow,sans-serif',fontSize:14,color:'var(--muted)'}}>Descuento {descCarrito}%</span>
+              <span style={{fontFamily:'Barlow,sans-serif',fontSize:14,color:'#f59e0b'}}>
+                👕 2x1 remeras XXXL{totales.promoXXXL.unidadesEnPromo > 0 ? ` (${totales.promoXXXL.unidadesEnPromo} u.)` : ''}
+                {totales.promoXXXL.sueltas > 0 && (
+                  <span style={{display:'block',fontSize:12,color:'var(--muted)'}}>
+                    {promoXXXLEstado && !promoXXXLEstado.activa
+                      ? (promoXXXLEstado.vencida ? 'Promo terminada el 31/12' : 'Promo agotada')
+                      : totales.promoXXXL.sueltas === 1 ? '1 XXXL sin par: va a precio de lista' : `${totales.promoXXXL.sueltas} XXXL sin promo disponible`}
+                  </span>
+                )}
+              </span>
+              <span style={{fontFamily:'Barlow Condensed,sans-serif',fontWeight:700,fontSize:15,color:'#f59e0b'}}>−${Math.round(totales.descuentoXXXL).toLocaleString('es-AR')}</span>
+            </div>
+          )}
+          {descAplicado > 0 && (
+            <div style={S.totalBrutoRow}>
+              <span style={{fontFamily:'Barlow,sans-serif',fontSize:14,color:socio?'var(--accent)':'var(--muted)'}}>{socio ? `⭐ Descuento socio ${DTO_SOCIO}%` : `Descuento ${descCarrito}%`}</span>
               <span style={{fontFamily:'Barlow Condensed,sans-serif',fontWeight:700,fontSize:15,color:'#22c55e'}}>−${Math.round(totales.descCarritoMonto).toLocaleString('es-AR')}</span>
             </div>
           )}
@@ -471,7 +576,12 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
           </div>
 
           <div style={S.fieldLabel}>DTO</div>
-          <select style={S.select} value={descCarrito} onChange={e=>setDescCarrito(Number(e.target.value))}>
+          <button style={{...S.socioBtn,...(socio?S.socioBtnActivo:{})}} onClick={toggleSocio} aria-pressed={socio}>
+            <span>{socio ? '✓' : '⭐'} SOCIO BOCA · {DTO_SOCIO}%</span>
+            <span style={S.socioBtnSub}>{socio ? 'Aplicado · tocá para quitar' : 'Descuento para socios del club'}</span>
+          </button>
+          <select style={{...S.select,...(socio?{opacity:0.4}:{})}} value={socio ? '' : descCarrito} disabled={socio} onChange={e=>setDescCarrito(Number(e.target.value))}>
+            {socio && <option value="">Socio {DTO_SOCIO}% aplicado</option>}
             {DESCUENTOS.map(d=><option key={d} value={d}>{d===0?'':`${d}%`}</option>)}
           </select>
 
@@ -559,6 +669,16 @@ const S = {
   divisaInput: { flex:1, background:'none', border:'none', outline:'none', color:'var(--text)', fontFamily:'Barlow Condensed,sans-serif', fontWeight:700, fontSize:20, padding:'10px 12px' },
   select: { width:'100%', background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--text)', fontFamily:'Barlow,sans-serif', fontSize:16, padding:'10px 12px', outline:'none', cursor:'pointer' },
   cerrarBtn: { width:'100%', padding:'16px 8px', background:'var(--accent)', border:'none', borderRadius:10, cursor:'pointer', fontFamily:'Barlow Condensed,sans-serif', fontWeight:800, fontSize:18, color:'#000', textTransform:'uppercase', letterSpacing:1, marginTop:4, boxShadow:'0 3px 12px rgba(245,200,0,0.3)' },
+  // Control XXXL 50% más grande que el resto de los chips, para tocarlo fácil en la tablet
+  xxxlWrap: { display:'flex', alignItems:'center', flexWrap:'wrap', gap:'4px 12px', marginTop:-2 },
+  xxxlBtn: { display:'inline-flex', alignItems:'center', gap:12, whiteSpace:'nowrap', padding:'6px 15px', background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:12, cursor:'pointer', fontFamily:'Barlow Condensed,sans-serif', fontWeight:800, fontSize:21, letterSpacing:0.5, color:'var(--muted)' },
+  xxxlBtnActivo: { background:'rgba(245,158,11,0.15)', border:'1.5px solid #f59e0b', color:'#f59e0b' },
+  xxxlStep: { width:36, height:36, background:'var(--bg)', border:'1.5px solid var(--border)', borderRadius:9, color:'var(--text)', fontWeight:800, fontSize:23, lineHeight:1, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', padding:0 },
+  xxxlSub: { fontFamily:'Barlow,sans-serif', fontWeight:400, fontSize:12, color:'var(--muted)', letterSpacing:0 },
+  xxxlInfo: { marginTop:6, fontFamily:'Barlow,sans-serif', fontSize:11, color:'var(--muted)' },
+  socioBtn: { width:'100%', display:'flex', flexDirection:'column', alignItems:'flex-start', gap:1, padding:'10px 14px', marginBottom:8, background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:10, cursor:'pointer', fontFamily:'Barlow Condensed,sans-serif', fontWeight:800, fontSize:17, letterSpacing:0.5, color:'var(--text)', textAlign:'left' },
+  socioBtnActivo: { background:'rgba(245,200,0,0.15)', border:'1.5px solid var(--accent)', color:'var(--accent)' },
+  socioBtnSub: { fontFamily:'Barlow,sans-serif', fontWeight:400, fontSize:12, color:'var(--muted)', letterSpacing:0 },
   reiniciarBtn: { width:'100%', padding:'13px', background:'none', border:'1.5px solid var(--border)', borderRadius:10, cursor:'pointer', fontFamily:'Barlow Condensed,sans-serif', fontWeight:700, fontSize:15, color:'var(--muted)', textTransform:'uppercase', letterSpacing:1 },
   overlay: { position:'fixed', inset:0, background:'rgba(0,0,10,0.8)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:200, backdropFilter:'blur(6px)' },
   confirmBox: { background:'var(--surface)', border:'2px solid var(--border)', borderRadius:16, padding:32, width:320, textAlign:'center' },

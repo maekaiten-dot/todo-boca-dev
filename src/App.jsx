@@ -8,14 +8,61 @@ import Articulos from './pages/Articulos.jsx'
 import Ingresos from './pages/Ingresos.jsx'
 import Pagos from './pages/Pagos.jsx'
 import GastosFijos from './pages/GastosFijos.jsx'
+import Rotacion from './pages/Rotacion.jsx'
+import GastosCaja from './pages/GastosCaja.jsx'
 import { getArticulos, getUsuarios, registrarLog, calcularStockTodos } from './api/sheets.js'
 
+// Barra inferior: solapas de uso diario. El resto de las solapas de Admin va en el menú "Más".
 const TABS_POR_TIPO = {
-  Admin: [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }, { id:'log', label:'Historial', icon:'📋' }, { id:'stats', label:'Stats', icon:'📈' }, { id:'arts', label:'Arts.', icon:'📦' }, { id:'ing', label:'Ingresos', icon:'📋' }, { id:'pagos', label:'Pagos', icon:'💳' }],
-  Caja:  [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }, { id:'arts', label:'Arts.', icon:'📦' }],
+  Admin: [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }, { id:'caja', label:'Gastos', icon:'🧾' }, { id:'log', label:'Historial', icon:'📋' }, { id:'arts', label:'Arts.', icon:'📦' }],
+  Caja:  [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }, { id:'caja', label:'Gastos', icon:'🧾' }, { id:'arts', label:'Arts.', icon:'📦' }],
 }
-// Tab extra solo para Adrián
-const TAB_GASTOS = { id:'gastos', label:'G.Fijos', icon:'📌' }
+// Solapas del menú "Más" (solo Admin). Para agregar una nueva, sumala acá y renderizala abajo con esAdmin.
+const TABS_MAS_ADMIN = [
+  { id:'stats', label:'Estadísticas', icon:'📈', desc:'Ventas por día y por mes' },
+  { id:'rota', label:'Rotación', icon:'🔄', desc:'Más vendidos y reposición' },
+  { id:'ing', label:'Ingresos', icon:'📥', desc:'Mercadería que entró' },
+  { id:'pagos', label:'Pagos', icon:'💳', desc:'Pagos a proveedores y gastos' },
+  { id:'gastos', label:'Gastos fijos', icon:'📌', desc:'Gastos fijos del mes' },
+]
+
+function MenuMas({ tabs, tabActual, onElegir, onCerrar }) {
+  useEffect(() => {
+    const onKey = e => { if (e.key === 'Escape') onCerrar() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onCerrar])
+  return (
+    <div style={M.overlay} onClick={onCerrar}>
+      <div style={M.sheet} onClick={e => e.stopPropagation()} role="dialog" aria-label="Más secciones">
+        <div style={M.handle} />
+        <div style={M.title}>Más secciones</div>
+        <div style={M.grid}>
+          {tabs.map(t => (
+            <button key={t.id} style={{ ...M.item, ...(tabActual === t.id ? M.itemActivo : {}) }} onClick={() => onElegir(t.id)}>
+              <span style={M.icon}>{t.icon}</span>
+              <span style={M.label}>{t.label}</span>
+              <span style={M.desc}>{t.desc}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const M = {
+  overlay: { position:'fixed', inset:0, background:'rgba(0,0,10,0.6)', zIndex:400, display:'flex', alignItems:'flex-end', justifyContent:'center' },
+  sheet: { width:'100%', maxWidth:640, background:'var(--surface)', borderTop:'2px solid var(--accent)', borderRadius:'18px 18px 0 0', padding:'10px 16px calc(16px + env(safe-area-inset-bottom, 0px))', display:'flex', flexDirection:'column', gap:12 },
+  handle: { width:40, height:4, borderRadius:2, background:'var(--border)', alignSelf:'center' },
+  title: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:18, color:'var(--muted)', letterSpacing:1.5, textTransform:'uppercase' },
+  grid: { display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(150px, 1fr))', gap:10 },
+  item: { display:'flex', flexDirection:'column', alignItems:'flex-start', gap:2, padding:'14px', background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:12, cursor:'pointer', textAlign:'left' },
+  itemActivo: { borderColor:'var(--accent)' },
+  icon: { fontSize:22, marginBottom:4 },
+  label: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:18, color:'var(--text)', letterSpacing:0.5 },
+  desc: { fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)', lineHeight:1.3 },
+}
 
 function PinModal({ onConfirm, onCancel, usuario }) {
   const [pin, setPin] = useState('')
@@ -91,6 +138,7 @@ export default function App() {
   const [logoTapTimer, setLogoTapTimer] = useState(null)
   const [pinPendiente, setPinPendiente] = useState(null)
   const [tabsVisitadas, setTabsVisitadas] = useState(new Set(['venta']))
+  const [menuMasAbierto, setMenuMasAbierto] = useState(false)
 
   const [perfilGuardado, setPerfilGuardado] = useState(() => {
     try { return JSON.parse(localStorage.getItem('tb_perfil_v2')) || null }
@@ -136,6 +184,7 @@ export default function App() {
     setTab('venta')
     setTabsVisitadas(new Set(['venta']))
     setPinPendiente(null)
+    setMenuMasAbierto(false)
     registrarLog({ accion:'PERFIL_CONFIGURADO', detalle:`${usuario.nombre} · ${usuario.tipo}`, empleado:usuario.nombre, resultado:'OK' })
   }
 
@@ -156,6 +205,7 @@ export default function App() {
   }
 
   function handleTabChange(newTab) {
+    setMenuMasAbierto(false)
     setTab(newTab)
     setTabsVisitadas(prev => new Set([...prev, newTab]))
     registrarLog({ accion:'NAVEGACION', detalle:`Navegó a ${newTab}`, empleado:perfilGuardado?.nombre||'', resultado:'OK' })
@@ -165,8 +215,10 @@ export default function App() {
   const esAdrian = perfilGuardado?.nombre?.toLowerCase() === 'adrián' || perfilGuardado?.nombre?.toLowerCase() === 'adrian'
   const tipoKey = esAdmin ? 'Admin' : 'Caja'
   const tabsBase = TABS_POR_TIPO[tipoKey] || TABS_POR_TIPO['Caja']
-  // Tab Gastos Fijos visible para todos los Admin, editable solo por Adrián
-  const tabs = esAdmin ? [...tabsBase, TAB_GASTOS] : tabsBase
+  // Gastos Fijos visible para todos los Admin, editable solo por Adrián
+  const tabs = tabsBase
+  const tabsMas = esAdmin ? TABS_MAS_ADMIN : []
+  const tabMasActiva = tabsMas.find(t => t.id === tab)
   const empleadoActual = perfilGuardado?.nombre || ''
   const usuariosLogin = usuarios.filter(u => u.tipo?.toLowerCase() === 'admin' || u.nombre === 'Tablet')
 
@@ -222,6 +274,9 @@ export default function App() {
           {tabsVisitadas.has('hoy') && (
             <div style={tabStyle('hoy')}><VentasDelDia refreshKey={refreshKey} puedeAnular={true} /></div>
           )}
+          {tabsVisitadas.has('caja') && (
+            <div style={tabStyle('caja')}><GastosCaja usuarios={usuarios} perfilNombre={empleadoActual} onRegistrado={() => setRefreshKey(k => k + 1)} /></div>
+          )}
           {esAdmin && tabsVisitadas.has('log') && (
             <div style={tabStyle('log')}><LogVentas /></div>
           )}
@@ -230,6 +285,9 @@ export default function App() {
           )}
           {tabsVisitadas.has('arts') && (
             <div style={tabStyle('arts')}><Articulos empleado={empleadoActual} esAdmin={esAdmin} /></div>
+          )}
+          {esAdmin && tabsVisitadas.has('rota') && (
+            <div style={tabStyle('rota')}><Rotacion articulos={articulos} stockMap={stockMap} /></div>
           )}
           {esAdmin && tabsVisitadas.has('ing') && (
             <div style={tabStyle('ing')}><Ingresos /></div>
@@ -250,8 +308,16 @@ export default function App() {
               <span style={S.navLabel}>{t.label}</span>
             </button>
           ))}
+          {tabsMas.length > 0 && (
+            <button style={{ ...S.navBtn, ...(tabMasActiva || menuMasAbierto ? S.navBtnActive : {}) }} onClick={() => setMenuMasAbierto(v => !v)} aria-expanded={menuMasAbierto}>
+              {tabMasActiva && <div style={S.navBar} />}
+              <span style={S.navIcon}>{tabMasActiva ? tabMasActiva.icon : '☰'}</span>
+              <span style={S.navLabel}>{tabMasActiva ? tabMasActiva.label : 'Más'}</span>
+            </button>
+          )}
         </nav>
       </div>
+      {menuMasAbierto && <MenuMas tabs={tabsMas} tabActual={tab} onElegir={handleTabChange} onCerrar={() => setMenuMasAbierto(false)} />}
     </>
   )
 }

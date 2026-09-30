@@ -286,7 +286,111 @@ export async function generarIdVenta() {
   return `${prefix}-${String(finalSeq).padStart(3,'0')}`
 }
 
-export async function registrarVenta({ items, metodoPago, descCarrito = 0, empleado = '', notas = '', descuentoImanes = 0, descuentoPromo = 0 }) {
+// ── Columnas extra de DETALLE DE VENTAS ──────────────────────────────────────
+// AE: monto descontado por socio del club · AF: monto descontado por la promo 2x1 remeras XXXL
+const COL_DTO_SOCIO = 'AE'
+const COL_DTO_XXXL = 'AF'
+const _columnasListas = new Set()
+
+function numeroDeColumna(letras) {
+  return letras.split('').reduce((n, c) => n * 26 + (c.charCodeAt(0) - 64), 0)
+}
+
+// Se asegura de que DETALLE DE VENTAS tenga la columna y su encabezado (si la celda está vacía)
+async function asegurarColumna(letra, encabezado) {
+  if (_columnasListas.has(letra)) return
+  const token = await getAccessToken()
+  const metaRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}?fields=sheets.properties(sheetId,title,gridProperties.columnCount)`, { headers: { Authorization: `Bearer ${token}` } })
+  if (!metaRes.ok) throw new Error(`Sheets META error: ${metaRes.status}`)
+  const hoja = ((await metaRes.json()).sheets || []).find(h => h.properties?.title === 'DETALLE DE VENTAS')
+  if (!hoja) throw new Error('No se encontró la hoja DETALLE DE VENTAS')
+  const columnas = hoja.properties.gridProperties?.columnCount || 0
+  const necesarias = numeroDeColumna(letra)
+  if (columnas < necesarias) {
+    const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}:batchUpdate`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requests: [{ appendDimension: { sheetId: hoja.properties.sheetId, dimension: 'COLUMNS', length: necesarias - columnas } }] }),
+    })
+    if (!res.ok) throw new Error(`Sheets ADD COLUMN error: ${res.status}`)
+  }
+  const enc = await sheetsGet(`DETALLE DE VENTAS!${letra}1`)
+  if (!enc.values?.[0]?.[0]) await sheetsUpdate(`DETALLE DE VENTAS!${letra}1`, [[encabezado]])
+  _columnasListas.add(letra)
+}
+
+// ── Promo 2x1 remeras XXXL ───────────────────────────────────────────────────
+// Llevando 2 remeras XXXL de esta lista, pagás 1 (cada remera del par sale 50% off).
+// Las unidades impares van a precio de lista. La promo termina sola al llegar a 16 unidades vendidas
+// o al terminar el 31/12/2026 (hora de Argentina), lo que pase primero.
+export const REMERAS_XXXL = new Set([
+  'TB00708','TB00714','TB00840','TB00845','TB00882','TB00961','TB00963',
+  'TB01010','TB01023','TB01047','TB01113','TB01114','TB01142',
+])
+export const PROMO_XXXL_TOPE = 16
+export const PROMO_XXXL_VENCE = new Date('2027-01-01T03:00:00.000Z') // 31/12/2026 23:59:59 ART
+
+// Reparte la promo entre los items marcados como XXXL (item.xxxl = unidades XXXL de esa línea).
+// Se aplica por pares y sin pasar las unidades que le quedan a la promo.
+// Devuelve, alineado con items: { unidades, descuento } y el total. Debe usarse igual en carrito y al guardar.
+export function calcularPromoXXXL(items, unidadesDisponibles) {
+  const marcadas = items.map(i => REMERAS_XXXL.has(i.articulo || i.id) ? Math.max(0, Math.min(i.xxxl || 0, i.cantidad)) : 0)
+  const totalMarcadas = marcadas.reduce((s, n) => s + n, 0)
+  const paresPosibles = Math.floor(totalMarcadas / 2)
+  const paresDisponibles = Math.floor(Math.max(0, unidadesDisponibles) / 2)
+  let restantes = Math.min(paresPosibles, paresDisponibles) * 2
+  const porItem = items.map((item, idx) => {
+    const unidades = Math.min(marcadas[idx], restantes)
+    restantes -= unidades
+    return { unidades, descuento: unidades * item.precioUnitario * 0.5 }
+  })
+  const unidadesEnPromo = porItem.reduce((s, x) => s + x.unidades, 0)
+  return {
+    porItem,
+    totalMarcadas,
+    unidadesEnPromo,
+    descuento: porItem.reduce((s, x) => s + x.descuento, 0),
+    sueltas: totalMarcadas - unidadesEnPromo,
+  }
+}
+
+// Cuántas unidades se vendieron con la promo (ventas no anuladas con monto en AF)
+export async function getPromoXXXLEstado() {
+  if (Date.now() >= PROMO_XXXL_VENCE.getTime()) return { vendidas: null, disponibles: 0, activa: false, vencida: true }
+  const token = await getAccessToken()
+  const rangos = ['G2:G', 'K2:K', 'U2:U', `${COL_DTO_XXXL}2:${COL_DTO_XXXL}`].map(r => `ranges=${encodeURIComponent('DETALLE DE VENTAS!' + r)}`).join('&')
+  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchGet?${rangos}`, { headers: { Authorization: `Bearer ${token}` } })
+  if (!res.ok) throw new Error(`Sheets BATCHGET error: ${res.status}`)
+  const [art, precio, anulado, dto] = ((await res.json()).valueRanges || []).map(v => v.values || [])
+  let vendidas = 0
+  for (let i = 0; i < dto.length; i++) {
+    const monto = parsePrecio(dto[i]?.[0])
+    if (monto <= 0) continue
+    if (!REMERAS_XXXL.has(art[i]?.[0])) continue
+    if (anulado[i]?.[0] === 'TRUE') continue
+    const p = parsePrecio(precio[i]?.[0])
+    if (p > 0) vendidas += Math.round(monto / (p * 0.5))
+  }
+  const disponibles = Math.max(0, PROMO_XXXL_TOPE - vendidas)
+  return { vendidas, disponibles, activa: disponibles >= 2, vencida: false }
+}
+
+export async function registrarVenta({ items, metodoPago, descCarrito = 0, empleado = '', notas = '', descuentoImanes = 0, descuentoPromo = 0, socio = false, descuentoXXXLEsperado = 0 }) {
+  // Promo 2x1 XXXL: se vuelve a verificar contra la planilla justo antes de guardar
+  const hayXXXL = items.some(i => REMERAS_XXXL.has(i.articulo || i.id) && (i.xxxl || 0) > 0)
+  let promoXXXL = null
+  if (hayXXXL) {
+    const estado = await getPromoXXXLEstado()
+    promoXXXL = calcularPromoXXXL(items, estado.disponibles)
+    if (Math.round(promoXXXL.descuento) !== Math.round(descuentoXXXLEsperado)) {
+      const err = new Error('PROMO_XXXL_CAMBIO')
+      err.estadoPromoXXXL = estado
+      throw err
+    }
+    if (promoXXXL.descuento > 0) await asegurarColumna(COL_DTO_XXXL, 'DTO 2x1 XXXL')
+  }
+  const conXXXL = promoXXXL?.descuento > 0
+  if (socio) await asegurarColumna(COL_DTO_SOCIO, 'DTO SOCIO')
   const dt = getArgentinaDate()
   const idVenta = await generarIdVenta()
   const dtosPorItem = calcularDescuentosImanesItems(items)
@@ -304,13 +408,16 @@ export async function registrarVenta({ items, metodoPago, descCarrito = 0, emple
     const dto = dtosPorItem[idx]
     const dtoPromoItem = calcularDescuentoPromoItem(item, items)
     const dtoAlfajorItem = calcularDescuentoAlfajorItem(item, items)
-    const baseConDtos = precioTotal - dto.descuentoImanes - dtoPromoItem - dtoAlfajorItem
+    const dtoXXXLItem = conXXXL ? promoXXXL.porItem[idx].descuento : 0
+    const baseConDtos = precioTotal - dto.descuentoImanes - dtoPromoItem - dtoAlfajorItem - dtoXXXLItem
     let precioTotalFinal
+    let dtoSocioItem = 0
     if (descuentoItem > 0) {
       precioTotalFinal = baseConDtos - (baseConDtos * descuentoItem / 100)
     } else if (descCarrito > 0) {
       const pct = typeof descCarrito === 'string' ? parseFloat(descCarrito.replace('%','')) : descCarrito
       precioTotalFinal = baseConDtos - (baseConDtos * pct / 100)
+      if (socio) dtoSocioItem = baseConDtos * pct / 100
     } else {
       precioTotalFinal = baseConDtos
     }
@@ -326,11 +433,15 @@ export async function registrarVenta({ items, metodoPago, descCarrito = 0, emple
       Math.round(ingresoNeto),
       dto.descuentoImanes, dto.dtoIman8000x3, dto.dtoIman8000x2, dto.dtoIman6000x3, dto.dtoIman6000x2,
       '', '', '',
+      // AE: monto descontado por socio · AF: monto descontado por la promo 2x1 XXXL
+      ...(socio || conXXXL ? [socio ? Math.round(dtoSocioItem) : ''] : []),
+      ...(conXXXL ? [dtoXXXLItem > 0 ? Math.round(dtoXXXLItem) : ''] : []),
     ]
   })
+  const ultimaCol = conXXXL ? COL_DTO_XXXL : socio ? COL_DTO_SOCIO : 'AD'
 
   await Promise.all(rows.map((row, idx) =>
-    sheetsUpdate(`DETALLE DE VENTAS!A${nextRow+idx}:AD${nextRow+idx}`, [row])
+    sheetsUpdate(`DETALLE DE VENTAS!A${nextRow+idx}:${ultimaCol}${nextRow+idx}`, [row])
   ))
 
   const totalVenta = rows.reduce((s, r) => s+(r[18]||0), 0)
@@ -338,7 +449,7 @@ export async function registrarVenta({ items, metodoPago, descCarrito = 0, emple
   const totalDtoAlfajores = items.reduce((s, item) => s + calcularDescuentoAlfajorItem(item, items), 0)
   await registrarLog({
     accion:'VENTA_REGISTRADA',
-    detalle:`${items.length} producto(s) · ${metodoPago}${descCarrito>0?` · DTO ${descCarrito}%`:''}${totalDtoImanes>0?` · DTO imanes $${totalDtoImanes}`:''}${descuentoPromo>0?` · DTO promos $${Math.round(descuentoPromo)}`:''}${totalDtoAlfajores>0?` · DTO alfajores $${Math.round(totalDtoAlfajores)}`:''} · Total $${Math.round(totalVenta).toLocaleString('es-AR')}`,
+    detalle:`${items.length} producto(s) · ${metodoPago}${socio?' · SOCIO':''}${conXXXL?` · 2x1 XXXL $${Math.round(promoXXXL.descuento)} (${promoXXXL.unidadesEnPromo}u)`:''}${descCarrito>0?` · DTO ${descCarrito}%`:''}${totalDtoImanes>0?` · DTO imanes $${totalDtoImanes}`:''}${descuentoPromo>0?` · DTO promos $${Math.round(descuentoPromo)}`:''}${totalDtoAlfajores>0?` · DTO alfajores $${Math.round(totalDtoAlfajores)}`:''} · Total $${Math.round(totalVenta).toLocaleString('es-AR')}`,
     idReferencia:idVenta, empleado, resultado:'OK',
   })
   return idVenta
@@ -571,4 +682,74 @@ export async function cerrarMesGastosFijos(gastos, mesNuevo) {
       'FALSE', '', mesNuevo,
     ]])
   ))
+}
+
+// ── Gastos de caja (movimientos de efectivo registrados por los empleados) ──
+// Hoja: GASTOS CAJA · A:ID  B:FECHA  C:HORA  D:EMPLEADO  E:TIPO (SALIDA/ENTRADA)
+//                     F:CATEGORIA  G:DETALLE  H:MONTO  I:ANULADO  J:REGISTRADO DESDE
+const HOJA_GASTOS_CAJA = 'GASTOS CAJA'
+const ENCABEZADOS_GASTOS_CAJA = ['ID', 'FECHA', 'HORA', 'EMPLEADO', 'TIPO', 'CATEGORIA', 'DETALLE', 'MONTO', 'ANULADO', 'REGISTRADO DESDE']
+let _hojaGastosLista = false
+
+// Crea la hoja GASTOS CAJA con sus encabezados si todavía no existe
+async function asegurarHojaGastosCaja() {
+  if (_hojaGastosLista) return
+  const token = await getAccessToken()
+  const metaRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}?fields=sheets.properties.title`, { headers: { Authorization: `Bearer ${token}` } })
+  if (!metaRes.ok) throw new Error(`Sheets META error: ${metaRes.status}`)
+  const meta = await metaRes.json()
+  const existe = (meta.sheets || []).some(s => s.properties?.title === HOJA_GASTOS_CAJA)
+  if (!existe) {
+    const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}:batchUpdate`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requests: [{ addSheet: { properties: { title: HOJA_GASTOS_CAJA } } }] }),
+    })
+    if (!res.ok) throw new Error(`Sheets ADD SHEET error: ${res.status}`)
+    await sheetsUpdate(`${HOJA_GASTOS_CAJA}!A1:J1`, [ENCABEZADOS_GASTOS_CAJA])
+  }
+  _hojaGastosLista = true
+}
+
+function mapGastoCaja(r, idx) {
+  return {
+    rowNum: idx + 2, id: r[0] || '', fecha: r[1] || '', hora: r[2] || '',
+    empleado: r[3] || '', tipo: (r[4] || 'SALIDA').toUpperCase(), categoria: r[5] || '',
+    detalle: r[6] || '', monto: parsePrecio(r[7]),
+    anulado: r[8] === 'TRUE' || r[8] === true, registradoDesde: r[9] || '',
+  }
+}
+
+// Movimientos de caja del día (incluye anulados, marcados con anulado=true).
+// Si la hoja todavía no existe devuelve [] (se crea al registrar el primer gasto).
+export async function getGastosCajaHoy() {
+  let data
+  try { data = await sheetsGet(`${HOJA_GASTOS_CAJA}!A2:J`) }
+  catch (e) { if (String(e.message).includes('400')) return []; throw e }
+  const { fecha } = getArgentinaDate()
+  return (data.values || []).map(mapGastoCaja).filter(g => g.id && g.fecha === fecha)
+}
+
+export async function registrarGastoCaja({ empleado, tipo, categoria, detalle, monto, registradoDesde = '' }) {
+  await asegurarHojaGastosCaja()
+  const dt = getArgentinaDate()
+  const data = await sheetsGet(`${HOJA_GASTOS_CAJA}!A2:A`)
+  const prefix = `G${String(dt.raw.getFullYear()).slice(2)}${String(dt.raw.getMonth()+1).padStart(2,'0')}${String(dt.raw.getDate()).padStart(2,'0')}`
+  const idsHoy = new Set((data.values || []).map(r => r[0]).filter(id => id?.startsWith(prefix)))
+  let seq = idsHoy.size + 1
+  while (idsHoy.has(`${prefix}-${String(seq).padStart(3,'0')}`)) seq++
+  const id = `${prefix}-${String(seq).padStart(3,'0')}`
+  const row = [id, `'${dt.fecha}`, `'${dt.hora}`, empleado, tipo, categoria, detalle || '', Math.round(Number(monto) || 0), 'FALSE', registradoDesde]
+  await sheetsAppend(`${HOJA_GASTOS_CAJA}!A1`, [row])
+  await registrarLog({ accion: 'GASTO_CAJA_REGISTRADO', detalle: `${tipo} · ${categoria}${detalle ? ` (${detalle})` : ''} · $${Math.round(Number(monto) || 0).toLocaleString('es-AR')}`, idReferencia: id, empleado, resultado: 'OK' })
+  return id
+}
+
+export async function anularGastoCaja(id, empleado = '') {
+  // Busca la fila por ID (no por posición) para no anular otra fila por error
+  const data = await sheetsGet(`${HOJA_GASTOS_CAJA}!A2:A`)
+  const idx = (data.values || []).findIndex(r => r[0] === id)
+  if (idx < 0) throw new Error('No se encontró el movimiento')
+  await sheetsUpdate(`${HOJA_GASTOS_CAJA}!I${idx + 2}`, [['TRUE']])
+  await registrarLog({ accion: 'GASTO_CAJA_ANULADO', detalle: `Movimiento ${id} anulado`, idReferencia: id, empleado, resultado: 'OK' })
 }

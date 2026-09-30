@@ -1,6 +1,6 @@
 // src/pages/VentasDelDia.jsx
-import { useState, useEffect } from 'react'
-import { getVentasHoy, anularVenta, registrarLog } from '../api/sheets.js'
+import { useState, useEffect, Fragment } from 'react'
+import { getVentasHoy, anularVenta, registrarLog, getGastosCajaHoy } from '../api/sheets.js'
 import DetalleVentaModal from '../components/DetalleVentaModal.jsx'
 
 const METODO_ICONS = {
@@ -12,6 +12,10 @@ const METODO_ICONS = {
   'Efectivo Euros':'🇪🇺','Efectivo EUR':'🇪🇺',
 }
 
+// Métodos que cuentan como pesos en efectivo dentro de la caja
+const METODOS_EFECTIVO_PESOS = new Set(['Efectivo Pesos', 'Efectivo ARS', 'Efectivo'])
+const DIVISAS = { USD: 'US$', BRL: 'R$', EUR: '€' }
+
 export default function VentasDelDia({ refreshKey }) {
   const [ventas, setVentas] = useState([])
   const [loading, setLoading] = useState(true)
@@ -20,12 +24,28 @@ export default function VentasDelDia({ refreshKey }) {
   const [anulando, setAnulando] = useState(false)
   const [toast, setToast] = useState(null)
   const [ventaSeleccionada, setVentaSeleccionada] = useState(null)
+  const [gastosCaja, setGastosCaja] = useState([])
+  const [errorGastos, setErrorGastos] = useState(false)
+  // Detalle del resumen (caja y métodos de pago) plegado por defecto; se recuerda en este dispositivo
+  const [detalleAbierto, setDetalleAbierto] = useState(() => {
+    try { return localStorage.getItem('tb_hoy_detalle') === '1' } catch { return false }
+  })
+  function toggleDetalle() {
+    setDetalleAbierto(v => {
+      try { localStorage.setItem('tb_hoy_detalle', v ? '0' : '1') } catch {}
+      return !v
+    })
+  }
 
   useEffect(() => { cargar() }, [refreshKey])
 
   async function cargar() {
     setLoading(true)
     setError(null)
+    // Los gastos de caja se cargan aparte: si fallan, las ventas se muestran igual
+    getGastosCajaHoy()
+      .then(g => { setGastosCaja(g); setErrorGastos(false) })
+      .catch(e => { console.error(e); setErrorGastos(true) })
     try {
       const data = await getVentasHoy()
       setVentas(data)
@@ -85,6 +105,24 @@ export default function VentasDelDia({ refreshKey }) {
       return acc
     }, {})
 
+  // ── Caja en efectivo: ventas en pesos − salidas + entradas ──
+  const ventasEfectivo = ventas
+    .filter(v => !v.anulado && METODOS_EFECTIVO_PESOS.has(v.metodoPago))
+    .reduce((s, v) => s + (v.precioTotalFinal || v.precioTotal || 0), 0)
+  const gastosActivos = gastosCaja.filter(g => !g.anulado)
+  const salidas = gastosActivos.filter(g => g.tipo === 'SALIDA')
+  const entradas = gastosActivos.filter(g => g.tipo === 'ENTRADA')
+  const totalSalidas = salidas.reduce((s, g) => s + g.monto, 0)
+  const totalEntradas = entradas.reduce((s, g) => s + g.monto, 0)
+  const efectivoEsperado = ventasEfectivo - totalSalidas + totalEntradas
+  // Divisas cobradas hoy: el monto en moneda extranjera queda en NOTAS (ej. "USD 20"), una vez por venta
+  const divisas = {}
+  ventasActivas.forEach(v => {
+    const nota = v.items.find(i => !i.anulado && i.notas)?.notas || ''
+    const m = String(nota).match(/^(USD|BRL|EUR)\s*([\d.,]+)/)
+    if (m) divisas[m[1]] = (divisas[m[1]] || 0) + (Number(m[2].replace(',', '.')) || 0)
+  })
+
   if (loading) return (
     <div style={S.center}><div style={S.loadingText}>Cargando ventas...</div></div>
   )
@@ -108,25 +146,59 @@ export default function VentasDelDia({ refreshKey }) {
         <button style={S.refreshBtn} onClick={cargar}>↻</button>
       </div>
 
-      <div style={S.resumen}>
-        <div style={S.resumenCard}>
-          <div style={S.resumenValue}>${Math.round(totalDia).toLocaleString('es-AR')}</div>
-          <div style={S.resumenLabel}>Total del día</div>
+      {/* Resumen compacto: siempre visible, ocupa una sola franja */}
+      <button style={S.resumenBar} onClick={toggleDetalle} aria-expanded={detalleAbierto}>
+        <div style={S.resumenItem}>
+          <span style={S.resumenValor}>${Math.round(totalDia).toLocaleString('es-AR')}</span>
+          <span style={S.resumenEtiqueta}>Total del día</span>
         </div>
-        <div style={S.resumenCard}>
-          <div style={S.resumenValue}>{cantVentas}</div>
-          <div style={S.resumenLabel}>Ventas</div>
+        <div style={S.resumenItem}>
+          <span style={S.resumenValor}>{cantVentas}</span>
+          <span style={S.resumenEtiqueta}>Ventas</span>
         </div>
-      </div>
+        <div style={S.resumenItem}>
+          <span style={S.resumenValor}>${Math.round(efectivoEsperado).toLocaleString('es-AR')}</span>
+          <span style={S.resumenEtiqueta}>Debería haber en caja{errorGastos ? ' ⚠️' : ''}</span>
+        </div>
+        <span style={S.resumenToggle}>{detalleAbierto ? 'Ocultar ▴' : 'Detalle ▾'}</span>
+      </button>
 
-      {Object.keys(porMetodo).length > 0 && (
-        <div style={S.metodoSection}>
-          {Object.entries(porMetodo).map(([m, total]) => (
-            <div key={m} style={S.metodoRow}>
-              <span>{METODO_ICONS[m] || '💰'} {m}</span>
-              <span style={S.metodoTotal}>${Math.round(total).toLocaleString('es-AR')}</span>
+      {detalleAbierto && (
+        <div style={S.detalleGrid}>
+          <div style={S.cajaSection}>
+            <div style={S.cajaTitulo}>💵 Efectivo en caja (pesos)</div>
+            <div style={S.cajaRow}><span>Ventas en efectivo</span><span style={S.cajaMonto}>${Math.round(ventasEfectivo).toLocaleString('es-AR')}</span></div>
+            <div style={S.cajaRow}>
+              <span>Gastos y salidas{salidas.length > 0 ? ` (${salidas.length})` : ''}</span>
+              <span style={{ ...S.cajaMonto, color: '#ef4444' }}>− ${Math.round(totalSalidas).toLocaleString('es-AR')}</span>
             </div>
-          ))}
+            <div style={S.cajaRow}>
+              <span>Entradas{entradas.length > 0 ? ` (${entradas.length})` : ''}</span>
+              <span style={{ ...S.cajaMonto, color: '#22c55e' }}>+ ${Math.round(totalEntradas).toLocaleString('es-AR')}</span>
+            </div>
+            <div style={S.cajaTotalRow}>
+              <span>Debería haber en caja</span>
+              <span style={S.cajaTotal}>${Math.round(efectivoEsperado).toLocaleString('es-AR')}</span>
+            </div>
+            <div style={S.cajaNota}>
+              {errorGastos ? '⚠️ No se pudieron cargar los gastos de caja; tocá ↻ para reintentar. ' : ''}
+              Sin contar el cambio con el que se abrió la caja.
+              {Object.keys(divisas).length > 0 && (
+                <> Además, en divisas: {Object.entries(divisas).map(([c, v]) => `${DIVISAS[c]} ${v.toLocaleString('es-AR')}`).join(' · ')}.</>
+              )}
+            </div>
+          </div>
+
+          {Object.keys(porMetodo).length > 0 && (
+            <div style={S.metodoSection}>
+              {Object.entries(porMetodo).sort((a, b) => b[1] - a[1]).map(([m, total]) => (
+                <div key={m} style={S.metodoRow}>
+                  <span>{METODO_ICONS[m] || '💰'} {m}</span>
+                  <span style={S.metodoTotal}>${Math.round(total).toLocaleString('es-AR')}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -135,6 +207,15 @@ export default function VentasDelDia({ refreshKey }) {
           <div style={S.emptyText}>Sin ventas registradas hoy</div>
         ) : (
           <table style={S.table}>
+            <colgroup>
+              <col style={{ width: 76 }} />
+              <col />
+              <col style={{ width: 56 }} />
+              <col style={{ width: 96 }} />
+              <col style={{ width: 120 }} />
+              <col style={{ width: 150 }} />
+              <col style={{ width: 96 }} />
+            </colgroup>
             <thead>
               <tr>
                 <th style={S.th}>Hora</th>
@@ -150,7 +231,7 @@ export default function VentasDelDia({ refreshKey }) {
               {listaVentas.map(v => {
                 const tieneParcial = !v.anulado && v.items.some(i => i.anulado)
                 return (
-                  <>
+                  <Fragment key={v.idVenta}>
                     <tr key={`h-${v.idVenta}`} style={{...S.ventaHeaderRow, ...(v.anulado ? S.ventaHeaderAnulada : {})}} onClick={() => { setVentaSeleccionada(v); registrarLog({ accion: 'MODAL_VENTA_ABIERTO', detalle: `Venta ${v.idVenta}`, idReferencia: v.idVenta, resultado: 'OK' }) }}>
                       <td colSpan={5} style={S.ventaHeaderId}>
                         {v.anulado && <span style={S.badge_anulada}>ANULADA</span>}
@@ -218,7 +299,7 @@ export default function VentasDelDia({ refreshKey }) {
                         </tr>
                       )
                     })}
-                  </>
+                  </Fragment>
                 )
               })}
             </tbody>
@@ -269,15 +350,24 @@ const S = {
   header: { display:'flex', alignItems:'center', justifyContent:'space-between', padding:'16px 20px 12px', borderBottom:'2px solid var(--accent)', flexShrink:0 },
   headerTitle: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:32, color:'var(--accent)', textTransform:'uppercase', letterSpacing:2 },
   refreshBtn: { background:'var(--surface)', border:'1.5px solid var(--border)', borderRadius:10, color:'var(--text)', fontSize:24, width:44, height:44, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' },
-  resumen: { display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, padding:'14px 20px 10px' },
-  resumenCard: { background:'var(--surface)', borderRadius:12, padding:'14px 18px', border:'1.5px solid var(--border)' },
-  resumenValue: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:36, color:'var(--accent)' },
-  resumenLabel: { fontFamily:'Barlow, sans-serif', fontSize:14, color:'var(--muted)', marginTop:2 },
-  metodoSection: { margin:'0 20px 12px', background:'var(--surface)', borderRadius:10, border:'1.5px solid var(--border)', overflow:'hidden' },
+  resumenBar: { display:'flex', flexWrap:'wrap', alignItems:'center', gap:'6px 24px', margin:'10px 20px', padding:'8px 16px', background:'var(--surface)', border:'1.5px solid var(--border)', borderRadius:12, cursor:'pointer', textAlign:'left', flexShrink:0 },
+  resumenItem: { display:'flex', flexDirection:'column' },
+  resumenValor: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:24, lineHeight:1.1, color:'var(--accent)' },
+  resumenEtiqueta: { fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)' },
+  resumenToggle: { marginLeft:'auto', fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:14, color:'var(--muted)', letterSpacing:0.5, textTransform:'uppercase', whiteSpace:'nowrap' },
+  detalleGrid: { display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(300px, 1fr))', gap:12, margin:'0 20px 12px', alignItems:'start' },
+  cajaSection: { background:'var(--surface)', borderRadius:12, border:'1.5px solid var(--accent)', padding:'12px 16px', display:'flex', flexDirection:'column', gap:4 },
+  cajaTitulo: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:16, color:'var(--muted)', letterSpacing:1, textTransform:'uppercase', marginBottom:4 },
+  cajaRow: { display:'flex', justifyContent:'space-between', fontFamily:'Barlow, sans-serif', fontSize:15, color:'var(--text)' },
+  cajaMonto: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:18, color:'var(--text)' },
+  cajaTotalRow: { display:'flex', justifyContent:'space-between', alignItems:'baseline', borderTop:'1.5px solid var(--border)', paddingTop:8, marginTop:4, fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:18, color:'var(--text)', textTransform:'uppercase', letterSpacing:0.5 },
+  cajaTotal: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:32, color:'var(--accent)' },
+  cajaNota: { fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)', lineHeight:1.4 },
+  metodoSection: { background:'var(--surface)', borderRadius:10, border:'1.5px solid var(--border)', overflow:'hidden' },
   metodoRow: { display:'flex', justifyContent:'space-between', padding:'8px 14px', borderBottom:'1px solid var(--border)', fontFamily:'Barlow, sans-serif', fontSize:15, color:'var(--text)' },
   metodoTotal: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:17, color:'var(--accent)' },
   tableWrap: { flex:1, overflowX:'auto', padding:'0 20px 20px' },
-  table: { width:'100%', borderCollapse:'collapse', tableLayout:'fixed' },
+  table: { width:'100%', minWidth:860, borderCollapse:'collapse', tableLayout:'fixed' },
   th: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:13, color:'var(--muted)', letterSpacing:1, textTransform:'uppercase', padding:'8px 10px', borderBottom:'2px solid var(--border)', textAlign:'left', background:'var(--surface)', position:'sticky', top:0, zIndex:1 },
   td: { fontFamily:'Barlow, sans-serif', fontSize:14, color:'var(--text)', padding:'8px 10px', borderBottom:'1px solid rgba(13,48,128,0.4)', verticalAlign:'middle' },
   tdArticulo: { maxWidth:0 },

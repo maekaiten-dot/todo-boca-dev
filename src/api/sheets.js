@@ -248,11 +248,12 @@ function mapRow(r) {
     notas:r[19],
     anulado: r[20]==='TRUE'||r[20]===true,
     ingresoNeto: parsePrecio(r[21]),
+    posnet: r[34] || '',
   }
 }
 
 export async function getVentasHoy() {
-  const data = await sheetsGet('DETALLE DE VENTAS!A2:AD')
+  const data = await sheetsGet('DETALLE DE VENTAS!A2:AI')
   const rows = data.values || []
   const { fecha } = getArgentinaDate()
   return rows.filter(r => r[2]===fecha).map(mapRow)
@@ -375,7 +376,44 @@ export async function getPromoXXXLEstado() {
   return { vendidas, disponibles, activa: disponibles >= 2, vencida: false }
 }
 
-export async function registrarVenta({ items, metodoPago, descCarrito = 0, empleado = '', notas = '', descuentoImanes = 0, descuentoPromo = 0, socio = false, descuentoXXXLEsperado = 0 }) {
+// ── Descuento por pago en efectivo + redondeo ────────────────────────────────
+// 10% pagando en Efectivo Pesos, en cualquier compra (sin tope de monto).
+// Socio y efectivo se calculan los dos sobre la misma base (bruto menos promos), no en cascada:
+// 10% + 10% = 20%. Después se redondea SIEMPRE hacia abajo al múltiplo de $500.
+// Se guarda en AG (DTO EFECTIVO) y AH (REDONDEO).
+export const DTO_EFECTIVO_PCT = 10
+export const DTO_EFECTIVO_METODO = 'Efectivo Pesos'
+export const REDONDEO_MULTIPLO = 500
+const COL_DTO_EFECTIVO = 'AG'
+const COL_REDONDEO = 'AH'
+
+// ── Posnet con el que se cobra (tarjeta y QR) ────────────────────────────────
+// Se decide por el bruto MENOS las promos (imanes, alfajores, 2x1 XXXL), antes de socio/efectivo:
+// menos de $50.000 → posnet AMARILLO · $50.000 o más → posnet BLANCO. Se guarda en AI (POSNET).
+export const POSNET_TOPE = 50000
+export const POSNET_METODOS = new Set(['Tarjeta de Crédito', 'Tarjeta de Débito', 'Tarjeta', 'QR'])
+export const POSNETS = ['AMARILLO', 'BLANCO']
+const COL_POSNET = 'AI'
+export function posnetSugerido(brutoMenosPromos) {
+  return Math.round(brutoMenosPromos) < POSNET_TOPE ? 'AMARILLO' : 'BLANCO'
+}
+
+// montoActual: lo que se cobraría sin el descuento por efectivo (ya con promos y socio).
+// baseDescuentos: sobre esto se calcula el 10% (bruto menos promos, SIN las remeras del 2x1 XXXL,
+// que no se combinan con otros descuentos). Usar la MISMA función en carrito y al guardar.
+export function calcularEfectivoYRedondeo({ montoActual, baseDescuentos, metodoPago, activo }) {
+  const montoSinEfectivo = montoActual
+  const elegible = metodoPago === DTO_EFECTIVO_METODO && montoActual > 0
+  if (!activo || !elegible) return { elegible, aplica: false, dtoEfectivo: 0, redondeo: 0, antesRedondeo: montoSinEfectivo, total: montoSinEfectivo }
+  const dtoEfectivo = Math.max(0, baseDescuentos) * DTO_EFECTIVO_PCT / 100
+  const antesRedondeo = montoSinEfectivo - dtoEfectivo
+  let total = Math.floor((antesRedondeo + 1e-6) / REDONDEO_MULTIPLO) * REDONDEO_MULTIPLO
+  // Compras de menos de $500 después del descuento: no se redondea (quedaría en $0)
+  if (total <= 0) total = Math.round(antesRedondeo)
+  return { elegible, aplica: true, dtoEfectivo, redondeo: antesRedondeo - total, antesRedondeo, total }
+}
+
+export async function registrarVenta({ items, metodoPago, descCarrito = 0, empleado = '', notas = '', descuentoImanes = 0, descuentoPromo = 0, socio = false, descuentoXXXLEsperado = 0, efectivo = false, totalEsperado = null, posnet = '' }) {
   // Promo 2x1 XXXL: se vuelve a verificar contra la planilla justo antes de guardar
   const hayXXXL = items.some(i => REMERAS_XXXL.has(i.articulo || i.id) && (i.xxxl || 0) > 0)
   let promoXXXL = null
@@ -391,6 +429,12 @@ export async function registrarVenta({ items, metodoPago, descCarrito = 0, emple
   }
   const conXXXL = promoXXXL?.descuento > 0
   if (socio) await asegurarColumna(COL_DTO_SOCIO, 'DTO SOCIO')
+  const posnetVenta = POSNET_METODOS.has(metodoPago) && POSNETS.includes(posnet) ? posnet : ''
+  if (posnetVenta) await asegurarColumna(COL_POSNET, 'POSNET')
+  if (efectivo) {
+    await asegurarColumna(COL_DTO_EFECTIVO, 'DTO EFECTIVO')
+    await asegurarColumna(COL_REDONDEO, 'REDONDEO')
+  }
   const dt = getArgentinaDate()
   const idVenta = await generarIdVenta()
   const dtosPorItem = calcularDescuentosImanesItems(items)
@@ -400,28 +444,82 @@ export async function registrarVenta({ items, metodoPago, descCarrito = 0, emple
   allRows.forEach((r, i) => { if (r[0] && String(r[0]).trim()) lastDataRow = i+1 })
   const nextRow = lastDataRow + 1
 
-  const rows = items.map((item, idx) => {
-    const idDetalle = `${idVenta}-${String(idx+1).padStart(2,'0')}`
+  // 1) Precio final de cada línea con promos y descuento socio/manual (sin redondear todavía)
+  const lineas = items.map((item, idx) => {
     const precioTotal = item.cantidad * item.precioUnitario
-    const costoTotal = item.cantidad * item.costoUnitario
     const descuentoItem = item.descuento || 0
     const dto = dtosPorItem[idx]
     const dtoPromoItem = calcularDescuentoPromoItem(item, items)
     const dtoAlfajorItem = calcularDescuentoAlfajorItem(item, items)
     const dtoXXXLItem = conXXXL ? promoXXXL.porItem[idx].descuento : 0
     const baseConDtos = precioTotal - dto.descuentoImanes - dtoPromoItem - dtoAlfajorItem - dtoXXXLItem
+    // Las remeras del 2x1 XXXL no se combinan con socio/efectivo: lo que se paga por ellas
+    // (la mitad de cada par = dtoXXXLItem) queda fuera de la base de esos descuentos
+    const baseDescuentos = baseConDtos - dtoXXXLItem
     let precioTotalFinal
     let dtoSocioItem = 0
     if (descuentoItem > 0) {
-      precioTotalFinal = baseConDtos - (baseConDtos * descuentoItem / 100)
+      precioTotalFinal = baseConDtos - (baseDescuentos * descuentoItem / 100)
     } else if (descCarrito > 0) {
       const pct = typeof descCarrito === 'string' ? parseFloat(descCarrito.replace('%','')) : descCarrito
-      precioTotalFinal = baseConDtos - (baseConDtos * pct / 100)
-      if (socio) dtoSocioItem = baseConDtos * pct / 100
+      precioTotalFinal = baseConDtos - (baseDescuentos * pct / 100)
+      if (socio) dtoSocioItem = baseDescuentos * pct / 100
     } else {
       precioTotalFinal = baseConDtos
     }
-    const ingresoNeto = precioTotalFinal - costoTotal
+    return { item, idx, precioTotal, descuentoItem, dto, dtoXXXLItem, dtoSocioItem, baseConDtos, baseDescuentos, precioTotalFinal, dtoEfectivoItem: 0, redondeoItem: 0 }
+  })
+
+  // 2) Descuento por efectivo + redondeo: se calcula sobre el total y se reparte entre las líneas
+  //    de forma que la suma de PRECIO TOTAL FINAL dé exactamente el total redondeado.
+  let efectivoCalc = null
+  if (efectivo) {
+    const suma = k => lineas.reduce((s, l) => s + l[k], 0)
+    efectivoCalc = calcularEfectivoYRedondeo({
+      montoActual: suma('precioTotalFinal'), baseDescuentos: suma('baseDescuentos'), metodoPago, activo: true,
+    })
+    if (!efectivoCalc.aplica) throw new Error('EFECTIVO_NO_APLICA')
+    lineas.forEach(l => {
+      // El 10% por efectivo se calcula sobre la misma base que el de socio (no en cascada)
+      l.dtoEfectivoItem = l.baseDescuentos * DTO_EFECTIVO_PCT / 100
+      l.trasEfectivo = l.precioTotalFinal - l.dtoEfectivoItem
+    })
+    // El redondeo se reparte entre las líneas que llevan descuentos (las remeras del 2x1 quedan
+    // intactas); si ninguna lleva, entre todas
+    const redondeoTotal = efectivoCalc.antesRedondeo - efectivoCalc.total
+    const sumaBase = lineas.reduce((s, l) => s + Math.max(0, l.baseDescuentos), 0)
+    const peso = l => sumaBase > 0 ? Math.max(0, l.baseDescuentos) : l.trasEfectivo
+    const sumaPesos = lineas.reduce((s, l) => s + peso(l), 0) || 1
+    lineas.forEach(l => { l.finalEntero = Math.round(l.trasEfectivo - redondeoTotal * peso(l) / sumaPesos) })
+    // Ajuste de pesos sueltos en la línea con más peso para que cierre exacto
+    const diferencia = efectivoCalc.total - lineas.reduce((s, l) => s + l.finalEntero, 0)
+    if (diferencia !== 0 && lineas.length) lineas.reduce((a, b) => peso(b) > peso(a) ? b : a).finalEntero += diferencia
+    lineas.forEach(l => {
+      l.redondeoItem = l.trasEfectivo - l.finalEntero
+      l.precioTotalFinal = l.finalEntero
+    })
+  }
+
+  // Lo que se cobra tiene que coincidir con lo que mostró el carrito
+  const totalCalculado = lineas.reduce((s, l) => s + Math.round(l.precioTotalFinal), 0)
+  if (totalEsperado != null && efectivo && totalCalculado !== Math.round(totalEsperado)) {
+    throw new Error('TOTAL_NO_COINCIDE')
+  }
+
+  // 3) Filas para la planilla. Columnas extra: AE socio · AF 2x1 XXXL · AG efectivo · AH redondeo
+  const ultimaExtra = posnetVenta ? 4 : efectivo ? 3 : conXXXL ? 1 : socio ? 0 : -1
+  const rows = lineas.map(l => {
+    const { item, idx, precioTotal, descuentoItem, dto } = l
+    const idDetalle = `${idVenta}-${String(idx+1).padStart(2,'0')}`
+    const costoTotal = item.cantidad * item.costoUnitario
+    const ingresoNeto = l.precioTotalFinal - costoTotal
+    const extras = [
+      socio ? Math.round(l.dtoSocioItem) : '',
+      conXXXL && l.dtoXXXLItem > 0 ? Math.round(l.dtoXXXLItem) : '',
+      efectivo ? Math.round(l.dtoEfectivoItem) : '',
+      efectivo ? Math.round(l.redondeoItem) : '',
+      posnetVenta,
+    ]
     return [
       idDetalle, idVenta, `'${dt.fecha}`, `'${dt.hora}`, dt.mes, dt.anio,
       item.articulo, item.nombre, item.foto||'',
@@ -429,16 +527,14 @@ export async function registrarVenta({ items, metodoPago, descCarrito = 0, emple
       item.costoUnitario, costoTotal,
       empleado, metodoPago,
       descuentoItem||'', descCarrito>0?`${descCarrito}%`:'',
-      Math.round(precioTotalFinal), notas, false,
+      Math.round(l.precioTotalFinal), notas, false,
       Math.round(ingresoNeto),
       dto.descuentoImanes, dto.dtoIman8000x3, dto.dtoIman8000x2, dto.dtoIman6000x3, dto.dtoIman6000x2,
       '', '', '',
-      // AE: monto descontado por socio · AF: monto descontado por la promo 2x1 XXXL
-      ...(socio || conXXXL ? [socio ? Math.round(dtoSocioItem) : ''] : []),
-      ...(conXXXL ? [dtoXXXLItem > 0 ? Math.round(dtoXXXLItem) : ''] : []),
+      ...extras.slice(0, ultimaExtra + 1),
     ]
   })
-  const ultimaCol = conXXXL ? COL_DTO_XXXL : socio ? COL_DTO_SOCIO : 'AD'
+  const ultimaCol = ['AD', COL_DTO_SOCIO, COL_DTO_XXXL, COL_DTO_EFECTIVO, COL_REDONDEO, COL_POSNET][ultimaExtra + 1]
 
   await Promise.all(rows.map((row, idx) =>
     sheetsUpdate(`DETALLE DE VENTAS!A${nextRow+idx}:${ultimaCol}${nextRow+idx}`, [row])
@@ -449,7 +545,7 @@ export async function registrarVenta({ items, metodoPago, descCarrito = 0, emple
   const totalDtoAlfajores = items.reduce((s, item) => s + calcularDescuentoAlfajorItem(item, items), 0)
   await registrarLog({
     accion:'VENTA_REGISTRADA',
-    detalle:`${items.length} producto(s) · ${metodoPago}${socio?' · SOCIO':''}${conXXXL?` · 2x1 XXXL $${Math.round(promoXXXL.descuento)} (${promoXXXL.unidadesEnPromo}u)`:''}${descCarrito>0?` · DTO ${descCarrito}%`:''}${totalDtoImanes>0?` · DTO imanes $${totalDtoImanes}`:''}${descuentoPromo>0?` · DTO promos $${Math.round(descuentoPromo)}`:''}${totalDtoAlfajores>0?` · DTO alfajores $${Math.round(totalDtoAlfajores)}`:''} · Total $${Math.round(totalVenta).toLocaleString('es-AR')}`,
+    detalle:`${items.length} producto(s) · ${metodoPago}${posnetVenta?` · POSNET ${posnetVenta}`:''}${socio?' · SOCIO':''}${efectivoCalc?` · DTO EFECTIVO $${Math.round(efectivoCalc.dtoEfectivo)} · REDONDEO $${Math.round(efectivoCalc.redondeo)}`:''}${conXXXL?` · 2x1 XXXL $${Math.round(promoXXXL.descuento)} (${promoXXXL.unidadesEnPromo}u)`:''}${descCarrito>0?` · DTO ${descCarrito}%`:''}${totalDtoImanes>0?` · DTO imanes $${totalDtoImanes}`:''}${descuentoPromo>0?` · DTO promos $${Math.round(descuentoPromo)}`:''}${totalDtoAlfajores>0?` · DTO alfajores $${Math.round(totalDtoAlfajores)}`:''} · Total $${Math.round(totalVenta).toLocaleString('es-AR')}`,
     idReferencia:idVenta, empleado, resultado:'OK',
   })
   return idVenta

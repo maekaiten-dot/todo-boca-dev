@@ -105,6 +105,16 @@ export default function VentasDelDia({ refreshKey }) {
       return acc
     }, {})
 
+  // ── Totales por posnet (tarjeta y QR), para controlar contra el cierre de cada terminal ──
+  const porPosnet = ventas
+    .filter(v => !v.anulado && v.posnet)
+    .reduce((acc, v) => {
+      if (!acc[v.posnet]) acc[v.posnet] = { total: 0, ventas: new Set() }
+      acc[v.posnet].total += v.precioTotalFinal || v.precioTotal || 0
+      acc[v.posnet].ventas.add(v.idVenta || v.idDetalle)
+      return acc
+    }, {})
+
   // ── Caja en efectivo: ventas en pesos − salidas + entradas ──
   const ventasEfectivo = ventas
     .filter(v => !v.anulado && METODOS_EFECTIVO_PESOS.has(v.metodoPago))
@@ -195,6 +205,12 @@ export default function VentasDelDia({ refreshKey }) {
                 <div key={m} style={S.metodoRow}>
                   <span>{METODO_ICONS[m] || '💰'} {m}</span>
                   <span style={S.metodoTotal}>${Math.round(total).toLocaleString('es-AR')}</span>
+                </div>
+              ))}
+              {['AMARILLO', 'BLANCO'].filter(p => porPosnet[p]).map(p => (
+                <div key={p} style={{ ...S.metodoRow, background:'var(--surface2)' }}>
+                  <span>{p === 'AMARILLO' ? '🟡' : '⚪'} Posnet {p.toLowerCase()} ({porPosnet[p].ventas.size} {porPosnet[p].ventas.size === 1 ? 'venta' : 'ventas'})</span>
+                  <span style={S.metodoTotal}>${Math.round(porPosnet[p].total).toLocaleString('es-AR')}</span>
                 </div>
               ))}
             </div>
@@ -294,7 +310,10 @@ export default function VentasDelDia({ refreshKey }) {
                               </span>
                             )}
                           </td>
-                          <td style={S.td}>{METODO_ICONS[item.metodoPago] || '💰'} {item.metodoPago}</td>
+                          <td style={S.td}>
+                            {METODO_ICONS[item.metodoPago] || '💰'} {item.metodoPago}
+                            {item.posnet && <span style={{ display:'block', fontSize:11, color: item.posnet === 'AMARILLO' ? 'var(--accent)' : 'var(--muted)' }}>Posnet {item.posnet.toLowerCase()}</span>}
+                          </td>
                           <td style={S.td}>{item.empleado}</td>
                         </tr>
                       )

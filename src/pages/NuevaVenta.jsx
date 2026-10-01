@@ -1,6 +1,6 @@
 // src/pages/NuevaVenta.jsx
 import { useState, useEffect } from 'react'
-import { registrarVenta, registrarLog, REMERAS_XXXL, calcularPromoXXXL, getPromoXXXLEstado } from '../api/sheets.js'
+import { registrarVenta, registrarLog, REMERAS_XXXL, calcularPromoXXXL, getPromoXXXLEstado, calcularEfectivoYRedondeo, DTO_EFECTIVO_PCT, DTO_EFECTIVO_METODO, POSNET_METODOS, posnetSugerido } from '../api/sheets.js'
 import BarcodeScanner from '../components/BarcodeScanner.jsx'
 
 const METODOS_PAGO = [
@@ -14,7 +14,6 @@ const METODOS_PAGO = [
   { valor: 'Transferencia',     icon: '🏦', label: 'Transfer.' },
 ]
 
-const DESCUENTOS = [0, 5, 10, 15, 20, 25, 30, 40, 50]
 const DTO_SOCIO = 10 // % de descuento para socios del Club Atlético Boca Juniors
 
 // ── Imanes ───────────────────────────────────────────────────────────────────
@@ -139,10 +138,12 @@ function calcularTotalesConDescuento(carrito, descCarrito, xxxlDisponibles = 0) 
   carrito.forEach((item, idx) => { xxxlPorId[item.id] = promoXXXL.porItem[idx] })
 
   const subtotalConDesc = subtotalBruto - descuentoImanes - descuentoPromo - descuentoAlfajores - descuentoXXXL
-  const descCarritoMonto = subtotalConDesc * (descCarrito / 100)
+  // Base de socio/efectivo: sin las remeras del 2x1 XXXL (lo que se paga por ellas = descuentoXXXL)
+  const baseDescuentos = subtotalConDesc - descuentoXXXL
+  const descCarritoMonto = baseDescuentos * (descCarrito / 100)
   const totalNeto = subtotalConDesc - descCarritoMonto
 
-  return { totalBruto: subtotalBruto, descuentoImanes, descuentoPromo, descuentoAlfajores, descuentoXXXL, promoXXXL, xxxlPorId, subtotalConDesc, descCarritoMonto, totalNeto, cantA, cantB, cantLlaveros, comboAlfajores }
+  return { totalBruto: subtotalBruto, descuentoImanes, descuentoPromo, descuentoAlfajores, descuentoXXXL, promoXXXL, xxxlPorId, subtotalConDesc, baseDescuentos, descCarritoMonto, totalNeto, cantA, cantB, cantLlaveros, comboAlfajores }
 }
 
 function precioEfectivoItem(item, totales) {
@@ -182,7 +183,7 @@ function XXXLControl({ item, estado, onCambiar }) {
   if (!estado) return <div style={S.xxxlInfo}>Consultando promo XXXL…</div>
   if (estado.error) return <div style={S.xxxlInfo}>No se pudo consultar la promo XXXL</div>
   if (!estado.activa && n === 0) return <div style={S.xxxlInfo}>{estado.vencida ? 'Promo 2x1 XXXL terminada (31/12)' : 'Promo 2x1 XXXL agotada'}</div>
-  const leyenda = `2x1 · quedan ${estado.disponibles}`
+  const leyenda = `2x1 · sin otros descuentos · quedan ${estado.disponibles}`
   if (item.cantidad === 1) {
     return (
       <div style={S.xxxlWrap}>
@@ -210,10 +211,10 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
   const [busqueda, setBusqueda] = useState('')
   const [metodoPago, setMetodoPago] = useState('Efectivo Pesos')
   const [empleado, setEmpleado] = useState('')
-  const [descCarrito, setDescCarrito] = useState(0)
   const [socio, setSocio] = useState(false)
-  // El descuento socio reemplaza al DTO manual (no se suman)
-  const descAplicado = socio ? DTO_SOCIO : descCarrito
+  const [pagoEfectivo, setPagoEfectivo] = useState(false)
+  // El descuento manual por porcentaje se sacó: el único descuento de carrito es el de socio
+  const descAplicado = socio ? DTO_SOCIO : 0
   const [usuarios, setUsuarios] = useState([])
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState(null)
@@ -304,12 +305,43 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
   function reiniciarCarrito() {
     registrarLog({ accion:'CARRITO_REINICIADO', detalle:`${carrito.length} producto(s)`, empleado, resultado:'OK' })
     setCarrito([])
-    setDescCarrito(0)
     setSocio(false)
+    setPagoEfectivo(false)
     setConfirmarReinicio(false)
   }
 
   const totales = calcularTotalesConDescuento(carrito, descAplicado, promoXXXLEstado?.disponibles || 0)
+  // Descuento por pago en efectivo + redondeo: va al final, sobre lo que queda después de socio/manual
+  const efectivoCalc = calcularEfectivoYRedondeo({
+    montoActual: totales.totalNeto, baseDescuentos: totales.baseDescuentos,
+    metodoPago, activo: pagoEfectivo,
+  })
+  const totalFinal = efectivoCalc.total
+  // Aclaración en los renglones de socio/efectivo cuando hay remeras del 2x1 (que quedan afuera)
+  const notaBaseDescuentos = totales.descuentoXXXL > 0 ? (
+    <span style={{display:'block',fontSize:12,color:'var(--muted)'}}>
+      {totales.baseDescuentos > 0 ? `sobre $${Math.round(totales.baseDescuentos).toLocaleString('es-AR')} · no aplica a la promo 2x1` : 'No aplica a la promo 2x1'}
+    </span>
+  ) : null
+  // Si deja de corresponder (cambió el método de pago o se vació el carrito) se desactiva solo
+  useEffect(() => {
+    if (pagoEfectivo && !efectivoCalc.elegible) setPagoEfectivo(false)
+  }, [pagoEfectivo, efectivoCalc.elegible])
+  const motivoNoEfectivo = carrito.length === 0 ? 'Agregá productos al carrito'
+    : metodoPago !== DTO_EFECTIVO_METODO ? 'Solo pagando con Efectivo $' : ''
+
+  // Posnet: se define solo según el bruto MENOS las promos (imanes, alfajores, 2x1 XXXL),
+  // antes de socio/efectivo: menos de $50.000 → amarillo, $50.000 o más → blanco
+  const usaPosnet = POSNET_METODOS.has(metodoPago)
+  const posnetAuto = posnetSugerido(totales.subtotalConDesc)
+  const posnet = usaPosnet ? posnetAuto : ''
+
+  function togglePagoEfectivo() {
+    if (!efectivoCalc.elegible) return
+    const nuevo = !pagoEfectivo
+    setPagoEfectivo(nuevo)
+    registrarLog({ accion: nuevo ? 'DTO_EFECTIVO_ACTIVADO' : 'DTO_EFECTIVO_DESACTIVADO', detalle: `Descuento efectivo ${DTO_EFECTIVO_PCT}%`, empleado, resultado:'OK' })
+  }
 
   function toggleSocio() {
     const nuevo = !socio
@@ -328,6 +360,9 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
         descCarrito: descAplicado,
         socio,
         descuentoXXXLEsperado: totales.descuentoXXXL,
+        efectivo: efectivoCalc.aplica,
+        posnet,
+        totalEsperado: efectivoCalc.aplica ? efectivoCalc.total : null,
         empleado,
         notas,
         descuentoImanes: totales.descuentoImanes,
@@ -335,9 +370,9 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
       })
       showToast('Venta ' + idVenta + ' registrada ✓', 'success')
       setCarrito([])
-      setDescCarrito(0)
       setSocio(false)
-      setMontoDivisa('')
+      setPagoEfectivo(false)
+        setMontoDivisa('')
       if (totales.promoXXXL.totalMarcadas > 0) actualizarPromoXXXL()
       onVentaRegistrada?.()
     } catch (e) {
@@ -345,6 +380,12 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
         // Otra venta usó unidades de la promo mientras tanto: se actualiza el total y no se guarda
         setPromoXXXLEstado(e.estadoPromoXXXL)
         showToast(`La promo XXXL cambió (quedan ${e.estadoPromoXXXL.disponibles}). Revisá el total y cerrá de nuevo.`, 'error')
+        setSaving(false)
+        return
+      }
+      if (e?.message === 'EFECTIVO_NO_APLICA' || e?.message === 'TOTAL_NO_COINCIDE') {
+        showToast('El total con descuento por efectivo no coincide. Quitá y volvé a poner el descuento.', 'error')
+        setPagoEfectivo(false)
         setSaving(false)
         return
       }
@@ -495,7 +536,7 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
       <div style={{...(isMobile ? S.blockMobile : S.col), borderRight:'none'}}>
         <div style={S.colHeader}><span style={S.colTitle}>TOTAL VENTA</span></div>
         <div style={S.totalPanel}>
-          <div style={S.totalNeto}>${Math.round(totales.totalNeto).toLocaleString('es-AR')}</div>
+          <div style={S.totalNeto}>${Math.round(totalFinal).toLocaleString('es-AR')}</div>
           <div style={S.totalNetoLabel}>TOTAL NETO</div>
 
           <div style={S.totalBrutoRow}>
@@ -537,8 +578,23 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
           )}
           {descAplicado > 0 && (
             <div style={S.totalBrutoRow}>
-              <span style={{fontFamily:'Barlow,sans-serif',fontSize:14,color:socio?'var(--accent)':'var(--muted)'}}>{socio ? `⭐ Descuento socio ${DTO_SOCIO}%` : `Descuento ${descCarrito}%`}</span>
+              <span style={{fontFamily:'Barlow,sans-serif',fontSize:14,color:socio?'var(--accent)':'var(--muted)'}}>{`⭐ Descuento socio ${DTO_SOCIO}%`}{notaBaseDescuentos}</span>
               <span style={{fontFamily:'Barlow Condensed,sans-serif',fontWeight:700,fontSize:15,color:'#22c55e'}}>−${Math.round(totales.descCarritoMonto).toLocaleString('es-AR')}</span>
+            </div>
+          )}
+          {efectivoCalc.aplica && (
+            <div style={S.totalBrutoRow}>
+              <span style={{fontFamily:'Barlow,sans-serif',fontSize:14,color:'#22c55e'}}>💵 Descuento efectivo {DTO_EFECTIVO_PCT}%{notaBaseDescuentos}</span>
+              <span style={{fontFamily:'Barlow Condensed,sans-serif',fontWeight:700,fontSize:15,color:'#22c55e'}}>−${Math.round(efectivoCalc.dtoEfectivo).toLocaleString('es-AR')}</span>
+            </div>
+          )}
+          {efectivoCalc.aplica && Math.round(efectivoCalc.redondeo) > 0 && (
+            <div style={S.totalBrutoRow}>
+              <span style={{fontFamily:'Barlow,sans-serif',fontSize:14,color:'#22c55e'}}>
+                🪙 Descuento por redondeo
+                <span style={{display:'block',fontSize:12,color:'var(--muted)'}}>${Math.round(efectivoCalc.antesRedondeo).toLocaleString('es-AR')} → ${Math.round(efectivoCalc.total).toLocaleString('es-AR')}</span>
+              </span>
+              <span style={{fontFamily:'Barlow Condensed,sans-serif',fontWeight:700,fontSize:15,color:'#22c55e'}}>−${Math.round(efectivoCalc.redondeo).toLocaleString('es-AR')}</span>
             </div>
           )}
 
@@ -564,6 +620,14 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
             </>
           )}
 
+          {/* Posnet: automático según el monto, discreto y no presionable */}
+          {usaPosnet && carrito.length > 0 && (
+            <div style={S.posnetDiscreto} aria-label={`Posnet ${posnet.toLowerCase()}`}>
+              <i style={{...S.posnetPunto, background: posnet === 'AMARILLO' ? '#f5c800' : '#f0f4ff'}} />
+              {posnet === 'AMARILLO' ? 'p. amarillo' : 'p. blanco'}
+            </div>
+          )}
+
           <div style={S.fieldLabel}>EMPLEADO</div>
           <div style={S.metodosGrid}>
             {empleadoFijo
@@ -575,20 +639,26 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
             {!empleadoFijo && usuarios.length===0 && <span style={{color:'var(--muted)',fontSize:13}}>Sin usuarios</span>}
           </div>
 
-          <div style={S.fieldLabel}>DTO</div>
-          <button style={{...S.socioBtn,...(socio?S.socioBtnActivo:{})}} onClick={toggleSocio} aria-pressed={socio}>
-            <span>{socio ? '✓' : '⭐'} SOCIO BOCA · {DTO_SOCIO}%</span>
-            <span style={S.socioBtnSub}>{socio ? 'Aplicado · tocá para quitar' : 'Descuento para socios del club'}</span>
-          </button>
-          <select style={{...S.select,...(socio?{opacity:0.4}:{})}} value={socio ? '' : descCarrito} disabled={socio} onChange={e=>setDescCarrito(Number(e.target.value))}>
-            {socio && <option value="">Socio {DTO_SOCIO}% aplicado</option>}
-            {DESCUENTOS.map(d=><option key={d} value={d}>{d===0?'':`${d}%`}</option>)}
-          </select>
+          {/* Descuentos: chips chicos y de bajo contraste, para que no llamen la atención del cliente */}
+          <div style={S.dtoDiscretoRow}>
+            <button style={{...S.dtoDiscreto, ...(socio ? S.dtoDiscretoActivo : {})}} onClick={toggleSocio} aria-pressed={socio} title={`Socio ${DTO_SOCIO}%`}>
+              {socio ? '✓ ' : ''}Soc.
+            </button>
+            <button
+              style={{...S.dtoDiscreto, ...(pagoEfectivo ? S.dtoDiscretoActivo : {}), ...(!efectivoCalc.elegible ? {opacity:0.35, cursor:'not-allowed'} : {})}}
+              onClick={togglePagoEfectivo}
+              disabled={!efectivoCalc.elegible}
+              aria-pressed={pagoEfectivo}
+              title={motivoNoEfectivo || `Efectivo ${DTO_EFECTIVO_PCT}% + redondeo`}
+            >
+              {pagoEfectivo ? '✓ ' : ''}Efvo.
+            </button>
+          </div>
 
           <div style={S.divider}/>
 
           <button style={{...S.cerrarBtn,opacity:(saving||carrito.length===0)?0.5:1}} onClick={cerrarVenta} disabled={saving||carrito.length===0}>
-            {saving?'Guardando...':`CERRAR VENTA · $${Math.round(totales.totalNeto).toLocaleString('es-AR')}`}
+            {saving?'Guardando...':`CERRAR VENTA · $${Math.round(totalFinal).toLocaleString('es-AR')}`}
           </button>
           <button style={{...S.reiniciarBtn,opacity:carrito.length===0?0.4:1}} onClick={()=>setConfirmarReinicio(true)} disabled={carrito.length===0}>
             REINICIAR CARRITO
@@ -677,6 +747,18 @@ const S = {
   xxxlSub: { fontFamily:'Barlow,sans-serif', fontWeight:400, fontSize:12, color:'var(--muted)', letterSpacing:0 },
   xxxlInfo: { marginTop:6, fontFamily:'Barlow,sans-serif', fontSize:11, color:'var(--muted)' },
   socioBtn: { width:'100%', display:'flex', flexDirection:'column', alignItems:'flex-start', gap:1, padding:'10px 14px', marginBottom:8, background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:10, cursor:'pointer', fontFamily:'Barlow Condensed,sans-serif', fontWeight:800, fontSize:17, letterSpacing:0.5, color:'var(--text)', textAlign:'left' },
+  posnetDiscreto: { display:'flex', alignItems:'center', gap:6, marginTop:6, fontFamily:'Barlow,sans-serif', fontSize:12, color:'var(--muted)', opacity:0.7, userSelect:'none' },
+  posnetPunto: { display:'inline-block', width:7, height:7, borderRadius:'50%', opacity:0.6 },
+  dtoDiscretoRow: { display:'flex', gap:6, marginTop:10 },
+  dtoDiscreto: { padding:'6px 12px', background:'transparent', border:'1px solid var(--border)', borderRadius:8, cursor:'pointer', fontFamily:'Barlow,sans-serif', fontSize:13, color:'var(--muted)', opacity:0.8 },
+  dtoDiscretoActivo: { border:'1px solid var(--muted)', color:'var(--text)', background:'var(--surface2)', opacity:1 },
+  posnetGrid: { display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 },
+  posnetBtn: { display:'flex', flexDirection:'column', alignItems:'center', gap:2, padding:'12px 8px', background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:10, cursor:'pointer', fontFamily:'Barlow Condensed,sans-serif', fontWeight:800, fontSize:18, letterSpacing:0.5, color:'var(--muted)' },
+  posnetAmarilloActivo: { background:'#f5c800', border:'1.5px solid #f5c800', color:'#000' },
+  posnetBlancoActivo: { background:'#f0f4ff', border:'1.5px solid #f0f4ff', color:'#000' },
+  posnetSub: { fontFamily:'Barlow,sans-serif', fontWeight:400, fontSize:11, letterSpacing:0, opacity:0.75 },
+  posnetAviso: { fontFamily:'Barlow,sans-serif', fontSize:12, color:'#f59e0b', marginTop:4 },
+  efectivoBtnActivo: { background:'rgba(34,197,94,0.15)', border:'1.5px solid #22c55e', color:'#22c55e' },
   socioBtnActivo: { background:'rgba(245,200,0,0.15)', border:'1.5px solid var(--accent)', color:'var(--accent)' },
   socioBtnSub: { fontFamily:'Barlow,sans-serif', fontWeight:400, fontSize:12, color:'var(--muted)', letterSpacing:0 },
   reiniciarBtn: { width:'100%', padding:'13px', background:'none', border:'1.5px solid var(--border)', borderRadius:10, cursor:'pointer', fontFamily:'Barlow Condensed,sans-serif', fontWeight:700, fontSize:15, color:'var(--muted)', textTransform:'uppercase', letterSpacing:1 },

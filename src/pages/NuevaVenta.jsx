@@ -1,6 +1,6 @@
 // src/pages/NuevaVenta.jsx
 import { useState, useEffect } from 'react'
-import { registrarVenta, registrarLog, REMERAS_XXXL, calcularPromoXXXL, getPromoXXXLEstado, POSNET_METODOS, posnetSugerido, socioPermitido } from '../api/sheets.js'
+import { registrarVenta, registrarLog, REMERAS_XXXL, calcularPromoXXXL, getPromoXXXLEstado, POSNET_METODOS, posnetSugerido, socioPermitido, calcularRedondeoSocio } from '../api/sheets.js'
 import BarcodeScanner from '../components/BarcodeScanner.jsx'
 
 const METODOS_PAGO = [
@@ -309,7 +309,9 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
   }
 
   const totales = calcularTotalesConDescuento(carrito, descAplicado, promoXXXLEstado?.disponibles || 0)
-  const totalFinal = totales.totalNeto
+  // Socio pagando en Efectivo Pesos: el total se redondea hacia abajo a $500
+  const redondeoCalc = calcularRedondeoSocio({ montoActual: totales.totalNeto, metodoPago, socio: descAplicado > 0 })
+  const totalFinal = redondeoCalc.total
   // Aclaración en el renglón de socio cuando hay remeras del 2x1 (que quedan afuera)
   const notaBaseDescuentos = totales.descuentoXXXL > 0 ? (
     <span style={{display:'block',fontSize:12,color:'var(--muted)'}}>
@@ -347,6 +349,7 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
         descCarrito: descAplicado,
         socio,
         descuentoXXXLEsperado: totales.descuentoXXXL,
+        totalEsperado: redondeoCalc.aplica ? redondeoCalc.total : null,
         posnet,
         empleado,
         notas,
@@ -364,6 +367,11 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
         // Otra venta usó unidades de la promo mientras tanto: se actualiza el total y no se guarda
         setPromoXXXLEstado(e.estadoPromoXXXL)
         showToast(`La promo XXXL cambió (quedan ${e.estadoPromoXXXL.disponibles}). Revisá el total y cerrá de nuevo.`, 'error')
+        setSaving(false)
+        return
+      }
+      if (e?.message === 'TOTAL_NO_COINCIDE') {
+        showToast('El total cambió. Revisalo y cerrá de nuevo.', 'error')
         setSaving(false)
         return
       }
@@ -564,6 +572,15 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
             <div style={S.totalBrutoRow}>
               <span style={{fontFamily:'Barlow,sans-serif',fontSize:14,color:socio?'var(--accent)':'var(--muted)'}}>{`⭐ Descuento socio ${DTO_SOCIO}%`}{notaBaseDescuentos}</span>
               <span style={{fontFamily:'Barlow Condensed,sans-serif',fontWeight:700,fontSize:15,color:'#22c55e'}}>−${Math.round(totales.descCarritoMonto).toLocaleString('es-AR')}</span>
+            </div>
+          )}
+          {redondeoCalc.aplica && Math.round(redondeoCalc.redondeo) > 0 && (
+            <div style={S.totalBrutoRow}>
+              <span style={{fontFamily:'Barlow,sans-serif',fontSize:14,color:'var(--accent)'}}>
+                🪙 Redondeo
+                <span style={{display:'block',fontSize:12,color:'var(--muted)'}}>${Math.round(redondeoCalc.antesRedondeo).toLocaleString('es-AR')} → ${Math.round(redondeoCalc.total).toLocaleString('es-AR')}</span>
+              </span>
+              <span style={{fontFamily:'Barlow Condensed,sans-serif',fontWeight:700,fontSize:15,color:'#22c55e'}}>−${Math.round(redondeoCalc.redondeo).toLocaleString('es-AR')}</span>
             </div>
           )}
 

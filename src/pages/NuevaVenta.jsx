@@ -1,6 +1,6 @@
 // src/pages/NuevaVenta.jsx
 import { useState, useEffect } from 'react'
-import { registrarVenta, registrarLog, REMERAS_XXXL, calcularPromoXXXL, getPromoXXXLEstado, calcularEfectivoYRedondeo, DTO_EFECTIVO_PCT, DTO_EFECTIVO_METODO, POSNET_METODOS, posnetSugerido, socioPermitido } from '../api/sheets.js'
+import { registrarVenta, registrarLog, REMERAS_XXXL, calcularPromoXXXL, getPromoXXXLEstado, POSNET_METODOS, posnetSugerido, socioPermitido } from '../api/sheets.js'
 import BarcodeScanner from '../components/BarcodeScanner.jsx'
 
 const METODOS_PAGO = [
@@ -138,7 +138,7 @@ function calcularTotalesConDescuento(carrito, descCarrito, xxxlDisponibles = 0) 
   carrito.forEach((item, idx) => { xxxlPorId[item.id] = promoXXXL.porItem[idx] })
 
   const subtotalConDesc = subtotalBruto - descuentoImanes - descuentoPromo - descuentoAlfajores - descuentoXXXL
-  // Base de socio/efectivo: sin las remeras del 2x1 XXXL (lo que se paga por ellas = descuentoXXXL)
+  // Base del descuento de socio: sin las remeras del 2x1 XXXL (lo que se paga por ellas = descuentoXXXL)
   const baseDescuentos = subtotalConDesc - descuentoXXXL
   const descCarritoMonto = baseDescuentos * (descCarrito / 100)
   const totalNeto = subtotalConDesc - descCarritoMonto
@@ -212,7 +212,6 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
   const [metodoPago, setMetodoPago] = useState('Efectivo Pesos')
   const [empleado, setEmpleado] = useState('')
   const [socio, setSocio] = useState(false)
-  const [pagoEfectivo, setPagoEfectivo] = useState(false)
   // El descuento manual por porcentaje se sacó: el único descuento de carrito es el de socio
   const descAplicado = socio && socioPermitido(metodoPago) ? DTO_SOCIO : 0
   const [usuarios, setUsuarios] = useState([])
@@ -306,42 +305,23 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
     registrarLog({ accion:'CARRITO_REINICIADO', detalle:`${carrito.length} producto(s)`, empleado, resultado:'OK' })
     setCarrito([])
     setSocio(false)
-    setPagoEfectivo(false)
     setConfirmarReinicio(false)
   }
 
   const totales = calcularTotalesConDescuento(carrito, descAplicado, promoXXXLEstado?.disponibles || 0)
-  // Descuento por pago en efectivo + redondeo: va al final, sobre lo que queda después de socio/manual
-  const efectivoCalc = calcularEfectivoYRedondeo({
-    montoActual: totales.totalNeto, baseDescuentos: totales.baseDescuentos,
-    metodoPago, activo: pagoEfectivo,
-  })
-  const totalFinal = efectivoCalc.total
-  // Aclaración en los renglones de socio/efectivo cuando hay remeras del 2x1 (que quedan afuera)
+  const totalFinal = totales.totalNeto
+  // Aclaración en el renglón de socio cuando hay remeras del 2x1 (que quedan afuera)
   const notaBaseDescuentos = totales.descuentoXXXL > 0 ? (
     <span style={{display:'block',fontSize:12,color:'var(--muted)'}}>
       {totales.baseDescuentos > 0 ? `sobre $${Math.round(totales.baseDescuentos).toLocaleString('es-AR')} · no aplica a la promo 2x1` : 'No aplica a la promo 2x1'}
     </span>
   ) : null
-  // Si deja de corresponder (cambió el método de pago o se vació el carrito) se desactiva solo
-  useEffect(() => {
-    if (pagoEfectivo && !efectivoCalc.elegible) setPagoEfectivo(false)
-  }, [pagoEfectivo, efectivoCalc.elegible])
-  const motivoNoEfectivo = carrito.length === 0 ? 'Agregá productos al carrito'
-    : metodoPago !== DTO_EFECTIVO_METODO ? 'Solo pagando con Efectivo $' : ''
 
   // Posnet: se define solo según el bruto MENOS las promos (imanes, alfajores, 2x1 XXXL),
-  // antes de socio/efectivo: menos de $50.000 → amarillo, $50.000 o más → blanco
+  // antes del descuento de socio: menos de $50.000 → amarillo, $50.000 o más → blanco
   const usaPosnet = POSNET_METODOS.has(metodoPago)
   const posnetAuto = posnetSugerido(totales.subtotalConDesc)
   const posnet = usaPosnet ? posnetAuto : ''
-
-  function togglePagoEfectivo() {
-    if (!efectivoCalc.elegible) return
-    const nuevo = !pagoEfectivo
-    setPagoEfectivo(nuevo)
-    registrarLog({ accion: nuevo ? 'DTO_EFECTIVO_ACTIVADO' : 'DTO_EFECTIVO_DESACTIVADO', detalle: `Descuento efectivo ${DTO_EFECTIVO_PCT}%`, empleado, resultado:'OK' })
-  }
 
   // Socio: no corresponde pagando con dólares, euros o reales (se apaga solo si cambian el método)
   const socioHabilitado = socioPermitido(metodoPago)
@@ -367,9 +347,7 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
         descCarrito: descAplicado,
         socio,
         descuentoXXXLEsperado: totales.descuentoXXXL,
-        efectivo: efectivoCalc.aplica,
         posnet,
-        totalEsperado: efectivoCalc.aplica ? efectivoCalc.total : null,
         empleado,
         notas,
         descuentoImanes: totales.descuentoImanes,
@@ -378,8 +356,7 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
       showToast('Venta ' + idVenta + ' registrada ✓', 'success')
       setCarrito([])
       setSocio(false)
-      setPagoEfectivo(false)
-        setMontoDivisa('')
+      setMontoDivisa('')
       if (totales.promoXXXL.totalMarcadas > 0) actualizarPromoXXXL()
       onVentaRegistrada?.()
     } catch (e) {
@@ -393,12 +370,6 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
       if (e?.message === 'SOCIO_NO_APLICA') {
         showToast('En moneda extranjera no hay descuento de socio. Revisá el total y cerrá de nuevo.', 'error')
         setSocio(false)
-        setSaving(false)
-        return
-      }
-      if (e?.message === 'EFECTIVO_NO_APLICA' || e?.message === 'TOTAL_NO_COINCIDE') {
-        showToast('El total con descuento por efectivo no coincide. Quitá y volvé a poner el descuento.', 'error')
-        setPagoEfectivo(false)
         setSaving(false)
         return
       }
@@ -595,21 +566,6 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
               <span style={{fontFamily:'Barlow Condensed,sans-serif',fontWeight:700,fontSize:15,color:'#22c55e'}}>−${Math.round(totales.descCarritoMonto).toLocaleString('es-AR')}</span>
             </div>
           )}
-          {efectivoCalc.aplica && (
-            <div style={S.totalBrutoRow}>
-              <span style={{fontFamily:'Barlow,sans-serif',fontSize:14,color:'#22c55e'}}>💵 Descuento efectivo {DTO_EFECTIVO_PCT}%{notaBaseDescuentos}</span>
-              <span style={{fontFamily:'Barlow Condensed,sans-serif',fontWeight:700,fontSize:15,color:'#22c55e'}}>−${Math.round(efectivoCalc.dtoEfectivo).toLocaleString('es-AR')}</span>
-            </div>
-          )}
-          {efectivoCalc.aplica && Math.round(efectivoCalc.redondeo) > 0 && (
-            <div style={S.totalBrutoRow}>
-              <span style={{fontFamily:'Barlow,sans-serif',fontSize:14,color:'#22c55e'}}>
-                🪙 Descuento por redondeo
-                <span style={{display:'block',fontSize:12,color:'var(--muted)'}}>${Math.round(efectivoCalc.antesRedondeo).toLocaleString('es-AR')} → ${Math.round(efectivoCalc.total).toLocaleString('es-AR')}</span>
-              </span>
-              <span style={{fontFamily:'Barlow Condensed,sans-serif',fontWeight:700,fontSize:15,color:'#22c55e'}}>−${Math.round(efectivoCalc.redondeo).toLocaleString('es-AR')}</span>
-            </div>
-          )}
 
           <div style={S.divider}/>
 
@@ -661,15 +617,6 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
               title={socioHabilitado ? `Socio ${DTO_SOCIO}%` : 'Sin descuento en moneda extranjera'}
             >
               {socio ? '✓ ' : ''}Soc.
-            </button>
-            <button
-              style={{...S.dtoDiscreto, ...(pagoEfectivo ? S.dtoDiscretoActivo : {}), ...(!efectivoCalc.elegible ? {opacity:0.35, cursor:'not-allowed'} : {})}}
-              onClick={togglePagoEfectivo}
-              disabled={!efectivoCalc.elegible}
-              aria-pressed={pagoEfectivo}
-              title={motivoNoEfectivo || `Efectivo ${DTO_EFECTIVO_PCT}% + redondeo`}
-            >
-              {pagoEfectivo ? '✓ ' : ''}Efvo.
             </button>
           </div>
 

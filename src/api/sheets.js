@@ -398,6 +398,13 @@ export function posnetSugerido(brutoMenosPromos) {
   return Math.round(brutoMenosPromos) < POSNET_TOPE ? 'AMARILLO' : 'BLANCO'
 }
 
+// ── Moneda extranjera: sin descuentos ────────────────────────────────────────
+// Pagando en efectivo con dólares, euros o reales no hay descuento de socio ni de efectivo.
+export const METODOS_MONEDA_EXTRANJERA = new Set(['Efectivo Dólares', 'Efectivo Euros', 'Efectivo Reales'])
+export function socioPermitido(metodoPago) {
+  return !METODOS_MONEDA_EXTRANJERA.has(metodoPago)
+}
+
 // montoActual: lo que se cobraría sin el descuento por efectivo (ya con promos y socio).
 // baseDescuentos: sobre esto se calcula el 10% (bruto menos promos, SIN las remeras del 2x1 XXXL,
 // que no se combinan con otros descuentos). Usar la MISMA función en carrito y al guardar.
@@ -414,6 +421,8 @@ export function calcularEfectivoYRedondeo({ montoActual, baseDescuentos, metodoP
 }
 
 export async function registrarVenta({ items, metodoPago, descCarrito = 0, empleado = '', notas = '', descuentoImanes = 0, descuentoPromo = 0, socio = false, descuentoXXXLEsperado = 0, efectivo = false, totalEsperado = null, posnet = '' }) {
+  // Moneda extranjera: el descuento de socio no corresponde (control final antes de guardar)
+  if (socio && !socioPermitido(metodoPago)) throw new Error('SOCIO_NO_APLICA')
   // Promo 2x1 XXXL: se vuelve a verificar contra la planilla justo antes de guardar
   const hayXXXL = items.some(i => REMERAS_XXXL.has(i.articulo || i.id) && (i.xxxl || 0) > 0)
   let promoXXXL = null

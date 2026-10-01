@@ -1,6 +1,6 @@
 // src/pages/NuevaVenta.jsx
 import { useState, useEffect } from 'react'
-import { registrarVenta, registrarLog, REMERAS_XXXL, calcularPromoXXXL, getPromoXXXLEstado, calcularEfectivoYRedondeo, DTO_EFECTIVO_PCT, DTO_EFECTIVO_METODO, POSNET_METODOS, posnetSugerido } from '../api/sheets.js'
+import { registrarVenta, registrarLog, REMERAS_XXXL, calcularPromoXXXL, getPromoXXXLEstado, calcularEfectivoYRedondeo, DTO_EFECTIVO_PCT, DTO_EFECTIVO_METODO, POSNET_METODOS, posnetSugerido, socioPermitido } from '../api/sheets.js'
 import BarcodeScanner from '../components/BarcodeScanner.jsx'
 
 const METODOS_PAGO = [
@@ -214,7 +214,7 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
   const [socio, setSocio] = useState(false)
   const [pagoEfectivo, setPagoEfectivo] = useState(false)
   // El descuento manual por porcentaje se sacó: el único descuento de carrito es el de socio
-  const descAplicado = socio ? DTO_SOCIO : 0
+  const descAplicado = socio && socioPermitido(metodoPago) ? DTO_SOCIO : 0
   const [usuarios, setUsuarios] = useState([])
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState(null)
@@ -343,7 +343,14 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
     registrarLog({ accion: nuevo ? 'DTO_EFECTIVO_ACTIVADO' : 'DTO_EFECTIVO_DESACTIVADO', detalle: `Descuento efectivo ${DTO_EFECTIVO_PCT}%`, empleado, resultado:'OK' })
   }
 
+  // Socio: no corresponde pagando con dólares, euros o reales (se apaga solo si cambian el método)
+  const socioHabilitado = socioPermitido(metodoPago)
+  useEffect(() => {
+    if (socio && !socioHabilitado) setSocio(false)
+  }, [socio, socioHabilitado])
+
   function toggleSocio() {
+    if (!socioHabilitado) return
     const nuevo = !socio
     setSocio(nuevo)
     registrarLog({ accion: nuevo ? 'DTO_SOCIO_ACTIVADO' : 'DTO_SOCIO_DESACTIVADO', detalle: `Descuento socio ${DTO_SOCIO}%`, empleado, resultado:'OK' })
@@ -380,6 +387,12 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
         // Otra venta usó unidades de la promo mientras tanto: se actualiza el total y no se guarda
         setPromoXXXLEstado(e.estadoPromoXXXL)
         showToast(`La promo XXXL cambió (quedan ${e.estadoPromoXXXL.disponibles}). Revisá el total y cerrá de nuevo.`, 'error')
+        setSaving(false)
+        return
+      }
+      if (e?.message === 'SOCIO_NO_APLICA') {
+        showToast('En moneda extranjera no hay descuento de socio. Revisá el total y cerrá de nuevo.', 'error')
+        setSocio(false)
         setSaving(false)
         return
       }
@@ -640,7 +653,13 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
 
           {/* Descuentos: chips chicos y de bajo contraste, para que no llamen la atención del cliente */}
           <div style={S.dtoDiscretoRow}>
-            <button style={{...S.dtoDiscreto, ...(socio ? S.dtoDiscretoActivo : {})}} onClick={toggleSocio} aria-pressed={socio} title={`Socio ${DTO_SOCIO}%`}>
+            <button
+              style={{...S.dtoDiscreto, ...(socio ? S.dtoDiscretoActivo : {}), ...(!socioHabilitado ? {opacity:0.35, cursor:'not-allowed'} : {})}}
+              onClick={toggleSocio}
+              disabled={!socioHabilitado}
+              aria-pressed={socio}
+              title={socioHabilitado ? `Socio ${DTO_SOCIO}%` : 'Sin descuento en moneda extranjera'}
+            >
               {socio ? '✓ ' : ''}Soc.
             </button>
             <button

@@ -10,12 +10,13 @@ import Pagos from './pages/Pagos.jsx'
 import GastosFijos from './pages/GastosFijos.jsx'
 import Rotacion from './pages/Rotacion.jsx'
 import GastosCaja from './pages/GastosCaja.jsx'
+import Tutoriales from './pages/Tutoriales.jsx'
 import { getArticulos, getUsuarios, registrarLog, calcularStockTodos } from './api/sheets.js'
 
 // Barra inferior: solapas de uso diario. El resto de las solapas de Admin va en el menú "Más".
 const TABS_POR_TIPO = {
   Admin: [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }, { id:'caja', label:'Gastos', icon:'🧾' }, { id:'log', label:'Historial', icon:'📋' }, { id:'arts', label:'Arts.', icon:'📦' }],
-  Caja:  [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }, { id:'caja', label:'Gastos', icon:'🧾' }, { id:'arts', label:'Arts.', icon:'📦' }],
+  Caja:  [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }, { id:'caja', label:'Gastos', icon:'🧾' }, { id:'arts', label:'Arts.', icon:'📦' }, { id:'tutos', label:'Tutoriales', icon:'📘' }],
 }
 // Solapas del menú "Más" (solo Admin). Para agregar una nueva, sumala acá y renderizala abajo con esAdmin.
 const TABS_MAS_ADMIN = [
@@ -24,6 +25,7 @@ const TABS_MAS_ADMIN = [
   { id:'ing', label:'Ingresos', icon:'📥', desc:'Mercadería que entró' },
   { id:'pagos', label:'Pagos', icon:'💳', desc:'Pagos a proveedores y gastos' },
   { id:'gastos', label:'Gastos fijos', icon:'📌', desc:'Gastos fijos del mes' },
+  { id:'tutos', label:'Tutoriales', icon:'📘', desc:'Instructivos para el equipo' },
 ]
 
 function MenuMas({ tabs, tabActual, onElegir, onCerrar }) {
@@ -285,6 +287,9 @@ export default function App() {
           )}
           {tabsVisitadas.has('arts') && (
             <div style={tabStyle('arts')}><Articulos empleado={empleadoActual} esAdmin={esAdmin} /></div>
+          )}
+          {tabsVisitadas.has('tutos') && (
+            <div style={tabStyle('tutos')}><Tutoriales esAdmin={esAdmin} perfilNombre={empleadoActual} /></div>
           )}
           {esAdmin && tabsVisitadas.has('rota') && (
             <div style={tabStyle('rota')}><Rotacion articulos={articulos} stockMap={stockMap} /></div>

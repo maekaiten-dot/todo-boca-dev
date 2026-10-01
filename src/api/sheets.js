@@ -858,3 +858,75 @@ export async function anularGastoCaja(id, empleado = '') {
   await sheetsUpdate(`${HOJA_GASTOS_CAJA}!I${idx + 2}`, [['TRUE']])
   await registrarLog({ accion: 'GASTO_CAJA_ANULADO', detalle: `Movimiento ${id} anulado`, idReferencia: id, empleado, resultado: 'OK' })
 }
+
+// ── Tutoriales (links a instructivos para los empleados) ─────────────────────
+// Hoja: TUTORIALES · A:ID  B:FECHA  C:HORA  D:TITULO  E:DESCRIPCION  F:LINK  G:SUBIDO POR  H:ACTIVO
+// Los cargan los Admin; los ven todos, del más nuevo al más viejo.
+const HOJA_TUTORIALES = 'TUTORIALES'
+const ENCABEZADOS_TUTORIALES = ['ID', 'FECHA', 'HORA', 'TITULO', 'DESCRIPCION', 'LINK', 'SUBIDO POR', 'ACTIVO']
+let _hojaTutorialesLista = false
+
+async function asegurarHojaTutoriales() {
+  if (_hojaTutorialesLista) return
+  const token = await getAccessToken()
+  const metaRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}?fields=sheets.properties.title`, { headers: { Authorization: `Bearer ${token}` } })
+  if (!metaRes.ok) throw new Error(`Sheets META error: ${metaRes.status}`)
+  const meta = await metaRes.json()
+  const existe = (meta.sheets || []).some(s => s.properties?.title === HOJA_TUTORIALES)
+  if (!existe) {
+    const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}:batchUpdate`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requests: [{ addSheet: { properties: { title: HOJA_TUTORIALES } } }] }),
+    })
+    if (!res.ok) throw new Error(`Sheets ADD SHEET error: ${res.status}`)
+    await sheetsUpdate(`${HOJA_TUTORIALES}!A1:H1`, [ENCABEZADOS_TUTORIALES])
+  }
+  _hojaTutorialesLista = true
+}
+
+// "dd/mm/aaaa" + "hh:mm:ss" → milisegundos (para ordenar por fecha de subida)
+function fechaHoraAMs(fecha, hora) {
+  const [d, m, a] = String(fecha || '').split('/').map(Number)
+  const [hh = 0, mm = 0, ss = 0] = String(hora || '').split(':').map(Number)
+  if (!d || !m || !a) return 0
+  return new Date(a, m - 1, d, hh, mm, ss).getTime()
+}
+
+// Tutoriales activos, del más nuevo al más viejo. Si la hoja no existe todavía devuelve [].
+export async function getTutoriales() {
+  let data
+  try { data = await sheetsGet(`${HOJA_TUTORIALES}!A2:H`) }
+  catch (e) { if (String(e.message).includes('400')) return []; throw e }
+  return (data.values || [])
+    .map(r => ({
+      id: r[0] || '', fecha: r[1] || '', hora: r[2] || '', titulo: r[3] || '',
+      descripcion: r[4] || '', link: r[5] || '', subidoPor: r[6] || '',
+      activo: !(r[7] === 'FALSE' || r[7] === false),
+    }))
+    .filter(t => t.id && t.link && t.activo)
+    .map(t => ({ ...t, ms: fechaHoraAMs(t.fecha, t.hora) }))
+    .sort((a, b) => b.ms - a.ms)
+}
+
+export async function agregarTutorial({ titulo, descripcion = '', link, subidoPor = '' }) {
+  await asegurarHojaTutoriales()
+  const dt = getArgentinaDate()
+  const data = await sheetsGet(`${HOJA_TUTORIALES}!A2:A`)
+  const ids = new Set((data.values || []).map(r => r[0]))
+  let seq = ids.size + 1
+  while (ids.has(`T${String(seq).padStart(3, '0')}`)) seq++
+  const id = `T${String(seq).padStart(3, '0')}`
+  await sheetsAppend(`${HOJA_TUTORIALES}!A1`, [[id, `'${dt.fecha}`, `'${dt.hora}`, titulo, descripcion, link, subidoPor, 'TRUE']])
+  await registrarLog({ accion: 'TUTORIAL_AGREGADO', detalle: titulo, idReferencia: id, empleado: subidoPor, resultado: 'OK' })
+  return id
+}
+
+// No se borra la fila: queda en la planilla con ACTIVO = FALSE
+export async function quitarTutorial(id, empleado = '') {
+  const data = await sheetsGet(`${HOJA_TUTORIALES}!A2:A`)
+  const idx = (data.values || []).findIndex(r => r[0] === id)
+  if (idx < 0) throw new Error('No se encontró el tutorial')
+  await sheetsUpdate(`${HOJA_TUTORIALES}!H${idx + 2}`, [['FALSE']])
+  await registrarLog({ accion: 'TUTORIAL_QUITADO', detalle: `Tutorial ${id} quitado`, idReferencia: id, empleado, resultado: 'OK' })
+}

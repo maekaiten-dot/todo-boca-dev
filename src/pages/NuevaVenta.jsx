@@ -622,9 +622,8 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
 
           {/* Posnet: automático según el monto, discreto y no presionable */}
           {usaPosnet && carrito.length > 0 && (
-            <div style={S.posnetDiscreto} aria-label={`Posnet ${posnet.toLowerCase()}`}>
-              <i style={{...S.posnetPunto, background: posnet === 'AMARILLO' ? '#f5c800' : '#f0f4ff'}} />
-              {posnet === 'AMARILLO' ? 'p. amarillo' : 'p. blanco'}
+            <div style={S.posnetGrid4} role="img" aria-label={`Posnet ${posnet.toLowerCase()}`} title={`Posnet ${posnet.toLowerCase()}`}>
+              <div style={{...S.posnetRect, background: posnet === 'AMARILLO' ? '#f5c800' : '#f0f4ff'}} />
             </div>
           )}
 
@@ -747,6 +746,9 @@ const S = {
   xxxlSub: { fontFamily:'Barlow,sans-serif', fontWeight:400, fontSize:12, color:'var(--muted)', letterSpacing:0 },
   xxxlInfo: { marginTop:6, fontFamily:'Barlow,sans-serif', fontSize:11, color:'var(--muted)' },
   socioBtn: { width:'100%', display:'flex', flexDirection:'column', alignItems:'flex-start', gap:1, padding:'10px 14px', marginBottom:8, background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:10, cursor:'pointer', fontFamily:'Barlow Condensed,sans-serif', fontWeight:800, fontSize:17, letterSpacing:0.5, color:'var(--text)', textAlign:'left' },
+  // Indicador de posnet: solo un rectángulo del color del posnet, del ancho de un botón de método de pago
+  posnetGrid4: { display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:6, marginTop:8 },
+  posnetRect: { height:36, borderRadius:10 },
   posnetDiscreto: { display:'flex', alignItems:'center', gap:6, marginTop:6, fontFamily:'Barlow,sans-serif', fontSize:12, color:'var(--muted)', opacity:0.7, userSelect:'none' },
   posnetPunto: { display:'inline-block', width:7, height:7, borderRadius:'50%', opacity:0.6 },
   dtoDiscretoRow: { display:'flex', gap:6, marginTop:10 },

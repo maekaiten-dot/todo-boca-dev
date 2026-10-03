@@ -52,6 +52,30 @@ function agruparPorMes(ventas, filtro) {
   return Object.values(mesMap).sort((a, b) => a.key.localeCompare(b.key))
 }
 
+const esPosnetBlanco = v => String(v.posnet || '').trim().toUpperCase() === 'BLANCO'
+const tienePosnet = v => ['AMARILLO', 'BLANCO'].includes(String(v.posnet || '').trim().toUpperCase())
+
+// Posnet blanco por mes: total cobrado y % sobre el total del mes.
+// El posnet se registra desde que se agregó a la app: los meses anteriores no tienen el dato
+// y no se muestran (arranca en el primer mes con algún posnet registrado).
+function calcularPosnetBlancoPorMes(ventas, mesTotales, mesTarjeta) {
+  const conPosnet = agruparPorMes(ventas, tienePosnet)
+  if (conPosnet.length === 0) return []
+  const primerMes = conPosnet[0].key
+  const blanco = agruparPorMes(ventas, esPosnetBlanco)
+  return mesTotales
+    .filter(mt => mt.key >= primerMes)
+    .map(mt => {
+      const total = blanco.find(m => m.key === mt.key)?.total || 0
+      const tq = mesTarjeta.find(m => m.key === mt.key)?.total || 0
+      return {
+        key: mt.key, label: mt.label, total,
+        pct: mt.total > 0 ? parseFloat((total / mt.total * 100).toFixed(2)) : 0,
+        pctTarjeta: tq > 0 ? parseFloat((total / tq * 100).toFixed(2)) : 0,
+      }
+    })
+}
+
 function calcularPctPorMes(mesTotales, mesTarjeta) {
   // Para cada mes en mesTotales, calcular % tarjeta+QR
   return mesTotales.map(mt => {
@@ -89,6 +113,38 @@ const PctTooltip = ({ active, payload, label }) => {
   return null
 }
 
+const BlancoPctTooltip = ({ active, payload, label }) => {
+  if (active && payload && payload.length) {
+    const d = payload[0].payload
+    return (
+      <div style={{ background:'var(--surface)', border:'1.5px solid var(--border)', borderRadius:8, padding:'10px 14px' }}>
+        <div style={{ fontFamily:'Barlow Condensed, sans-serif', fontSize:13, color:'var(--muted)', marginBottom:4 }}>{label}</div>
+        <div style={{ fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:20, color:'#e8eefc' }}>
+          {d.pct.toFixed(2)}% del total
+        </div>
+        <div style={{ fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)', marginTop:2 }}>
+          {d.pctTarjeta.toFixed(2)}% de lo cobrado con tarjeta + QR
+        </div>
+      </div>
+    )
+  }
+  return null
+}
+
+const BlancoTotalTooltip = ({ active, payload, label }) => {
+  if (active && payload && payload.length) {
+    return (
+      <div style={{ background:'var(--surface)', border:'1.5px solid var(--border)', borderRadius:8, padding:'10px 14px' }}>
+        <div style={{ fontFamily:'Barlow Condensed, sans-serif', fontSize:13, color:'var(--muted)', marginBottom:4 }}>{label}</div>
+        <div style={{ fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:20, color:'#e8eefc' }}>
+          ${Math.round(payload[0].value).toLocaleString('es-AR')}
+        </div>
+      </div>
+    )
+  }
+  return null
+}
+
 export default function Estadisticas() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -96,6 +152,7 @@ export default function Estadisticas() {
   const [datosMes, setDatosMes] = useState([])
   const [datosMetodo, setDatosMetodo] = useState([])
   const [datosPct, setDatosPct] = useState([])
+  const [datosBlanco, setDatosBlanco] = useState([])
   const [totalPeriodo, setTotalPeriodo] = useState(0)
   const [mejorDia, setMejorDia] = useState(null)
 
@@ -128,6 +185,7 @@ export default function Estadisticas() {
       setDatosMes(mesTotales)
       setDatosMetodo(mesTarjeta)
       setDatosPct(calcularPctPorMes(mesTotales, mesTarjeta))
+      setDatosBlanco(calcularPosnetBlancoPorMes(ventas, mesTotales, mesTarjeta))
 
     } catch (e) {
       setError('No se pudo cargar. Intentá de nuevo.')
@@ -239,6 +297,43 @@ export default function Estadisticas() {
         </div>
       </div>
 
+
+      {/* Gráfico % posnet blanco sobre total por mes */}
+      <div style={S.chartCard}>
+        <div style={S.chartTitle}>% Posnet blanco sobre total — por mes</div>
+        {datosBlanco.length === 0 ? <div style={S.sinDatos}>Todavía no hay ventas con posnet registrado.</div> : (
+        <div style={S.chartWrap}>
+          <ResponsiveContainer width="100%" height={560}>
+            <BarChart data={datosBlanco} margin={{ top: 8, right: 8, left: 0, bottom: 40 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+              <XAxis dataKey="label" tick={{ fontFamily:'Barlow Condensed, sans-serif', fontSize:11, fill:'#6a8ccc' }} angle={-45} textAnchor="end" interval={0} tickLine={false} axisLine={false} />
+              <YAxis tick={{ fontFamily:'Barlow Condensed, sans-serif', fontSize:11, fill:'#6a8ccc' }} tickFormatter={v => `${v}%`} domain={[0, 100]} tickLine={false} axisLine={false} width={48} />
+              <Tooltip content={<BlancoPctTooltip />} cursor={{ fill:'rgba(232,238,252,0.06)' }} />
+              <Bar dataKey="pct" fill="#e8eefc" radius={[4, 4, 0, 0]} maxBarSize={48} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+        )}
+      </div>
+
+      {/* Gráfico total cobrado con posnet blanco por mes */}
+      <div style={S.chartCard}>
+        <div style={S.chartTitle}>Ventas posnet blanco por mes</div>
+        {datosBlanco.length === 0 ? <div style={S.sinDatos}>Todavía no hay ventas con posnet registrado.</div> : (
+        <div style={S.chartWrap}>
+          <ResponsiveContainer width="100%" height={560}>
+            <BarChart data={datosBlanco} margin={{ top: 8, right: 8, left: 0, bottom: 40 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+              <XAxis dataKey="label" tick={{ fontFamily:'Barlow Condensed, sans-serif', fontSize:11, fill:'#6a8ccc' }} angle={-45} textAnchor="end" interval={0} tickLine={false} axisLine={false} />
+              <YAxis tick={{ fontFamily:'Barlow Condensed, sans-serif', fontSize:11, fill:'#6a8ccc' }} tickFormatter={v => v >= 1000000 ? `${(v/1000000).toFixed(1)}M` : v >= 1000 ? `${(v/1000).toFixed(0)}k` : v} tickLine={false} axisLine={false} width={48} />
+              <Tooltip content={<BlancoTotalTooltip />} cursor={{ fill:'rgba(232,238,252,0.06)' }} />
+              <Bar dataKey="total" fill="#e8eefc" radius={[4, 4, 0, 0]} maxBarSize={48} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+        )}
+      </div>
+
     </div>
   )
 }
@@ -260,4 +355,5 @@ const S = {
   chartCard: { margin:'0 20px 16px', background:'var(--surface)', borderRadius:14, border:'1.5px solid var(--border)', padding:'16px' },
   chartTitle: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:16, color:'var(--muted)', letterSpacing:1, textTransform:'uppercase', marginBottom:12 },
   chartWrap: { width:'100%' },
+  sinDatos: { fontFamily:'Barlow, sans-serif', fontSize:14, color:'var(--muted)', padding:'24px 0' },
 }

@@ -260,7 +260,8 @@ export async function getVentasHoy() {
 }
 
 export async function getHistoricoVentas() {
-  const data = await sheetsGet('DETALLE DE VENTAS!A2:AD')
+  // Hasta AI para incluir el POSNET (amarillo/blanco)
+  const data = await sheetsGet('DETALLE DE VENTAS!A2:AI')
   const rows = data.values || []
   return rows.filter(r => r[0]).map(mapRow)
 }

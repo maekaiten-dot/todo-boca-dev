@@ -145,6 +145,116 @@ const BlancoTotalTooltip = ({ active, payload, label }) => {
   return null
 }
 
+const fmt$ = n => '$' + Math.round(n).toLocaleString('es-AR')
+const DIAS_SEMANA = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado']
+
+// Agrupa las filas de un día por ticket (ID_VENTA), de la más nueva a la más vieja
+function armarTicketsDelDia(ventas, fechaKey) {
+  const map = {}
+  ventas.filter(v => v.fecha === fechaKey).forEach(v => {
+    const id = v.idVenta || v.idDetalle
+    if (!map[id]) map[id] = { id, hora: v.hora || '', empleado: v.empleado || '', metodoPago: v.metodoPago || '', posnet: v.posnet || '', notas: v.notas || '', anulado: v.anulado, items: [], total: 0 }
+    const t = map[id]
+    const precio = parsePrecio(v.precioTotalFinal) || parsePrecio(v.precioTotal)
+    t.items.push({ nombre: v.nombre || v.articulo || '', cantidad: v.cantidad || 0, precio })
+    t.total += precio
+    if (!v.anulado) t.anulado = false
+  })
+  return Object.values(map).sort((a, b) => b.hora.localeCompare(a.hora))
+}
+
+function DetalleDia({ dia, ventas, onCerrar }) {
+  useEffect(() => {
+    const onKey = e => { if (e.key === 'Escape') onCerrar() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onCerrar])
+
+  const tickets = armarTicketsDelDia(ventas, dia.fechaKey)
+  const validos = tickets.filter(t => !t.anulado)
+  const total = validos.reduce((s, t) => s + t.total, 0)
+  const porMetodo = {}
+  validos.forEach(t => { porMetodo[t.metodoPago || 'Sin método'] = (porMetodo[t.metodoPago || 'Sin método'] || 0) + t.total })
+  const [d, m, a] = dia.fechaKey.split('/').map(Number)
+  const nombreDia = DIAS_SEMANA[new Date(a, m - 1, d).getDay()]
+
+  return (
+    <div style={D.overlay} onClick={onCerrar}>
+      <div style={D.sheet} onClick={e => e.stopPropagation()} role="dialog" aria-label={`Ventas del ${dia.label}`}>
+        <div style={D.head}>
+          <div>
+            <div style={D.titulo}>{nombreDia} {String(d).padStart(2, '0')}/{String(m).padStart(2, '0')}/{a}</div>
+            <div style={D.sub}>{validos.length} {validos.length === 1 ? 'venta' : 'ventas'}{tickets.length > validos.length ? ` · ${tickets.length - validos.length} anulada(s)` : ''}</div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={D.total}>{fmt$(total)}</div>
+            <button style={D.cerrar} onClick={onCerrar} aria-label="Cerrar">✕</button>
+          </div>
+        </div>
+
+        {Object.keys(porMetodo).length > 0 && (
+          <div style={D.metodos}>
+            {Object.entries(porMetodo).sort((x, y) => y[1] - x[1]).map(([met, monto]) => (
+              <span key={met} style={D.metodoChip}>{met} · <strong style={{ color: 'var(--text)' }}>{fmt$(monto)}</strong></span>
+            ))}
+          </div>
+        )}
+
+        <div style={D.lista}>
+          {tickets.length === 0 ? <div style={D.vacio}>No hubo ventas este día.</div> : tickets.map(t => (
+            <div key={t.id} style={{ ...D.ticket, ...(t.anulado ? { opacity: 0.45 } : {}) }}>
+              <div style={D.ticketHead}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={D.ticketMeta}>
+                    {t.anulado && <span style={D.badgeAnulada}>ANULADA</span>}
+                    {t.hora.slice(0, 5)} · {t.empleado}
+                  </div>
+                  <div style={D.ticketMetodo}>
+                    {t.metodoPago}
+                    {t.posnet && <span style={{ ...D.posnetDot, background: t.posnet.toUpperCase() === 'AMARILLO' ? '#f5c800' : '#f0f4ff' }} title={`Posnet ${t.posnet.toLowerCase()}`} />}
+                    {t.notas && <span style={{ color: 'var(--muted)' }}> · {t.notas}</span>}
+                  </div>
+                </div>
+                <div style={{ ...D.ticketTotal, ...(t.anulado ? { textDecoration: 'line-through' } : {}) }}>{fmt$(t.total)}</div>
+              </div>
+              {t.items.map((it, i) => (
+                <div key={i} style={D.item}>
+                  <span style={D.itemNombre}>{it.cantidad} × {it.nombre}</span>
+                  <span style={D.itemPrecio}>{fmt$(it.precio)}</span>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const D = {
+  overlay: { position:'fixed', inset:0, background:'rgba(0,0,10,0.7)', zIndex:400, display:'flex', alignItems:'flex-end', justifyContent:'center' },
+  sheet: { width:'100%', maxWidth:720, maxHeight:'88vh', display:'flex', flexDirection:'column', background:'var(--surface)', borderTop:'2px solid var(--accent)', borderRadius:'18px 18px 0 0', padding:'14px 16px calc(12px + env(safe-area-inset-bottom, 0px))', gap:10 },
+  head: { display:'flex', justifyContent:'space-between', alignItems:'center', gap:12 },
+  titulo: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:22, color:'var(--accent)', letterSpacing:0.5 },
+  sub: { fontFamily:'Barlow, sans-serif', fontSize:13, color:'var(--muted)' },
+  total: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:26, color:'#00e676', whiteSpace:'nowrap' },
+  cerrar: { background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:10, color:'var(--text)', fontSize:18, width:40, height:40, cursor:'pointer', flexShrink:0 },
+  metodos: { display:'flex', flexWrap:'wrap', gap:6 },
+  metodoChip: { fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)', background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:20, padding:'3px 10px' },
+  lista: { overflowY:'auto', display:'flex', flexDirection:'column', gap:8, paddingBottom:4 },
+  vacio: { fontFamily:'Barlow, sans-serif', fontSize:14, color:'var(--muted)', padding:'16px 0' },
+  ticket: { background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:10, padding:'10px 12px' },
+  ticketHead: { display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:10, marginBottom:4 },
+  ticketMeta: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:16, color:'var(--text)' },
+  ticketMetodo: { fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)', display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' },
+  posnetDot: { display:'inline-block', width:18, height:10, borderRadius:3 },
+  ticketTotal: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:18, color:'var(--accent)', whiteSpace:'nowrap' },
+  item: { display:'flex', justifyContent:'space-between', gap:10, fontFamily:'Barlow, sans-serif', fontSize:13, color:'var(--text)', padding:'2px 0' },
+  itemNombre: { minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', opacity:0.9 },
+  itemPrecio: { flexShrink:0, color:'var(--muted)' },
+  badgeAnulada: { fontSize:10, fontWeight:800, color:'#ef4444', background:'rgba(239,68,68,0.15)', borderRadius:4, padding:'1px 5px', marginRight:6, letterSpacing:1 },
+}
+
 export default function Estadisticas() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -153,6 +263,8 @@ export default function Estadisticas() {
   const [datosMetodo, setDatosMetodo] = useState([])
   const [datosPct, setDatosPct] = useState([])
   const [datosBlanco, setDatosBlanco] = useState([])
+  const [ventasTodas, setVentasTodas] = useState([])
+  const [diaAbierto, setDiaAbierto] = useState(null)
   const [totalPeriodo, setTotalPeriodo] = useState(0)
   const [mejorDia, setMejorDia] = useState(null)
 
@@ -179,6 +291,7 @@ export default function Estadisticas() {
       const mesTotales = agruparPorMes(ventas)
       const mesTarjeta = agruparPorMes(ventas, v => esTarjetaOQR(v.metodoPago))
 
+      setVentasTodas(ventas)
       setDatosGrafico(dias)
       setTotalPeriodo(total)
       setMejorDia(mejor)
@@ -236,14 +349,15 @@ export default function Estadisticas() {
       {/* Gráfico diario */}
       <div style={S.chartCard}>
         <div style={S.chartTitle}>Ventas por día — últimos 35 días</div>
+        <div style={S.chartHint}>Tocá una columna para ver las ventas de ese día</div>
         <div style={S.chartWrap}>
           <ResponsiveContainer width="100%" height={560}>
-            <BarChart data={datosGrafico} margin={{ top: 8, right: 8, left: 0, bottom: 40 }}>
+            <BarChart data={datosGrafico} margin={{ top: 8, right: 8, left: 0, bottom: 40 }} style={{ cursor:'pointer', outline:'none' }} onClick={st => { const dia = st?.activePayload?.[0]?.payload || datosGrafico[Number(st?.activeTooltipIndex ?? st?.activeIndex)] || datosGrafico.find(x => x.label === st?.activeLabel); if (dia?.fechaKey) setDiaAbierto(dia) }}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
               <XAxis dataKey="label" tick={{ fontFamily:'Barlow Condensed, sans-serif', fontSize:11, fill:'#6a8ccc' }} angle={-45} textAnchor="end" interval={2} tickLine={false} axisLine={false} />
               <YAxis tick={{ fontFamily:'Barlow Condensed, sans-serif', fontSize:11, fill:'#6a8ccc' }} tickFormatter={v => v >= 1000000 ? `${(v/1000000).toFixed(1)}M` : v >= 1000 ? `${(v/1000).toFixed(0)}k` : v} tickLine={false} axisLine={false} width={48} />
               <Tooltip content={<CustomTooltip />} cursor={{ fill:'rgba(0,230,118,0.06)' }} />
-              <Bar dataKey="total" fill="#00e676" radius={[4, 4, 0, 0]} maxBarSize={32} />
+              <Bar dataKey="total" fill="#00e676" radius={[4, 4, 0, 0]} maxBarSize={32} cursor="pointer" onClick={d => { const dia = d?.payload || d; if (dia?.fechaKey) setDiaAbierto(dia) }} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -334,6 +448,7 @@ export default function Estadisticas() {
         )}
       </div>
 
+      {diaAbierto && <DetalleDia dia={diaAbierto} ventas={ventasTodas} onCerrar={() => setDiaAbierto(null)} />}
     </div>
   )
 }
@@ -355,5 +470,6 @@ const S = {
   chartCard: { margin:'0 20px 16px', background:'var(--surface)', borderRadius:14, border:'1.5px solid var(--border)', padding:'16px' },
   chartTitle: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:16, color:'var(--muted)', letterSpacing:1, textTransform:'uppercase', marginBottom:12 },
   chartWrap: { width:'100%' },
+  chartHint: { fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)', marginTop:-8, marginBottom:8 },
   sinDatos: { fontFamily:'Barlow, sans-serif', fontSize:14, color:'var(--muted)', padding:'24px 0' },
 }

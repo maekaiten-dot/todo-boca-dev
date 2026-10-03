@@ -565,6 +565,94 @@ export async function anularItemVenta(idDetalle, todosLosItems, empleado = '') {
   }
 }
 
+// ── Histórico de precios y costos ─────────────────────────────────────────────
+// Hoja: HISTORICO DE PRECIOS Y COSTOS
+//   A:ID ARTICULO  B:NOMBRE  C:VIGENTE DESDE  D:VIGENTE HASTA  E:PRECIO UNITARIO  F:COSTO UNITARIO
+//   G:CAMBIÓ (precio / costo / precio y costo)  H:QUIÉN LO CAMBIÓ
+// Intervalos abiertos: la fila con HASTA vacío es el valor vigente. Al cambiar precio o costo desde
+// la app, se cierra esa fila (HASTA = fecha y hora del cambio) y se agrega una nueva abierta.
+// Los cambios hechos a mano en la planilla ARTICULOS no quedan registrados.
+const HOJA_HIST = 'HISTORICO DE PRECIOS Y COSTOS'
+const ENCABEZADOS_HIST = ['ID ARTICULO', 'NOMBRE', 'VIGENTE DESDE', 'VIGENTE HASTA', 'PRECIO UNITARIO', 'COSTO UNITARIO', 'CAMBIÓ', 'QUIÉN LO CAMBIÓ']
+let _histFormatoOk = false
+
+// Pasa la hoja del formato viejo (A:ID B:NOMBRE C:FECHA VIGENCIA D:PRECIO E:COSTO) al nuevo.
+// Las filas del 22/09 quedan como "vigente desde esa fecha, hasta: vacío". Las filas sin ID se descartan.
+// Las columnas I a K (restos de stock copiados de ARTICULOS) se vacían: al reordenar las filas quedarían desalineadas.
+async function asegurarFormatoHistorico() {
+  if (_histFormatoOk) return
+  const data = await sheetsGet(`${HOJA_HIST}!A1:K`)
+  const rows = data.values || []
+  const header = (rows[0] || []).map(h => String(h || '').trim().toUpperCase())
+  if (header[2] === 'VIGENTE DESDE') { _histFormatoOk = true; return }
+  if (header[2] !== 'FECHA VIGENCIA' && rows.length > 1) throw new Error('HISTORICO_FORMATO_DESCONOCIDO')
+  const nuevas = rows.slice(1)
+    .filter(r => String(r[0] || '').trim())
+    .map(r => [r[0], r[1] || '', `'${r[2] || ''}`, '', parsePrecio(r[3]), parsePrecio(r[4]), '', '', '', '', ''])
+  const vacias = Math.max(0, rows.length - 1 - nuevas.length)
+  const valores = [[...ENCABEZADOS_HIST, '', '', ''], ...nuevas, ...Array.from({ length: vacias }, () => Array(11).fill(''))]
+  await sheetsUpdate(`${HOJA_HIST}!A1:K${valores.length}`, valores)
+  await registrarLog({ accion: 'HISTORICO_MIGRADO', detalle: `${nuevas.length} filas pasadas al formato con VIGENTE DESDE / HASTA`, resultado: 'OK' })
+  _histFormatoOk = true
+}
+
+function fechaHoraHist() {
+  const dt = getArgentinaDate()
+  return `'${dt.fecha} ${String(dt.hora).slice(0, 5)}`
+}
+
+async function proximaFilaHist() {
+  const data = await sheetsGet(`${HOJA_HIST}!A:A`)
+  let ultima = 1
+  ;(data.values || []).forEach((r, i) => { if (String(r[0] || '').trim()) ultima = i + 1 })
+  return ultima + 1
+}
+
+// Registra un cambio de precio y/o costo. No hace nada si los valores no cambiaron.
+export async function registrarCambioPrecioCosto({ id, nombre, precioAnterior, costoAnterior, precioNuevo, costoNuevo, quien = '' }) {
+  const pA = parsePrecio(precioAnterior), cA = parsePrecio(costoAnterior)
+  const pN = parsePrecio(precioNuevo), cN = parsePrecio(costoNuevo)
+  const cambioPrecio = pA !== pN, cambioCosto = cA !== cN
+  if (!cambioPrecio && !cambioCosto) return false
+  const cambio = cambioPrecio && cambioCosto ? 'precio y costo' : cambioPrecio ? 'precio' : 'costo'
+  await asegurarFormatoHistorico()
+  const ahora = fechaHoraHist()
+  const data = await sheetsGet(`${HOJA_HIST}!A2:D`)
+  const rows = data.values || []
+  let idxAbierta = -1
+  rows.forEach((r, i) => { if (r[0] === id && !String(r[3] || '').trim()) idxAbierta = i })
+  let fila = await proximaFilaHist()
+  if (idxAbierta >= 0) {
+    // Cierra el intervalo vigente
+    await sheetsUpdate(`${HOJA_HIST}!D${idxAbierta + 2}`, [[ahora]])
+    await sheetsUpdate(`${HOJA_HIST}!G${idxAbierta + 2}:H${idxAbierta + 2}`, [[cambio, quien]])
+  } else {
+    // No había intervalo abierto: se guarda el valor anterior con "desde" desconocido
+    await sheetsUpdate(`${HOJA_HIST}!A${fila}:H${fila}`, [[id, nombre, '', ahora, pA, cA, cambio, quien]])
+    fila++
+  }
+  // Nuevo intervalo vigente
+  await sheetsUpdate(`${HOJA_HIST}!A${fila}:H${fila}`, [[id, nombre, ahora, '', pN, cN, '', '']])
+  await registrarLog({ accion: 'HISTORICO_PRECIO_COSTO', detalle: `${id} · ${cambio}: $${pA.toLocaleString('es-AR')}/$${cA.toLocaleString('es-AR')} → $${pN.toLocaleString('es-AR')}/$${cN.toLocaleString('es-AR')}`, idReferencia: id, empleado: quien, resultado: 'OK' })
+  return true
+}
+
+// Artículo nuevo: abre su primer intervalo
+async function registrarAltaEnHistorico(art, quien = '') {
+  await asegurarFormatoHistorico()
+  const fila = await proximaFilaHist()
+  await sheetsUpdate(`${HOJA_HIST}!A${fila}:H${fila}`, [[art.id, art.nombre, fechaHoraHist(), '', parsePrecio(art.precioUnitario), parsePrecio(art.costoUnitario), '', '']])
+}
+
+// El histórico nunca frena el guardado del artículo: si falla, queda anotado en el LOG
+async function historicoSeguro(fn, id, empleado) {
+  try { await fn() }
+  catch (e) {
+    console.error(e)
+    try { await registrarLog({ accion: 'ERROR_HISTORICO', detalle: e?.message || 'Error desconocido', idReferencia: id, empleado, resultado: 'ERROR' }) } catch {}
+  }
+}
+
 export async function getArticulosAdmin() {
   const data = await sheetsGet('ARTICULOS!A1:K')
   const rows = data.values || []
@@ -594,12 +682,27 @@ export async function agregarArticulo(art, empleado = '') {
   try { await sheetsUpdate(`ARTICULOS!A${nextRow}:K${nextRow}`, [row]) }
   catch (e) { await sheetsAppend('ARTICULOS!A1', [row]) }
   await registrarLog({ accion:'ARTICULO_CREADO', detalle:`${art.id} · ${art.nombre} · $${art.precioUnitario}`, idReferencia:art.id, empleado, resultado:'OK' })
+  await historicoSeguro(() => registrarAltaEnHistorico(art, empleado), art.id, empleado)
 }
 
 export async function editarArticulo(rowNum, art, empleado = '') {
+  // Valores que había en la planilla justo antes del cambio (para el histórico)
+  let anterior = null
+  try {
+    const prev = await sheetsGet(`ARTICULOS!A${rowNum}:H${rowNum}`)
+    const r = (prev.values || [])[0] || []
+    if (r[0] === art.id) anterior = { precio: r[6], costo: r[7] }
+  } catch (e) { console.error(e) }
   const row = [art.id,art.nombre,art.stockInicial||'0',art.info||'',art.disponibilidad||'ACTIVO',art.foto||'',art.precioUnitario||'0',art.costoUnitario||'0',art.cantidadReponer||'0',art.stockCierre||'0',art.stockActual||'0']
   await sheetsUpdate(`ARTICULOS!A${rowNum}:K${rowNum}`, [row])
   await registrarLog({ accion:'ARTICULO_EDITADO', detalle:`${art.id} · ${art.nombre} · $${art.precioUnitario}`, idReferencia:art.id, empleado, resultado:'OK' })
+  if (anterior) {
+    await historicoSeguro(() => registrarCambioPrecioCosto({
+      id: art.id, nombre: art.nombre,
+      precioAnterior: anterior.precio, costoAnterior: anterior.costo,
+      precioNuevo: art.precioUnitario, costoNuevo: art.costoUnitario, quien: empleado,
+    }), art.id, empleado)
+  }
 }
 
 export async function toggleDisponibilidad(rowNum, artId, nuevaDisp, empleado = '') {

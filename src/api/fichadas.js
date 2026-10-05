@@ -109,3 +109,14 @@ export async function registrarFichada(qr) {
 export const iniciarVinculacion = (pin, idUsuario, nombre) => llamar('/api/fichadas/vincular-inicio', { pin, idUsuario, nombre })
 export const listarDispositivos = (pin) => llamar('/api/fichadas/dispositivos', { pin })
 export const darDeBajaDispositivo = (pin, id) => llamar('/api/fichadas/dispositivos', { pin, baja: id })
+
+// ¿Sigue activo este celular? Devuelve null si no se pudo consultar (sin internet).
+export async function estadoCelular(idDispositivo) {
+  try { return (await llamar('/api/fichadas/estado', { idDispositivo })).activo }
+  catch { return null }
+}
+
+// En iPhone, el ícono de la pantalla de inicio tiene datos separados de Safari:
+// hay que vincular desde el ícono, no desde Safari.
+export const esIphone = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+export const esIconoInicio = () => window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone === true

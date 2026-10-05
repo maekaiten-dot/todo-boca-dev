@@ -4,11 +4,11 @@
 import { useEffect, useState } from 'react'
 import QrSvg from '../components/QrSvg.jsx'
 import { CSS_GLOBAL } from '../App.jsx'
-import { leerLlave, vincularCelular, generarQrFichada, sincronizarHora, ahoraServidor, CLAVE_CELULAR, QR_ROTACION_MS } from '../api/fichadas.js'
+import { leerLlave, borrarLlave, vincularCelular, generarQrFichada, sincronizarHora, ahoraServidor, estadoCelular, esIphone, esIconoInicio, CLAVE_CELULAR, QR_ROTACION_MS } from '../api/fichadas.js'
 
 export default function FicharCelular() {
   const tokenUrl = new URLSearchParams(window.location.search).get('v')
-  const [estado, setEstado] = useState('cargando') // cargando | sinVincular | vinculando | listo | error
+  const [estado, setEstado] = useState('cargando') // cargando | sinVincular | vinculando | listo | dadoDeBaja | error
   const [llave, setLlave] = useState(null)
   const [error, setError] = useState('')
 
@@ -17,7 +17,11 @@ export default function FicharCelular() {
       if (!window.crypto?.subtle || !window.indexedDB) { setError('Este navegador no es compatible. Abrí el link con Chrome o Safari.'); setEstado('error'); return }
       await sincronizarHora()
       const guardada = await leerLlave(CLAVE_CELULAR)
-      if (guardada && !tokenUrl) { setLlave(guardada); setEstado('listo') }
+      if (guardada && !tokenUrl) {
+        const activo = await estadoCelular(guardada.idDispositivo)
+        if (activo === false) { await borrarLlave(CLAVE_CELULAR); setLlave(guardada); setEstado('dadoDeBaja'); return }
+        setLlave(guardada); setEstado('listo')
+      }
       else setEstado('sinVincular')
     })()
   }, [])
@@ -40,7 +44,18 @@ export default function FicharCelular() {
         {estado === 'error' && <div style={S.error}>{error}</div>}
 
         {(estado === 'sinVincular' || estado === 'vinculando') && (
-          tokenUrl ? (
+          tokenUrl && esIphone() && !esIconoInicio() ? (
+            <div style={S.card}>
+              <div style={S.titulo}>Antes de vincular</div>
+              <div style={S.muted}>En iPhone hay que vincular desde el ícono de la pantalla de inicio:</div>
+              <div style={S.pasos}>
+                <div>1. Tocá el botón <b>Compartir</b> de Safari (el cuadrado con la flecha).</div>
+                <div>2. Elegí <b>Agregar a inicio</b> y después <b>Agregar</b>.</div>
+                <div>3. Abrí el ícono nuevo de TODO BOCA y tocá <b>Vincular</b> ahí.</div>
+              </div>
+              <div style={S.muted}>Hacelo dentro de los próximos 10 minutos, mientras el código de vinculación siga vigente.</div>
+            </div>
+          ) : tokenUrl ? (
             <div style={S.card}>
               <div style={S.titulo}>Vincular este celular</div>
               <div style={S.muted}>Este va a ser el único celular desde el que vas a poder fichar. Si ya tenías otro vinculado, queda dado de baja.</div>
@@ -55,6 +70,12 @@ export default function FicharCelular() {
           )
         )}
 
+        {estado === 'dadoDeBaja' && (
+          <div style={S.card}>
+            <div style={S.titulo}>Celular desvinculado</div>
+            <div style={S.muted}>{llave?.nombre ? `${llave.nombre}, este` : 'Este'} celular ya no está habilitado para fichar (se vinculó otro o lo dieron de baja). Pedile al admin un QR de vinculación nuevo.</div>
+          </div>
+        )}
         {estado === 'listo' && llave && <QrRotativo llave={llave} />}
       </div>
     </>
@@ -101,6 +122,7 @@ const S = {
   muted: { fontFamily: 'Barlow, sans-serif', fontSize: 14, color: 'var(--muted)', lineHeight: 1.5 },
   error: { fontFamily: 'Barlow, sans-serif', fontSize: 14, color: '#ef4444', lineHeight: 1.5 },
   btn: { width: '100%', padding: 14, background: 'var(--accent)', border: 'none', borderRadius: 10, color: '#000', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 18, letterSpacing: 1, cursor: 'pointer' },
+  pasos: { fontFamily: 'Barlow, sans-serif', fontSize: 14, color: 'var(--text)', lineHeight: 1.6, textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 6 },
   qrBox: { background: '#fff', padding: 10, borderRadius: 12, lineHeight: 0 },
   barra: { width: 260, height: 6, background: 'var(--surface2)', borderRadius: 3, overflow: 'hidden' },
   barraLlena: { height: '100%', background: 'var(--accent)', transition: 'width 0.25s linear' },

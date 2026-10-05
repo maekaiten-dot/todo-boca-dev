@@ -74,7 +74,7 @@ export default function Fichadas({ usuarios = [] }) {
 
       <div style={S.card}>
         <div style={S.subtitulo}>2 · Vincular el celular de una empleada</div>
-        <div style={S.muted}>La empleada escanea este QR con la cámara de su celular y toca "Vincular". Vale una sola vez y por 10 minutos. Si ya tenía otro celular, queda dado de baja.</div>
+        <div style={S.muted}>La empleada escanea este QR con la cámara de su celular y toca "Vincular". En iPhone, primero tiene que agregar la página a la pantalla de inicio y vincular desde ese ícono (la pantalla se lo explica). Vale una sola vez y por 10 minutos. Si ya tenía otro celular, queda dado de baja.</div>
         <select style={S.input} value={empleada} onChange={e => { setEmpleada(e.target.value); setVinculacion(null) }}>
           <option value="">Elegí la empleada…</option>
           {empleadas.map(u => <option key={u.id} value={u.id}>{u.nombre} ({u.id})</option>)}

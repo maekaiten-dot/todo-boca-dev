@@ -12,6 +12,8 @@ import Rotacion from './pages/Rotacion.jsx'
 import GastosCaja from './pages/GastosCaja.jsx'
 import Tutoriales from './pages/Tutoriales.jsx'
 import Conteo from './pages/Conteo.jsx'
+import Fichadas from './pages/Fichadas.jsx'
+import FicharTablet from './components/FicharTablet.jsx'
 import { getArticulos, getUsuarios, registrarLog, calcularStockTodos } from './api/sheets.js'
 
 // Barra inferior: solapas de uso diario. El resto de las solapas de Admin va en el menú "Más".
@@ -28,6 +30,7 @@ const TABS_MAS_ADMIN = [
   { id:'gastos', label:'Gastos fijos', icon:'📌', desc:'Gastos fijos del mes' },
   { id:'conteo', label:'Conteo y stock', icon:'🔢', desc:'Contar, bajas y diferencias' },
   { id:'tutos', label:'Tutoriales', icon:'📘', desc:'Instructivos para el equipo' },
+  { id:'fich', label:'Fichadas', icon:'⏱', desc:'Tablet y celulares para fichar' },
 ]
 
 function MenuMas({ tabs, tabActual, onElegir, onCerrar }) {
@@ -271,6 +274,7 @@ export default function App() {
             <span style={S.logoTodo}>TODO</span><span style={S.logoBoca}>BOCA</span>
           </div>
           <div style={S.headerRight}>
+            <FicharTablet />
             <div style={S.perfilPill}><span style={S.perfilLabel}>{empleadoActual}</span></div>
             {loadingArticulos && <span style={S.loadingPill}>Cargando...</span>}
           </div>
@@ -310,6 +314,9 @@ export default function App() {
           {esAdmin && tabsVisitadas.has('pagos') && (
             <div style={tabStyle('pagos')}><Pagos empleado={empleadoActual} empleadoFijo={empleadoActual} usuarios={usuarios} /></div>
           )}
+          {esAdmin && tabsVisitadas.has('fich') && (
+            <div style={tabStyle('fich')}><Fichadas usuarios={usuarios} /></div>
+          )}
           {esAdmin && tabsVisitadas.has('gastos') && (
             <div style={tabStyle('gastos')}><GastosFijos soloLectura={!esAdrian} /></div>
           )}
@@ -337,7 +344,7 @@ export default function App() {
   )
 }
 
-const CSS_GLOBAL = `
+export const CSS_GLOBAL = `
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   :root { --bg: #021030; --surface: #031a4a; --surface2: #042060; --border: #0d3080; --text: #f0f4ff; --muted: #6a8ccc; --accent: #f5c800; --success: #22c55e; }
   html, body, #root { height: 100%; width: 100%; background: var(--bg); color: var(--text); -webkit-font-smoothing: antialiased; overflow: hidden; }

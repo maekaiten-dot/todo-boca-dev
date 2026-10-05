@@ -2,7 +2,9 @@
 import { useEffect, useRef, useState } from 'react'
 import jsQR from 'jsqr'
 
-export default function BarcodeScanner({ onDetected, onClose }) {
+// onDetected puede devolver { ok, nombre } o una promesa (ej. fichadas, que consultan al servidor).
+// titulo: texto del encabezado · autoCerrarMs: cierra solo tras un resultado ok (0 = no cierra)
+export default function BarcodeScanner({ onDetected, onClose, titulo = 'ESCANEAR QR', autoCerrarMs = 0 }) {
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
   const streamRef = useRef(null)
@@ -117,18 +119,28 @@ export default function BarcodeScanner({ onDetected, onClose }) {
     animFrameRef.current = requestAnimationFrame(scanLoop)
   }
 
-  function handleDetected(valor) {
+  const cerradoRef = useRef(false)
+
+  async function handleDetected(valor) {
     pausedRef.current = true
-    const info = onDetected(valor)
+    let info = onDetected(valor)
+    if (info && typeof info.then === 'function') {
+      setConfirmacion({ ok: null, nombre: 'Verificando…' })
+      try { info = await info } catch (e) { info = { ok: false, nombre: e.message || 'Error' } }
+    }
+    if (cerradoRef.current) return
     setConfirmacion(info)
+    if (info?.ok && autoCerrarMs > 0) { setTimeout(() => { if (!cerradoRef.current) handleClose() }, autoCerrarMs); return }
     setTimeout(() => {
+      if (cerradoRef.current) return
       setConfirmacion(null)
       pausedRef.current = false
       scanLoop()
-    }, 1500)
+    }, info?.duracionMs || 1500)
   }
 
   function handleClose() {
+    cerradoRef.current = true
     pausedRef.current = true
     if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current)
     stopStream()
@@ -139,7 +151,7 @@ export default function BarcodeScanner({ onDetected, onClose }) {
     <div style={S.overlay} onClick={handleClose}>
       <div style={S.box} onClick={e => e.stopPropagation()}>
         <div style={S.header}>
-          <span style={S.title}>ESCANEAR QR</span>
+          <span style={S.title}>{titulo}</span>
           <div style={{display:'flex', alignItems:'center', gap:8}}>
             {usando && (
               <span style={{...S.badge, ...(usando==='native' ? S.badgeNative : S.badgeJsqr)}}>
@@ -159,9 +171,10 @@ export default function BarcodeScanner({ onDetected, onClose }) {
             <div style={S.crosshair} />
             {!confirmacion && <div style={S.hint}>Apuntá el QR al recuadro</div>}
             {confirmacion && (
-              <div style={{...S.confirmBanner, ...(confirmacion.ok ? S.confirmOk : S.confirmError)}}>
-                <div style={S.confirmIcon}>{confirmacion.ok ? '✓' : '✕'}</div>
+              <div style={{...S.confirmBanner, ...(confirmacion.ok === null ? S.confirmPendiente : confirmacion.ok ? S.confirmOk : S.confirmError)}}>
+                <div style={S.confirmIcon}>{confirmacion.ok === null ? '…' : confirmacion.ok ? '✓' : '✕'}</div>
                 <div style={S.confirmNombre}>{confirmacion.nombre}</div>
+                {confirmacion.detalle && <div style={S.confirmDetalle}>{confirmacion.detalle}</div>}
               </div>
             )}
           </div>
@@ -187,6 +200,8 @@ const S = {
   confirmBanner: { position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:12 },
   confirmOk: { background:'rgba(34,197,94,0.92)' },
   confirmError: { background:'rgba(239,68,68,0.92)' },
+  confirmPendiente: { background:'rgba(3,26,74,0.92)' },
+  confirmDetalle: { fontFamily:'Barlow, sans-serif', fontSize:16, color:'#fff', textAlign:'center', padding:'0 20px', opacity:0.95 },
   confirmIcon: { fontSize:64, color:'#fff', lineHeight:1 },
   confirmNombre: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:26, color:'#fff', textAlign:'center', padding:'0 20px' },
   error: { padding:32, textAlign:'center', fontFamily:'Barlow, sans-serif', fontSize:15, color:'#ef4444' },

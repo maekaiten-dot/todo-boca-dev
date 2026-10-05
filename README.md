@@ -46,3 +46,12 @@ src/
 - Los IDs de venta se generan automáticamente con formato VYYMMDD-NNN
 - Los precios vienen de la columna G (PRECIO UNITARIO) de ARTICULOS
 - Solo se muestran artículos con DISPONIBILIDAD distinta de "no"
+
+## Fichadas (ingreso/salida con QR)
+
+- Cada empleada abre `https://<tu-app>/?fichar=1` en **su** celular (conviene "Agregar a pantalla de inicio"). Ahí ve un QR firmado que cambia cada 10 s.
+- La tablet escanea ese QR con el botón **⏱ Fichar** del encabezado.
+- El servidor (`/api/fichadas/*`, funciones de Vercel) verifica la firma del celular, la firma de la tablet, que el QR tenga menos de 30 s y que no se haya usado. Guarda todo, incluso los rechazos con su motivo, en las pestañas `FICHADAS` y `DISPOSITIVOS`, que se crean solas.
+- Admin → Más → **Fichadas**: habilitar la tablet, generar el QR de vinculación de cada celular y dar de baja dispositivos.
+
+**Configuración (una vez):** crear una planilla nueva y una cuenta de servicio nueva en Google Cloud, compartir la planilla solo con esa cuenta, y cargar en Vercel las variables `FICHADAS_*` de `.env.example`. Para probar en local con las funciones usar `npx vercel dev` (`npm run dev` no levanta `/api`).

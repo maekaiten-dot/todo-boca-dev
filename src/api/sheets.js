@@ -645,7 +645,11 @@ async function registrarAltaEnHistorico(art, quien = '') {
 }
 
 // El histórico nunca frena el guardado del artículo: si falla, queda anotado en el LOG
+// DESACTIVADO hasta revisar cómo ARTICULOS lee los precios de esta hoja
+const HISTORICO_ACTIVO = false
+
 async function historicoSeguro(fn, id, empleado) {
+  if (!HISTORICO_ACTIVO) return
   try { await fn() }
   catch (e) {
     console.error(e)

@@ -138,6 +138,10 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
     setTimeout(() => setToast(null), 3000)
   }
 
+  // Sin costo = costo vacío o en $0 (solo se marca para administradores)
+  const sinCosto = a => (Number(String(a.costoUnitario ?? '').replace(/[$\s.]/g,'').replace(',','.')) || 0) <= 0
+  const [soloSinCosto, setSoloSinCosto] = useState(false)
+
   const normalizr = str => str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
   const articulosFiltrados = articulos
     .filter(a => esAdmin || a.disponibilidad?.toUpperCase() === 'ACTIVO')
@@ -146,6 +150,7 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
       if (filtroDisp === 'INACTIVO') return a.disponibilidad?.toUpperCase() !== 'ACTIVO'
       return true
     })
+    .filter(a => !(esAdmin && soloSinCosto) || sinCosto(a))
     .filter(a => {
       if (!busqueda.trim()) return true
       const q = normalizr(busqueda)
@@ -190,6 +195,11 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
             <button key={f} style={{...S.dispTab, ...(filtroDisp===f ? S.dispTabActive : {})}} onClick={() => setFiltroDisp(f)}>{f}</button>
           ))}
         </div>}
+        {esAdmin && (
+          <button style={{...S.dispTab, ...S.sinCostoTab, ...(soloSinCosto ? S.sinCostoTabActivo : {})}} onClick={() => setSoloSinCosto(v => !v)} aria-pressed={soloSinCosto}>
+            SIN COSTO ({articulos.filter(a => sinCosto(a) && (filtroDisp === 'TODOS' || (filtroDisp === 'ACTIVO') === (a.disponibilidad?.toUpperCase() === 'ACTIVO'))).length})
+          </button>
+        )}
       </div>
 
       <div style={S.conteo}>{articulosFiltrados.length} artículos</div>
@@ -220,7 +230,10 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
                     </div>
                   </td>
                   <td style={{...S.td, ...S.tdSku}}>{art.id}</td>
-                  <td style={{...S.td, ...S.tdNombre}}>{art.nombre}</td>
+                  <td style={{...S.td, ...S.tdNombre}}>
+                    {art.nombre}
+                    {esAdmin && sinCosto(art) && <div style={S.avisoSinCosto}>⚠ Sin costo unitario cargado</div>}
+                  </td>
                   <td style={S.td}>${Number(String(art.precioUnitario).replace(/[$\s.]/g,'').replace(',','.')||0).toLocaleString('es-AR')}</td>
                   {esAdmin && <td style={{...S.td, color:'var(--muted)'}}>${Number(String(art.costoUnitario).replace(/[$\s.]/g,'').replace(',','.')||0).toLocaleString('es-AR')}</td>}
                   <td style={{...S.td, textAlign:'center'}}>
@@ -459,4 +472,7 @@ const S = {
   modalFooter: { display:'flex', gap:10, padding:'14px 24px', borderTop:'1px solid var(--border)', flexShrink:0 },
   cancelBtn: { flex:1, padding:'13px', background:'none', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--muted)', fontFamily:'Barlow, sans-serif', fontSize:15, cursor:'pointer' },
   saveBtn: { flex:2, padding:'13px', background:'var(--accent)', border:'none', borderRadius:8, color:'#000', fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:17, cursor:'pointer', letterSpacing:1 },
+  avisoSinCosto: { fontFamily:'Barlow, sans-serif', fontSize:12, fontWeight:600, color:'#f59e0b', marginTop:3 },
+  sinCostoTab: { borderColor:'rgba(245,158,11,0.5)', color:'#f59e0b' },
+  sinCostoTabActivo: { background:'rgba(245,158,11,0.15)', borderColor:'#f59e0b', color:'#f59e0b' },
 }

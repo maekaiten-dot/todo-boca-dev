@@ -17,12 +17,17 @@ export default function FicharCelular() {
       if (!window.crypto?.subtle || !window.indexedDB) { setError('Este navegador no es compatible. Abrí el link con Chrome o Safari.'); setEstado('error'); return }
       await sincronizarHora()
       const guardada = await leerLlave(CLAVE_CELULAR)
-      if (guardada && !tokenUrl) {
+      if (guardada) {
         const activo = await estadoCelular(guardada.idDispositivo)
-        if (activo === false) { await borrarLlave(CLAVE_CELULAR); setLlave(guardada); setEstado('dadoDeBaja'); return }
-        setLlave(guardada); setEstado('listo')
+        if (activo !== false) {
+          // Ya vinculado: mostrar el QR aunque el link (o el acceso directo) traiga un código de vinculación viejo
+          if (tokenUrl) window.history.replaceState(null, '', `${window.location.pathname}?fichar=1`)
+          setLlave(guardada); setEstado('listo'); return
+        }
+        await borrarLlave(CLAVE_CELULAR)
+        if (!tokenUrl) { setLlave(guardada); setEstado('dadoDeBaja'); return }
       }
-      else setEstado('sinVincular')
+      setEstado('sinVincular')
     })()
   }, [])
 

@@ -98,7 +98,7 @@ export default function Conteo({ articulos = [], usuarios = [], perfilNombre = '
   const estado = datos?.estado || {}
   const clases = datos?.clases || {}
   const listaHoy = useMemo(() => datos ? armarListaConteoDelDia(articulos, estado, clases) : [], [datos, articulos])
-  const sinContar = useMemo(() => articulos.filter(a => !estado[a.id]?.contado && !resultados[a.id]?.guardado).sort((x, y) => x.nombre.localeCompare(y.nombre)), [datos, articulos, resultados])
+  const sinContar = useMemo(() => articulos.filter(a => !estado[a.id]?.contado && !resultados[a.id]?.guardado).sort((x, y) => (!x.nombre - !y.nombre) || x.nombre.localeCompare(y.nombre)), [datos, articulos, resultados])
   const contadosTotal = articulos.length - sinContar.length
   const pendientesHoy = listaHoy.filter(a => !a.contadoHoy && !resultados[a.id]?.guardado).length
 

@@ -54,4 +54,4 @@ src/
 - El servidor (`/api/fichadas/*`, funciones de Vercel) verifica la firma del celular, la firma de la tablet, que el QR tenga menos de 30 s y que no se haya usado. Guarda todo, incluso los rechazos con su motivo, en las pestañas `FICHADAS` y `DISPOSITIVOS`, que se crean solas.
 - Admin → Más → **Fichadas**: habilitar la tablet, generar el QR de vinculación de cada celular y dar de baja dispositivos.
 
-**Configuración (una vez):** crear una planilla nueva y una cuenta de servicio nueva en Google Cloud, compartir la planilla solo con esa cuenta, y cargar en Vercel las variables `FICHADAS_*` de `.env.example`. Para probar en local con las funciones usar `npx vercel dev` (`npm run dev` no levanta `/api`).
+**Configuración (una vez):** cargar en Vercel `FICHADAS_SECRET` y `FICHADAS_ADMIN_PIN`. Por defecto las fichadas se guardan en la misma planilla de la app; para más seguridad se puede usar una planilla y cuenta de servicio propias con `FICHADAS_SHEET_ID`, `FICHADAS_GOOGLE_CLIENT_EMAIL` y `FICHADAS_GOOGLE_PRIVATE_KEY`. Para probar en local con las funciones usar `npx vercel dev` (`npm run dev` no levanta `/api`).

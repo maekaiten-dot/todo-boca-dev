@@ -7,11 +7,13 @@ const SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 let _token = null
 let _tokenExp = 0
 
+// Si no hay variables FICHADAS_* propias, usa la misma planilla y cuenta de la app (VITE_*).
 function cfg() {
-  const sheetId = process.env.FICHADAS_SHEET_ID
-  const email = process.env.FICHADAS_GOOGLE_CLIENT_EMAIL
-  const key = process.env.FICHADAS_GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n')
-  if (!sheetId || !email || !key) throw new Error('Faltan variables FICHADAS_SHEET_ID / FICHADAS_GOOGLE_CLIENT_EMAIL / FICHADAS_GOOGLE_PRIVATE_KEY')
+  const env = process.env
+  const sheetId = env.FICHADAS_SHEET_ID || env.VITE_SHEET_ID
+  const email = env.FICHADAS_GOOGLE_CLIENT_EMAIL || env.VITE_GOOGLE_CLIENT_EMAIL
+  const key = (env.FICHADAS_GOOGLE_PRIVATE_KEY || env.VITE_GOOGLE_PRIVATE_KEY)?.replace(/\\n/g, '\n')
+  if (!sheetId || !email || !key) throw new Error('Faltan las variables de Google Sheets (VITE_SHEET_ID / VITE_GOOGLE_CLIENT_EMAIL / VITE_GOOGLE_PRIVATE_KEY)')
   return { sheetId, email, key }
 }
 

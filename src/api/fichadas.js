@@ -120,3 +120,10 @@ export async function estadoCelular(idDispositivo) {
 // hay que vincular desde el ícono, no desde Safari.
 export const esIphone = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
 export const esIconoInicio = () => window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone === true
+
+// Pide al navegador que no borre estos datos por falta de espacio (Chrome lo concede
+// a los sitios agregados a la pantalla de inicio o de uso frecuente).
+export async function pedirAlmacenamientoPersistente() {
+  try { if (navigator.storage?.persist && !(await navigator.storage.persisted())) await navigator.storage.persist() }
+  catch { /* no soportado */ }
+}

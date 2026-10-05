@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react'
 import QrSvg from '../components/QrSvg.jsx'
 import { CSS_GLOBAL } from '../App.jsx'
-import { leerLlave, borrarLlave, vincularCelular, generarQrFichada, sincronizarHora, ahoraServidor, estadoCelular, esIphone, esIconoInicio, CLAVE_CELULAR, QR_ROTACION_MS } from '../api/fichadas.js'
+import { leerLlave, borrarLlave, vincularCelular, generarQrFichada, sincronizarHora, ahoraServidor, estadoCelular, pedirAlmacenamientoPersistente, esIphone, esIconoInicio, CLAVE_CELULAR, QR_ROTACION_MS } from '../api/fichadas.js'
 
 export default function FicharCelular() {
   const tokenUrl = new URLSearchParams(window.location.search).get('v')
@@ -22,6 +22,7 @@ export default function FicharCelular() {
         if (activo !== false) {
           // Ya vinculado: mostrar el QR aunque el link (o el acceso directo) traiga un código de vinculación viejo
           if (tokenUrl) window.history.replaceState(null, '', `${window.location.pathname}?fichar=1`)
+          pedirAlmacenamientoPersistente()
           setLlave(guardada); setEstado('listo'); return
         }
         await borrarLlave(CLAVE_CELULAR)
@@ -36,6 +37,7 @@ export default function FicharCelular() {
     try {
       const datos = await vincularCelular(tokenUrl)
       window.history.replaceState(null, '', `${window.location.pathname}?fichar=1`)
+      pedirAlmacenamientoPersistente()
       setLlave(datos); setEstado('listo')
     } catch (e) { setError(e.message); setEstado('sinVincular') }
   }

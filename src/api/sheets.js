@@ -576,23 +576,15 @@ const HOJA_HIST = 'HISTORICO DE PRECIOS Y COSTOS'
 const ENCABEZADOS_HIST = ['ID ARTICULO', 'NOMBRE', 'VIGENTE DESDE', 'VIGENTE HASTA', 'PRECIO UNITARIO', 'COSTO UNITARIO', 'CAMBIÓ', 'QUIÉN LO CAMBIÓ']
 let _histFormatoOk = false
 
-// Pasa la hoja del formato viejo (A:ID B:NOMBRE C:FECHA VIGENCIA D:PRECIO E:COSTO) al nuevo.
-// Las filas del 22/09 quedan como "vigente desde esa fecha, hasta: vacío". Las filas sin ID se descartan.
-// Las columnas I a K (restos de stock copiados de ARTICULOS) se vacían: al reordenar las filas quedarían desalineadas.
+// Solo verifica que la hoja tenga el formato con VIGENTE DESDE / HASTA. Nunca mueve ni borra filas:
+// si el encabezado no coincide, no escribe nada (el error queda en el LOG como ERROR_HISTORICO).
 async function asegurarFormatoHistorico() {
   if (_histFormatoOk) return
-  const data = await sheetsGet(`${HOJA_HIST}!A1:K`)
-  const rows = data.values || []
-  const header = (rows[0] || []).map(h => String(h || '').trim().toUpperCase())
-  if (header[2] === 'VIGENTE DESDE') { _histFormatoOk = true; return }
-  if (header[2] !== 'FECHA VIGENCIA' && rows.length > 1) throw new Error('HISTORICO_FORMATO_DESCONOCIDO')
-  const nuevas = rows.slice(1)
-    .filter(r => String(r[0] || '').trim())
-    .map(r => [r[0], r[1] || '', `'${r[2] || ''}`, '', parsePrecio(r[3]), parsePrecio(r[4]), '', '', '', '', ''])
-  const vacias = Math.max(0, rows.length - 1 - nuevas.length)
-  const valores = [[...ENCABEZADOS_HIST, '', '', ''], ...nuevas, ...Array.from({ length: vacias }, () => Array(11).fill(''))]
-  await sheetsUpdate(`${HOJA_HIST}!A1:K${valores.length}`, valores)
-  await registrarLog({ accion: 'HISTORICO_MIGRADO', detalle: `${nuevas.length} filas pasadas al formato con VIGENTE DESDE / HASTA`, resultado: 'OK' })
+  const data = await sheetsGet(`${HOJA_HIST}!A1:H1`)
+  const header = ((data.values || [])[0] || []).map(h => String(h || '').trim().toUpperCase())
+  if (header[0] !== 'ID ARTICULO' || header[2] !== 'VIGENTE DESDE' || header[3] !== 'VIGENTE HASTA' || header[4] !== 'PRECIO UNITARIO' || header[5] !== 'COSTO UNITARIO') {
+    throw new Error('HISTORICO_FORMATO_DISTINTO: ' + header.join(' | '))
+  }
   _histFormatoOk = true
 }
 
@@ -645,8 +637,8 @@ async function registrarAltaEnHistorico(art, quien = '') {
 }
 
 // El histórico nunca frena el guardado del artículo: si falla, queda anotado en el LOG
-// DESACTIVADO hasta revisar cómo ARTICULOS lee los precios de esta hoja
-const HISTORICO_ACTIVO = false
+// Interruptor del histórico (ARTICULOS ya no tiene fórmulas que lean esta hoja)
+const HISTORICO_ACTIVO = true
 
 async function historicoSeguro(fn, id, empleado) {
   if (!HISTORICO_ACTIVO) return

@@ -39,6 +39,7 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
   const [toast, setToast] = useState(null)
   const [stockMap, setStockMap] = useState({}) // articuloId -> stockActualCalculado
   const [loadingStock, setLoadingStock] = useState(false)
+  const [stockContado, setStockContado] = useState({}) // articuloId -> se contó alguna vez
   const fileInputCamara = useRef(null)
   const fileInputGaleria = useRef(null)
 
@@ -53,9 +54,10 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
       // Calcular stock dinámico en background
       setLoadingStock(true)
       calcularStockTodos(data).then(conStock => {
-        const map = {}
-        conStock.forEach(a => { map[a.id] = a.stockActualCalculado })
+        const map = {}, contados = {}
+        conStock.forEach(a => { map[a.id] = a.stockActualCalculado; contados[a.id] = a.stockContado })
         setStockMap(map)
+        setStockContado(contados)
         setLoadingStock(false)
       }).catch(() => setLoadingStock(false))
     } catch (e) {
@@ -248,6 +250,7 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
                           {stockMap[art.id] ?? '—'}
                         </span>
                     }
+                    {!loadingStock && stockContado[art.id] === false && <div style={{fontFamily:'Barlow, sans-serif', fontSize:11, color:'var(--muted)'}} title="Todavía no se contó: el número no es confiable">sin contar</div>}
                   </td>
                   <td style={S.td}>
                     {esAdmin

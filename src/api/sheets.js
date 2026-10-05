@@ -736,20 +736,208 @@ export async function anularIngreso(rowNum, idIngreso, empleado = '') {
   await registrarLog({ accion:'INGRESO_ANULADO', detalle:`Ingreso ${idIngreso} anulado`, idReferencia:idIngreso, empleado, resultado:'OK' })
 }
 
+// ── Stock: conteos, bajas y cálculo ──────────────────────────────────────────
+// El último CONTEO de cada artículo es su punto de partida (con fecha y hora). Desde ahí:
+//   stock = contado + ingresos posteriores − ventas posteriores − bajas posteriores
+// Si el artículo nunca se contó: STOCK INICIAL (ARTICULOS) + todos los ingresos − todas las ventas − bajas,
+// y se marca como "sin contar" (no confiable).
+// Hoja MOVIMIENTOS STOCK:
+//   A:ID  B:FECHA  C:HORA  D:TIPO (CONTEO/BAJA)  E:ID ARTICULO  F:NOMBRE  G:CANTIDAD (contada, o unidades dadas de baja)
+//   H:STOCK ESPERADO  I:DIFERENCIA  J:COSTO UNITARIO  K:VALOR DIFERENCIA  L:MOTIVO  M:EMPLEADO  N:ANULADO  O:NOTAS
+const HOJA_MOV = 'MOVIMIENTOS STOCK'
+const ENCABEZADOS_MOV = ['ID', 'FECHA', 'HORA', 'TIPO', 'ID ARTICULO', 'NOMBRE', 'CANTIDAD', 'STOCK ESPERADO', 'DIFERENCIA', 'COSTO UNITARIO', 'VALOR DIFERENCIA', 'MOTIVO', 'EMPLEADO', 'ANULADO', 'NOTAS']
+let _hojaMovLista = false
+
+// Frecuencia de conteo según la clase del artículo (ventas de los últimos 90 días, en $):
+// A = el 80% de la facturación · B = el 15% siguiente · C = el resto (incluye lo que no se vendió)
+export const FRECUENCIA_CONTEO = { A: 14, B: 30, C: 90 }
+export const ARTICULOS_POR_DIA = 15
+export const MOTIVOS_BAJA = ['Rotura / daño', 'Faltante / robo', 'Uso interno', 'Regalo / canje', 'Otro']
+
+// "5/10/2026" + "14:32:10" → ms (hora de Argentina). También acepta "2026-10-05".
+export function fechaHoraAMsAR(fecha, hora) {
+  const f = String(fecha || '').trim().replace(/^'/, '')
+  let d, m, a
+  if (/^\d{4}-\d{1,2}-\d{1,2}/.test(f)) { [a, m, d] = f.slice(0, 10).split('-').map(Number) }
+  else { [d, m, a] = f.split(' ')[0].split('/').map(Number) }
+  if (!d || !m || !a) return 0
+  const hh = String(hora || '').trim() || (f.includes(' ') ? f.split(' ')[1] : '')
+  const [h = 0, mi = 0, se = 0] = String(hh || '0:0:0').split(':').map(n => Number(n) || 0)
+  return Date.UTC(a, m - 1, d, h + 3, mi, se) // UTC-3
+}
+
+async function asegurarHojaMovimientos() {
+  if (_hojaMovLista) return
+  const token = await getAccessToken()
+  const metaRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}?fields=sheets.properties.title`, { headers: { Authorization: `Bearer ${token}` } })
+  if (!metaRes.ok) throw new Error(`Sheets META error: ${metaRes.status}`)
+  const meta = await metaRes.json()
+  if (!(meta.sheets || []).some(s => s.properties?.title === HOJA_MOV)) {
+    const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}:batchUpdate`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requests: [{ addSheet: { properties: { title: HOJA_MOV } } }] }),
+    })
+    if (!res.ok) throw new Error(`Sheets ADD SHEET error: ${res.status}`)
+    await sheetsUpdate(`${HOJA_MOV}!A1:O1`, [ENCABEZADOS_MOV])
+  }
+  _hojaMovLista = true
+}
+
+function mapMovimiento(r) {
+  return {
+    id: r[0] || '', fecha: r[1] || '', hora: r[2] || '', tipo: String(r[3] || '').toUpperCase(),
+    articuloId: r[4] || '', nombre: r[5] || '', cantidad: Number(r[6]) || 0,
+    esperado: r[7] === '' || r[7] == null ? null : Number(r[7]) || 0,
+    diferencia: Number(r[8]) || 0, costoUnitario: parsePrecio(r[9]), valorDiferencia: Number(String(r[10] || '0').replace(/[$\s.]/g, '').replace(',', '.')) || 0,
+    motivo: r[11] || '', empleado: r[12] || '', anulado: r[13] === 'TRUE' || r[13] === true, notas: r[14] || '',
+    ms: fechaHoraAMsAR(r[1], r[2]),
+  }
+}
+
+async function getMovimientosRows() {
+  try { const d = await sheetsGet(`${HOJA_MOV}!A2:O`); return (d.values || []).filter(r => r[0]).map(mapMovimiento) }
+  catch (e) { if (String(e.message).includes('400')) return []; throw e }
+}
+
+// Lee todo lo necesario para calcular stock (ventas, ingresos y movimientos)
+export async function getDatosStock() {
+  const [dv, di, movs] = await Promise.all([sheetsGet('DETALLE DE VENTAS!A2:U'), sheetsGet('INGRESOS!A2:K'), getMovimientosRows()])
+  const ventas = (dv.values || []).filter(r => r[0] && r[6] && r[20] !== 'TRUE')
+    .map(r => ({ id: r[6], cant: Number(r[9]) || 0, ms: fechaHoraAMsAR(r[2], r[3]), total: parsePrecio(r[18]) || parsePrecio(r[11]) }))
+  const ingresos = (di.values || []).filter(r => r[0] && r[3] && r[10] !== 'TRUE')
+    .map(r => ({ id: r[3], cant: Number(r[5]) || 0, ms: fechaHoraAMsAR(r[1], r[2]) }))
+  return { ventas, ingresos, movimientos: movs }
+}
+
+// Cálculo puro (sin leer la planilla): devuelve { [id]: { stock, contado, ultimoConteoMs, ultimoConteo } }
+export function calcularStockDesdeDatos(articulos, { ventas, ingresos, movimientos }) {
+  const ultimoConteo = {}
+  movimientos.forEach(m => {
+    if (m.anulado || m.tipo !== 'CONTEO') return
+    const u = ultimoConteo[m.articuloId]
+    if (!u || m.ms >= u.ms) ultimoConteo[m.articuloId] = m
+  })
+  const out = {}
+  articulos.forEach(a => { out[a.id] = { stock: 0, contado: false, ultimoConteoMs: 0, ultimoConteo: null, base: Number(a.stockInicial) || 0 } })
+  Object.entries(out).forEach(([id, o]) => { const c = ultimoConteo[id]; if (c) { o.contado = true; o.ultimoConteoMs = c.ms; o.ultimoConteo = c; o.base = c.cantidad } })
+  const desde = id => out[id]?.ultimoConteoMs || -Infinity
+  ingresos.forEach(x => { const o = out[x.id]; if (o && x.ms > desde(x.id)) o.base += x.cant })
+  ventas.forEach(x => { const o = out[x.id]; if (o && x.ms > desde(x.id)) o.base -= x.cant })
+  movimientos.forEach(m => { const o = out[m.articuloId]; if (o && !m.anulado && m.tipo === 'BAJA' && m.ms > desde(m.articuloId)) o.base -= m.cantidad })
+  Object.values(out).forEach(o => { o.stock = o.base; delete o.base })
+  return out
+}
+
+// Clase A/B/C por facturación de los últimos 90 días
+export function calcularClasesABC(articulos, ventas, ahoraMs = Date.now()) {
+  const desde = ahoraMs - 90 * 86400000
+  const fact = {}
+  ventas.forEach(v => { if (v.ms >= desde) fact[v.id] = (fact[v.id] || 0) + v.total })
+  const ids = articulos.map(a => a.id).sort((x, y) => (fact[y] || 0) - (fact[x] || 0))
+  const total = ids.reduce((s, id) => s + (fact[id] || 0), 0)
+  const clase = {}
+  let acum = 0
+  ids.forEach(id => {
+    const f = fact[id] || 0
+    if (f <= 0 || total <= 0) { clase[id] = 'C'; return }
+    acum += f
+    clase[id] = acum - f < 0.8 * total ? 'A' : acum - f < 0.95 * total ? 'B' : 'C'
+  })
+  return clase
+}
+
+// Lista de conteo del día: los más atrasados según su frecuencia. Estable durante el día:
+// se calcula con los conteos de ANTES de hoy, y los contados hoy aparecen como hechos.
+export function armarListaConteoDelDia(articulos, estadoStock, clases, ahoraMs = Date.now(), cantidad = ARTICULOS_POR_DIA) {
+  const hoyAR = new Date(ahoraMs - 3 * 3600000); hoyAR.setUTCHours(0, 0, 0, 0)
+  const inicioHoy = hoyAR.getTime() + 3 * 3600000
+  const prioridad = a => {
+    const e = estadoStock[a.id] || {}
+    const ultimoAntesDeHoy = e.ultimoConteoMs && e.ultimoConteoMs < inicioHoy ? e.ultimoConteoMs : (e.ultimoConteoAnteriorMs || 0)
+    if (!ultimoAntesDeHoy) return 1e6 + (e.stock < 0 ? 1 : 0)
+    const dias = (inicioHoy - ultimoAntesDeHoy) / 86400000
+    return dias / FRECUENCIA_CONTEO[clases[a.id] || 'C'] + (e.stock < 0 ? 0.5 : 0)
+  }
+  const candidatos = articulos.map(a => ({ a, p: prioridad(a) })).filter(x => x.p >= 1)
+  candidatos.sort((x, y) => y.p - x.p || x.a.nombre.localeCompare(y.a.nombre))
+  return candidatos.slice(0, cantidad).map(x => ({ ...x.a, contadoHoy: (estadoStock[x.a.id]?.ultimoConteoMs || 0) >= inicioHoy }))
+}
+
+// Estado completo para la solapa Conteo
+export async function getEstadoStock(articulos) {
+  const datos = await getDatosStock()
+  const estado = calcularStockDesdeDatos(articulos, datos)
+  // Para que la lista del día no cambie al contar: guardamos también el conteo anterior al de hoy
+  const conteosPorArt = {}
+  datos.movimientos.forEach(m => { if (!m.anulado && m.tipo === 'CONTEO') (conteosPorArt[m.articuloId] ||= []).push(m.ms) })
+  Object.entries(conteosPorArt).forEach(([id, lista]) => {
+    if (!estado[id]) return
+    lista.sort((x, y) => x - y)
+    const hoyAR = new Date(Date.now() - 3 * 3600000); hoyAR.setUTCHours(0, 0, 0, 0)
+    const inicioHoy = hoyAR.getTime() + 3 * 3600000
+    estado[id].ultimoConteoAnteriorMs = [...lista].reverse().find(ms => ms < inicioHoy) || 0
+  })
+  const clases = calcularClasesABC(articulos, datos.ventas)
+  return { estado, clases, movimientos: datos.movimientos }
+}
+
+function nuevoIdMovimiento(dt, rows) {
+  const prefix = `M${String(dt.raw.getFullYear()).slice(2)}${String(dt.raw.getMonth()+1).padStart(2,'0')}${String(dt.raw.getDate()).padStart(2,'0')}`
+  const ids = new Set(rows.map(r => r.id).filter(id => id.startsWith(prefix)))
+  let seq = ids.size + 1
+  while (ids.has(`${prefix}-${String(seq).padStart(3,'0')}`)) seq++
+  return `${prefix}-${String(seq).padStart(3,'0')}`
+}
+
+// Conteo de un artículo. Calcula el stock esperado con los datos frescos de la planilla.
+// Si no coincide y todavía no se recontó, NO guarda: devuelve { necesitaRecuento: true } para pedir
+// que se cuente de nuevo. El segundo conteo se guarda siempre (con el primero en NOTAS).
+export async function registrarConteo({ articulo, cantidad, empleado = '', primerConteo = null }) {
+  const contado = Math.max(0, Math.round(Number(cantidad) || 0))
+  await asegurarHojaMovimientos()
+  const datos = await getDatosStock()
+  const esperado = calcularStockDesdeDatos([articulo], datos)[articulo.id].stock
+  const diferencia = contado - esperado
+  if (diferencia !== 0 && primerConteo == null) return { necesitaRecuento: true, guardado: false }
+  const dt = getArgentinaDate()
+  const id = nuevoIdMovimiento(dt, datos.movimientos)
+  const costo = Number(articulo.costoUnitario) || 0
+  const notas = primerConteo != null ? `Recontado (1er conteo: ${primerConteo})` : ''
+  await sheetsAppend(`${HOJA_MOV}!A1`, [[id, `'${dt.fecha}`, `'${dt.hora}`, 'CONTEO', articulo.id, articulo.nombre, contado, esperado, diferencia, costo, Math.round(diferencia * costo), '', empleado, 'FALSE', notas]])
+  await registrarLog({ accion: 'STOCK_CONTEO', detalle: `${articulo.id} · contado ${contado} · esperado ${esperado} · dif ${diferencia}`, idReferencia: id, empleado, resultado: 'OK' })
+  return { guardado: true, id, esperado, diferencia }
+}
+
+export async function registrarBaja({ articulo, cantidad, motivo, detalle = '', empleado = '' }) {
+  const unidades = Math.max(1, Math.round(Number(cantidad) || 0))
+  await asegurarHojaMovimientos()
+  const movs = await getMovimientosRows()
+  const dt = getArgentinaDate()
+  const id = nuevoIdMovimiento(dt, movs)
+  const costo = Number(articulo.costoUnitario) || 0
+  await sheetsAppend(`${HOJA_MOV}!A1`, [[id, `'${dt.fecha}`, `'${dt.hora}`, 'BAJA', articulo.id, articulo.nombre, unidades, '', -unidades, costo, -Math.round(unidades * costo), motivo, empleado, 'FALSE', detalle]])
+  await registrarLog({ accion: 'STOCK_BAJA', detalle: `${articulo.id} · ${unidades} u. · ${motivo}${detalle ? ` (${detalle})` : ''}`, idReferencia: id, empleado, resultado: 'OK' })
+  return id
+}
+
+export async function anularMovimientoStock(id, empleado = '') {
+  const data = await sheetsGet(`${HOJA_MOV}!A2:A`)
+  const idx = (data.values || []).findIndex(r => r[0] === id)
+  if (idx < 0) throw new Error('No se encontró el movimiento')
+  await sheetsUpdate(`${HOJA_MOV}!N${idx + 2}`, [['TRUE']])
+  await registrarLog({ accion: 'STOCK_MOVIMIENTO_ANULADO', detalle: `Movimiento ${id} anulado`, idReferencia: id, empleado, resultado: 'OK' })
+}
+
 export async function calcularStockActual(articuloId, stockInicial) {
-  const [dataIngresos, dataVentas] = await Promise.all([sheetsGet('INGRESOS!A2:K'), sheetsGet('DETALLE DE VENTAS!A2:U')])
-  const ingresos = (dataIngresos.values||[]).filter(r=>r[3]===articuloId&&r[10]!=='TRUE').reduce((s,r)=>s+(Number(r[5])||0),0)
-  const ventas = (dataVentas.values||[]).filter(r=>r[6]===articuloId&&r[20]!=='TRUE').reduce((s,r)=>s+(Number(r[9])||0),0)
-  return (Number(stockInicial)||0)+ingresos-ventas
+  const datos = await getDatosStock()
+  return calcularStockDesdeDatos([{ id: articuloId, stockInicial }], datos)[articuloId].stock
 }
 
 export async function calcularStockTodos(articulos) {
-  const [dataIngresos, dataVentas] = await Promise.all([sheetsGet('INGRESOS!A2:K'), sheetsGet('DETALLE DE VENTAS!A2:U')])
-  const ingresosPorArt = {}
-  ;(dataIngresos.values||[]).filter(r=>r[0]&&r[10]!=='TRUE').forEach(r=>{const id=r[3];if(id)ingresosPorArt[id]=(ingresosPorArt[id]||0)+(Number(r[5])||0)})
-  const ventasPorArt = {}
-  ;(dataVentas.values||[]).filter(r=>r[0]&&r[20]!=='TRUE').forEach(r=>{const id=r[6];if(id)ventasPorArt[id]=(ventasPorArt[id]||0)+(Number(r[9])||0)})
-  return articulos.map(art=>({...art, stockActualCalculado:(Number(art.stockInicial)||0)+(ingresosPorArt[art.id]||0)-(ventasPorArt[art.id]||0)}))
+  const datos = await getDatosStock()
+  const estado = calcularStockDesdeDatos(articulos, datos)
+  return articulos.map(art => ({ ...art, stockActualCalculado: estado[art.id]?.stock ?? 0, stockContado: !!estado[art.id]?.contado, ultimoConteoMs: estado[art.id]?.ultimoConteoMs || 0 }))
 }
 
 export async function getPagos() {

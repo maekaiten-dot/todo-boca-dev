@@ -83,3 +83,7 @@ export async function asegurarHoja(titulo, encabezados) {
   if (!filas || filas.length === 0) await sheetsUpdate(`${titulo}!A1`, [encabezados])
   _hojasOk.add(titulo)
 }
+
+export async function sheetsClear(range) {
+  return api(`/values/${encodeURIComponent(range)}:clear`, { method: 'POST', body: {} })
+}

@@ -127,3 +127,10 @@ export async function pedirAlmacenamientoPersistente() {
   try { if (navigator.storage?.persist && !(await navigator.storage.persisted())) await navigator.storage.persist() }
   catch { /* no soportado */ }
 }
+
+// PIN de fichadas recordado mientras la app esté abierta (no se guarda en el dispositivo)
+let _pin = ''
+export const getPinFichadas = () => _pin
+export const setPinFichadas = (p) => { _pin = p }
+
+export const asistencia = (pin, accion, extra = {}) => llamar('/api/fichadas/asistencia', { pin, accion, ...extra })

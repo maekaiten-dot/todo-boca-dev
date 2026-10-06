@@ -947,7 +947,9 @@ export async function getPagos() {
     rowNum:idx+2, idPago:r[0]||'', tipo:r[1]||'',
     fechaIngreso:r[2]||'', fechaPago:r[3]||'',
     articuloId:r[4]||'', articuloNombre:r[5]||'',
-    cantidad:Number(r[6])||0, costoUnitario:parsePrecio(r[7]), costoTotal:parsePrecio(r[8]),
+    cantidad:Number(r[6])||0, costoUnitario:parsePrecio(r[7]),
+    // Si COSTO TOTAL quedó vacío o en 0 (pagos cargados con el bug del "$"), se recalcula
+    costoTotal:parsePrecio(r[8]) || (Number(r[6])||0) * parsePrecio(r[7]),
     descripcion:r[9]||'', proveedor:r[10]||'', montoPagado:parsePrecio(r[11]),
     pagado:r[12]==='TRUE'||r[12]===true, empleado:r[13]||'', anulado:r[14]==='TRUE'||r[14]===true,
   }))
@@ -960,11 +962,13 @@ export async function registrarPago({ tipo, fechaIngreso, fechaPago, articuloId,
   const prefix = `P${String(dt.raw.getFullYear()).slice(2)}${String(dt.raw.getMonth()+1).padStart(2,'0')}${String(dt.raw.getDate()).padStart(2,'0')}`
   const hoy = rows.filter(r=>r[0]?.startsWith(prefix))
   const idPago = `${prefix}-${String(hoy.length+1).padStart(3,'0')}`
-  const costoTotal = (Number(cantidad)||0)*(Number(costoUnitario)||0)
-  const row = [idPago,tipo||'GASTO',fechaIngreso?`'${fechaIngreso}`:'',fechaPago?`'${fechaPago}`:'',articuloId||'',articuloNombre||'',cantidad||0,costoUnitario||0,costoTotal,descripcion||'',proveedor||'',montoPagado||0,pagado?'TRUE':'FALSE',empleado||'','FALSE']
+  // Montos como número limpio: acepta "$8.000", "8.000" o "8000"
+  const cant = Number(cantidad)||0, cu = parsePrecio(costoUnitario), mp = parsePrecio(montoPagado)
+  const costoTotal = cant*cu
+  const row = [idPago,tipo||'GASTO',fechaIngreso?`'${fechaIngreso}`:'',fechaPago?`'${fechaPago}`:'',articuloId||'',articuloNombre||'',cant,cu,costoTotal,descripcion||'',proveedor||'',mp,pagado?'TRUE':'FALSE',empleado||'','FALSE']
   await sheetsAppend('PAGOS!A1', [row])
   if (tipo==='MERCADERÍA'&&fechaIngreso&&articuloId) {
-    const rowIngreso = [`I${idPago.slice(1)}`,`'${fechaIngreso}`,`'${dt.hora}`,articuloId,articuloNombre,cantidad||0,costoUnitario||0,costoTotal,proveedor||'',empleado||'',false]
+    const rowIngreso = [`I${idPago.slice(1)}`,`'${fechaIngreso}`,`'${dt.hora}`,articuloId,articuloNombre,cant,cu,costoTotal,proveedor||'',empleado||'',false]
     await sheetsAppend('INGRESOS!A1', [rowIngreso])
   }
   await registrarLog({ accion:'PAGO_REGISTRADO', detalle:`${tipo} · ${articuloNombre||descripcion} · $${montoPagado}`, idReferencia:idPago, empleado, resultado:'OK' })
@@ -972,13 +976,14 @@ export async function registrarPago({ tipo, fechaIngreso, fechaPago, articuloId,
 }
 
 export async function actualizarPago(rowNum, campos, empleado = '') {
-  const costoTotal = (Number(campos.cantidad)||0)*(Number(campos.costoUnitario)||0)
-  const row = [campos.idPago,campos.tipo||'GASTO',campos.fechaIngreso?`'${campos.fechaIngreso}`:'',campos.fechaPago?`'${campos.fechaPago}`:'',campos.articuloId||'',campos.articuloNombre||'',campos.cantidad||0,campos.costoUnitario||0,costoTotal,campos.descripcion||'',campos.proveedor||'',campos.montoPagado||0,campos.pagado?'TRUE':'FALSE',campos.empleado||'',campos.anulado?'TRUE':'FALSE']
+  const cant = Number(campos.cantidad)||0, cu = parsePrecio(campos.costoUnitario), mp = parsePrecio(campos.montoPagado)
+  const costoTotal = cant*cu
+  const row = [campos.idPago,campos.tipo||'GASTO',campos.fechaIngreso?`'${campos.fechaIngreso}`:'',campos.fechaPago?`'${campos.fechaPago}`:'',campos.articuloId||'',campos.articuloNombre||'',cant,cu,costoTotal,campos.descripcion||'',campos.proveedor||'',mp,campos.pagado?'TRUE':'FALSE',campos.empleado||'',campos.anulado?'TRUE':'FALSE']
   await sheetsUpdate(`PAGOS!A${rowNum}:O${rowNum}`, [row])
   if (campos.tipo==='MERCADERÍA'&&campos.fechaIngreso&&campos.articuloId&&campos.crearIngreso) {
-    const costoTotalIng = (Number(campos.cantidad)||0)*(Number(campos.costoUnitario)||0)
+    const costoTotalIng = costoTotal
     const hora = new Date().toLocaleString('es-AR',{timeZone:'America/Argentina/Buenos_Aires',hour12:false}).split(', ')[1]
-    const rowIngreso = [`I${campos.idPago.slice(1)}`,`'${campos.fechaIngreso}`,`'${hora}`,campos.articuloId,campos.articuloNombre,campos.cantidad||0,campos.costoUnitario||0,costoTotalIng,campos.proveedor||'',empleado||'',false]
+    const rowIngreso = [`I${campos.idPago.slice(1)}`,`'${campos.fechaIngreso}`,`'${hora}`,campos.articuloId,campos.articuloNombre,cant,cu,costoTotalIng,campos.proveedor||'',empleado||'',false]
     await sheetsAppend('INGRESOS!A1', [rowIngreso])
   }
   await registrarLog({ accion:'PAGO_ACTUALIZADO', detalle:`${campos.idPago} actualizado`, idReferencia:campos.idPago, empleado, resultado:'OK' })

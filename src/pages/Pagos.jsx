@@ -33,6 +33,9 @@ const FORM_VACIO = {
   empleado: '',
 }
 
+// "$8.000", "8.000" o "8000" → 8000
+const parseMonto = v => Number(String(v ?? '').replace(/[$\s.]/g, '').replace(',', '.')) || 0
+
 function hoy() {
   return new Date().toLocaleDateString('es-AR', { timeZone:'America/Argentina/Buenos_Aires' })
 }
@@ -114,7 +117,7 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
   }
 
   function seleccionarArticulo(art) {
-    setForm(f => ({...f, articuloId: art.id, articuloNombre: art.nombre, articuloFoto: art.foto, costoUnitario: String(art.costoUnitario || '0')}))
+    setForm(f => ({...f, articuloId: art.id, articuloNombre: art.nombre, articuloFoto: art.foto, costoUnitario: String(parseMonto(art.costoUnitario))}))
     setArtBusqueda('')
   }
 
@@ -207,7 +210,7 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
       : ultimosUsados
     : []
 
-  const costoTotal = (Number(form.cantidad) || 0) * (Number(form.costoUnitario) || 0)
+  const costoTotal = (Number(form.cantidad) || 0) * parseMonto(form.costoUnitario)
 
   // Totales resumen
   const totalPagado = pagos.filter(p => !p.anulado && p.pagado).reduce((s, p) => s + p.montoPagado, 0)

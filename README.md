@@ -55,3 +55,6 @@ src/
 - Admin → Más → **Fichadas**: habilitar la tablet, generar el QR de vinculación de cada celular y dar de baja dispositivos.
 
 **Configuración (una vez):** cargar en Vercel `FICHADAS_SECRET` y `FICHADAS_ADMIN_PIN`. Por defecto las fichadas se guardan en la misma planilla de la app; para más seguridad se puede usar una planilla y cuenta de servicio propias con `FICHADAS_SHEET_ID`, `FICHADAS_GOOGLE_CLIENT_EMAIL` y `FICHADAS_GOOGLE_PRIVATE_KEY`. Para probar en local con las funciones usar `npx vercel dev` (`npm run dev` no levanta `/api`).
+
+### Asistencia
+Admin → Más → **Asistencia**: por mes y por empleada muestra cada día como a tiempo, tarde (tolerancia 10 min), franco, "¿franco?" (franco movido a confirmar), sin fichar o ausencia. El horario habitual se edita en **Horarios** (pestaña `HORARIOS`) y los cambios puntuales se cargan tocando el día (pestaña `CAMBIOS_HORARIO`). El cálculo está en `src/lib/asistencia.js`.

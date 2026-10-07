@@ -1,10 +1,11 @@
 // src/pages/Fichadas.jsx — Admin: habilitar la tablet, vincular celulares y ver dispositivos
 import { useEffect, useState } from 'react'
 import QrSvg from '../components/QrSvg.jsx'
-import { leerLlave, borrarLlave, vincularTerminal, iniciarVinculacion, listarDispositivos, darDeBajaDispositivo, pedirAlmacenamientoPersistente, CLAVE_TERMINAL } from '../api/fichadas.js'
+import { leerLlave, borrarLlave, vincularTerminal, iniciarVinculacion, listarDispositivos, darDeBajaDispositivo, pedirAlmacenamientoPersistente, getPinFichadas, setPinFichadas, CLAVE_TERMINAL } from '../api/fichadas.js'
 
 export default function Fichadas({ usuarios = [] }) {
-  const [pin, setPin] = useState('')
+  const [pin, setPinLocal] = useState(getPinFichadas())
+  const setPin = (p) => { setPinLocal(p); setPinFichadas(p) }
   const [terminal, setTerminal] = useState(null)
   const [empleada, setEmpleada] = useState('')
   const [vinculacion, setVinculacion] = useState(null) // { url, nombre, vence }

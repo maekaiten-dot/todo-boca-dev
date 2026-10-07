@@ -13,6 +13,7 @@ import GastosCaja from './pages/GastosCaja.jsx'
 import Tutoriales from './pages/Tutoriales.jsx'
 import Conteo from './pages/Conteo.jsx'
 import Fichadas from './pages/Fichadas.jsx'
+import Asistencia from './pages/Asistencia.jsx'
 import FicharTablet from './components/FicharTablet.jsx'
 import { getArticulos, getUsuarios, registrarLog, calcularStockTodos } from './api/sheets.js'
 
@@ -30,6 +31,7 @@ const TABS_MAS_ADMIN = [
   { id:'gastos', label:'Gastos fijos', icon:'📌', desc:'Gastos fijos del mes' },
   { id:'conteo', label:'Conteo y stock', icon:'🔢', desc:'Contar, bajas y diferencias' },
   { id:'tutos', label:'Tutoriales', icon:'📘', desc:'Instructivos para el equipo' },
+  { id:'asis', label:'Asistencia', icon:'🗓', desc:'Tardes, francos y fichadas faltantes' },
   { id:'fich', label:'Fichadas', icon:'⏱', desc:'Tablet y celulares para fichar' },
 ]
 
@@ -313,6 +315,9 @@ export default function App() {
           )}
           {esAdmin && tabsVisitadas.has('pagos') && (
             <div style={tabStyle('pagos')}><Pagos empleado={empleadoActual} empleadoFijo={empleadoActual} usuarios={usuarios} /></div>
+          )}
+          {esAdmin && tabsVisitadas.has('asis') && (
+            <div style={tabStyle('asis')}><Asistencia usuarios={usuarios} /></div>
           )}
           {esAdmin && tabsVisitadas.has('fich') && (
             <div style={tabStyle('fich')}><Fichadas usuarios={usuarios} /></div>

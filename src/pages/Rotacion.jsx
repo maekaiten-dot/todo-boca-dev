@@ -2,7 +2,7 @@
 // Rotación de artículos: más vendidos en 30/60/90/365 días, ritmo semanal y
 // reposición sugerida según el stock calculado. Solo para Admin (lo controla App.jsx).
 import { useState, useEffect, useMemo } from 'react'
-import { getHistoricoVentas } from '../api/sheets.js'
+import { getHistoricoVentas, getIngresos } from '../api/sheets.js'
 
 const VENTANAS = [30, 60, 90, 365]
 const METRICAS = [
@@ -78,6 +78,7 @@ function fechaDeDia(dia) {
 
 export default function Rotacion({ articulos = [], stockMap = {} }) {
   const [ventas, setVentas] = useState([])
+  const [ingresos, setIngresos] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [metrica, setMetrica] = useState('u')
@@ -91,7 +92,10 @@ export default function Rotacion({ articulos = [], stockMap = {} }) {
   async function cargar() {
     setLoading(true)
     setError(null)
-    try { setVentas(await getHistoricoVentas()) }
+    try {
+      const [v, ing] = await Promise.all([getHistoricoVentas(), getIngresos().catch(() => [])])
+      setVentas(v); setIngresos(ing)
+    }
     catch (e) { console.error(e); setError('No se pudo cargar. Intentá de nuevo.') }
     finally { setLoading(false) }
   }
@@ -102,6 +106,41 @@ export default function Rotacion({ articulos = [], stockMap = {} }) {
   const topAnio = useMemo(() => new Set(
     [...lista].filter(a => a.w[365][metrica] > 0).sort((a, b) => b.w[365][metrica] - a.w[365][metrica]).slice(0, top).map(a => a.id)
   ), [lista, metrica, top])
+
+  // Menos vendidos: artículos activos con stock (o sin stock calculado), incluidos los que no se vendieron nada.
+  // Los que no tienen stock ni ventas no entran: no hay nada que liquidar.
+  // Artículo "nuevo": su primer ingreso es reciente y nunca se había vendido antes. No se lo compara
+  // en las ventanas que empiezan antes de que llegara (no tuvo tiempo de venderse).
+  const llegadaNuevos = useMemo(() => {
+    const primerIngreso = {}, primeraVenta = {}
+    ingresos.forEach(i => { if (i.anulado || !i.articuloId) return; const d = diaDesdeFecha(i.fecha); if (d != null && (primerIngreso[i.articuloId] == null || d < primerIngreso[i.articuloId])) primerIngreso[i.articuloId] = d })
+    ventas.forEach(v => { if (v.anulado || !v.articulo) return; const d = diaDesdeFecha(v.fecha); if (d != null && (primeraVenta[v.articulo] == null || d < primeraVenta[v.articulo])) primeraVenta[v.articulo] = d })
+    const out = {}
+    Object.entries(primerIngreso).forEach(([id, d]) => { if (primeraVenta[id] == null || primeraVenta[id] >= d) out[id] = d })
+    return out
+  }, [ingresos, ventas])
+
+  const menosVendidos = useMemo(() => {
+    const porId = Object.fromEntries(lista.map(a => [a.id, a]))
+    const candidatos = articulos.filter(a => {
+      if (!a.id || !a.nombre) return false
+      const tieneStock = Object.prototype.hasOwnProperty.call(stockMap, a.id)
+      return !tieneStock || stockMap[a.id] > 0
+    })
+    const out = {}
+    for (const w of VENTANAS) {
+      out[w] = candidatos.filter(a => llegadaNuevos[a.id] == null || llegadaNuevos[a.id] <= hoy - w).map(a => {
+        const r = porId[a.id]
+        const tieneStock = Object.prototype.hasOwnProperty.call(stockMap, a.id)
+        return { id: a.id, nombre: a.nombre, valor: r ? r.w[w][metrica] : 0, stock: tieneStock ? stockMap[a.id] : null, ultimaVenta: r ? r.ultimaVenta : null }
+      }).sort((x, y) =>
+        x.valor - y.valor ||
+        (y.stock ?? 0) - (x.stock ?? 0) ||
+        (x.ultimaVenta ?? -1) - (y.ultimaVenta ?? -1)
+      ).slice(0, top)
+    }
+    return out
+  }, [lista, articulos, stockMap, metrica, top, llegadaNuevos, hoy])
 
   const filas = useMemo(() => lista.map(a => {
     const w30 = a.w[30].u / 30 * 7, w90 = a.w[90].u / 90 * 7, w365 = a.w[365].u / 365 * 7
@@ -207,6 +246,41 @@ export default function Rotacion({ articulos = [], stockMap = {} }) {
                   </div>
                 )
               })}
+            </div>
+          )
+        })}
+      </div>
+
+      <div style={S.seccion}>MENOS VENDIDOS</div>
+      <div style={S.legend}>
+        <span><i style={{ ...S.legendDot, background: '#ef4444' }} />Sin ventas en el período</span>
+        <span><i style={{ ...S.legendDot, background: '#6a8ccc' }} />Vendió poco</span>
+        <span>Solo artículos activos con stock. A igual venta, primero el que tiene más stock parado. Los que llegaron por primera vez dentro del período no se cuentan en ese período.</span>
+      </div>
+
+      <div style={S.grid}>
+        {VENTANAS.map(w => {
+          const ranking = menosVendidos[w] || []
+          const max = Math.max(1, ...ranking.map(a => a.valor))
+          return (
+            <div key={w} style={{ ...S.chartCard, margin: 0 }}>
+              <div style={S.chartTitle}>{w === 365 ? 'Último año' : `Últimos ${w} días`}</div>
+              {ranking.length === 0 && <div style={S.vacio}>Sin artículos para mostrar</div>}
+              {ranking.map((a, i) => (
+                <div key={a.id} style={S.barRow}>
+                  <span style={S.rank}>{i + 1}</span>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={S.barName} title={`${a.id} · ${a.nombre}`}>{a.nombre}</div>
+                    <div style={S.barLine}>
+                      <div style={{ ...S.bar, width: `${a.valor > 0 ? Math.max(1, a.valor / max * 80) : 1}%`, background: a.valor > 0 ? '#6a8ccc' : '#ef4444' }} />
+                      <span style={S.barVal}>{a.valor === 0 ? '0' : fmtVal(a.valor)}</span>
+                      <span style={S.barExtra}>
+                        {a.stock != null ? `stock ${fmtN(a.stock)} · ` : ''}{a.ultimaVenta != null ? `últ. venta ${fechaDeDia(a.ultimaVenta)}` : 'sin ventas en el año'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
           )
         })}
@@ -327,6 +401,8 @@ const S = {
   barLine: { display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 },
   bar: { height: 8, borderRadius: '0 4px 4px 0', minWidth: 2 },
   barVal: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 14, color: 'var(--text)', whiteSpace: 'nowrap' },
+  seccion: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 20, color: 'var(--accent)', letterSpacing: 1.5, padding: '8px 20px 6px' },
+  barExtra: { fontFamily: 'Barlow, sans-serif', fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
   nota: { fontFamily: 'Barlow, sans-serif', fontSize: 12, color: 'var(--muted)', lineHeight: 1.5, marginBottom: 8 },
   search: { fontFamily: 'Barlow, sans-serif', fontSize: 15, padding: '10px 14px', background: 'var(--bg)', border: '1.5px solid var(--border)', borderRadius: 10, color: 'var(--text)', marginBottom: 8, width: '100%', maxWidth: 360 },
   tableWrap: { overflowX: 'auto', WebkitOverflowScrolling: 'touch' },

@@ -249,19 +249,20 @@ function mapRow(r) {
     anulado: r[20]==='TRUE'||r[20]===true,
     ingresoNeto: parsePrecio(r[21]),
     posnet: r[34] || '',
+    correccionPosnet: r[35] || '',
   }
 }
 
 export async function getVentasHoy() {
-  const data = await sheetsGet('DETALLE DE VENTAS!A2:AI')
+  const data = await sheetsGet('DETALLE DE VENTAS!A2:AJ')
   const rows = data.values || []
   const { fecha } = getArgentinaDate()
   return rows.filter(r => r[2]===fecha).map(mapRow)
 }
 
 export async function getHistoricoVentas() {
-  // Hasta AI para incluir el POSNET (amarillo/blanco)
-  const data = await sheetsGet('DETALLE DE VENTAS!A2:AI')
+  // Hasta AJ para incluir el POSNET (amarillo/blanco) y su corrección manual
+  const data = await sheetsGet('DETALLE DE VENTAS!A2:AJ')
   const rows = data.values || []
   return rows.filter(r => r[0]).map(mapRow)
 }
@@ -319,6 +320,32 @@ async function asegurarColumna(letra, encabezado) {
   const enc = await sheetsGet(`DETALLE DE VENTAS!${letra}1`)
   if (!enc.values?.[0]?.[0]) await sheetsUpdate(`DETALLE DE VENTAS!${letra}1`, [[encabezado]])
   _columnasListas.add(letra)
+}
+
+// ── Corrección manual del posnet de una venta ────────────────────────────────
+// Cambia AI (POSNET) en todas las filas de la venta y deja constancia en AJ (CORRECCIÓN POSNET):
+// "AMARILLO → BLANCO · motivo · quién · fecha hora". Si ya había correcciones, se suman separadas por " | ".
+const COL_CORRECCION_POSNET = 'AJ'
+export const MOTIVOS_CORRECCION_POSNET = ['Se cobró con el otro posnet', 'El posnet indicado no funcionaba', 'Error al cargar la venta', 'Otro']
+
+export async function corregirPosnetVenta({ idVenta, posnetNuevo, motivo, detalle = '', quien = '' }) {
+  if (!POSNETS.includes(posnetNuevo)) throw new Error('POSNET_INVALIDO')
+  if (!motivo || (motivo === 'Otro' && !detalle.trim())) throw new Error('FALTA_MOTIVO')
+  const data = await sheetsGet('DETALLE DE VENTAS!A2:AJ')
+  const rows = data.values || []
+  const filas = []
+  rows.forEach((r, i) => { if (r[1] === idVenta) filas.push({ fila: i + 2, metodo: r[15] || '', posnet: r[34] || '', nota: r[35] || '' }) })
+  if (filas.length === 0) throw new Error('VENTA_NO_ENCONTRADA')
+  if (!filas.some(f => POSNET_METODOS.has(f.metodo))) throw new Error('VENTA_SIN_POSNET')
+  const anterior = filas[0].posnet || 'SIN DATO'
+  if (anterior === posnetNuevo) throw new Error('MISMO_POSNET')
+  await asegurarColumna(COL_POSNET, 'POSNET')
+  await asegurarColumna(COL_CORRECCION_POSNET, 'CORRECCIÓN POSNET')
+  const dt = getArgentinaDate()
+  const texto = `${anterior} → ${posnetNuevo} · ${motivo}${detalle.trim() ? ` (${detalle.trim()})` : ''} · ${quien || 'sin nombre'} · ${dt.fecha} ${String(dt.hora).slice(0, 5)}`
+  await Promise.all(filas.map(f => sheetsUpdate(`DETALLE DE VENTAS!AI${f.fila}:AJ${f.fila}`, [[posnetNuevo, f.nota ? `${f.nota} | ${texto}` : texto]])))
+  await registrarLog({ accion: 'POSNET_CORREGIDO', detalle: `${idVenta} · ${texto}`, idReferencia: idVenta, empleado: quien, resultado: 'OK' })
+  return { anterior, posnetNuevo }
 }
 
 // ── Promo 2x1 remeras XXXL ───────────────────────────────────────────────────

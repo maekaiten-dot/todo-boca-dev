@@ -1,6 +1,7 @@
 // src/pages/VentasDelDia.jsx
 import { useState, useEffect, Fragment } from 'react'
-import { getVentasHoy, anularVenta, registrarLog, getGastosCajaHoy } from '../api/sheets.js'
+import { getVentasHoy, anularVenta, registrarLog, getGastosCajaHoy, POSNET_METODOS } from '../api/sheets.js'
+import CorregirPosnetModal from '../components/CorregirPosnetModal.jsx'
 import DetalleVentaModal from '../components/DetalleVentaModal.jsx'
 
 const METODO_ICONS = {
@@ -16,12 +17,13 @@ const METODO_ICONS = {
 const METODOS_EFECTIVO_PESOS = new Set(['Efectivo Pesos', 'Efectivo ARS', 'Efectivo'])
 const DIVISAS = { USD: 'US$', BRL: 'R$', EUR: '€' }
 
-export default function VentasDelDia({ refreshKey }) {
+export default function VentasDelDia({ refreshKey, usuarios = [], perfilNombre = '', esAdmin = false }) {
   const [ventas, setVentas] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [confirmAnular, setConfirmAnular] = useState(null)
   const [anulando, setAnulando] = useState(false)
+  const [corrigiendo, setCorrigiendo] = useState(null)
   const [toast, setToast] = useState(null)
   const [ventaSeleccionada, setVentaSeleccionada] = useState(null)
   const [gastosCaja, setGastosCaja] = useState([])
@@ -80,7 +82,7 @@ export default function VentasDelDia({ refreshKey }) {
   const ventasAgrupadas = ventas.reduce((acc, v) => {
     const key = v.idVenta || v.idDetalle
     if (!acc[key]) {
-      acc[key] = { idVenta: key, hora: v.hora, metodoPago: v.metodoPago, empleado: v.empleado, items: [], total: 0, totalOriginal: 0, anulado: false }
+      acc[key] = { idVenta: key, hora: v.hora, metodoPago: v.metodoPago, empleado: v.empleado, posnet: v.posnet || '', correccionPosnet: v.correccionPosnet || '', items: [], total: 0, totalOriginal: 0, anulado: false }
     }
     acc[key].items.push(v)
     acc[key].totalOriginal += v.precioTotalFinal || v.precioTotal || 0
@@ -265,6 +267,11 @@ export default function VentasDelDia({ refreshKey }) {
                         ) : (
                           `$${Math.round(v.total).toLocaleString('es-AR')}`
                         )}
+                        {esAdmin && !v.anulado && POSNET_METODOS.has(v.metodoPago) && (
+                          <button style={S.posnetBtnInline} title={v.correccionPosnet ? `Corregido: ${v.correccionPosnet}` : 'Corregir el posnet registrado'} onClick={e => { e.stopPropagation(); setCorrigiendo(v) }}>
+                            Posnet{v.correccionPosnet ? ' ✎' : ''}
+                          </button>
+                        )}
                         {!v.anulado && (
                           <button style={S.anularBtnInline} onClick={e => { e.stopPropagation(); setConfirmAnular(v.idVenta) }}>
                             Anular
@@ -312,7 +319,7 @@ export default function VentasDelDia({ refreshKey }) {
                           </td>
                           <td style={S.td}>
                             {METODO_ICONS[item.metodoPago] || '💰'} {item.metodoPago}
-                            {item.posnet && <span style={{ display:'block', fontSize:11, color: item.posnet === 'AMARILLO' ? 'var(--accent)' : 'var(--muted)' }}>Posnet {item.posnet.toLowerCase()}</span>}
+                            {item.posnet && <span style={{ display:'block', fontSize:11, color: item.posnet === 'AMARILLO' ? 'var(--accent)' : 'var(--muted)' }} title={item.correccionPosnet || undefined}>Posnet {item.posnet.toLowerCase()}{item.correccionPosnet ? ' · corregido' : ''}</span>}
                           </td>
                           <td style={S.td}>{item.empleado}</td>
                         </tr>
@@ -325,6 +332,14 @@ export default function VentasDelDia({ refreshKey }) {
           </table>
         )}
       </div>
+
+      {corrigiendo && (
+        <CorregirPosnetModal
+          venta={corrigiendo} usuarios={usuarios} perfilNombre={perfilNombre}
+          onCerrar={() => setCorrigiendo(null)}
+          onGuardado={nuevo => { showToast(`Posnet corregido a ${nuevo.toLowerCase()}`, 'success'); setCorrigiendo(null); cargar() }}
+        />
+      )}
 
       {confirmAnular && (
         <div style={S.overlay} onClick={() => !anulando && setConfirmAnular(null)}>
@@ -401,6 +416,7 @@ const S = {
   badge_parcial: { fontFamily:'Barlow Condensed, sans-serif', fontSize:11, fontWeight:800, color:'#f59e0b', background:'rgba(245,158,11,0.15)', borderRadius:4, padding:'2px 6px', marginRight:8, letterSpacing:1 },
   itemRow: { cursor:'pointer', transition:'background 0.1s' },
   itemRowAnulado: { opacity:0.45 },
+  posnetBtnInline: { marginLeft:12, background:'none', border:'1px solid rgba(245,200,0,0.45)', borderRadius:6, color:'var(--accent)', fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:11, padding:'3px 8px', cursor:'pointer', letterSpacing:0.5, textTransform:'uppercase' },
   anularBtnInline: { marginLeft:12, background:'none', border:'1px solid rgba(239,68,68,0.4)', borderRadius:6, color:'rgba(239,68,68,0.8)', fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:11, padding:'3px 8px', cursor:'pointer', letterSpacing:0.5, textTransform:'uppercase' },
   emptyText: { fontFamily:'Barlow, sans-serif', color:'var(--muted)', textAlign:'center', padding:40, fontSize:18 },
   overlay: { position:'fixed', inset:0, background:'rgba(0,0,10,0.8)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:200, backdropFilter:'blur(6px)' },

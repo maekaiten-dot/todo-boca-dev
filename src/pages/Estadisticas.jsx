@@ -1,7 +1,8 @@
 // src/pages/Estadisticas.jsx
 import { useState, useEffect } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
-import { getHistoricoVentas } from '../api/sheets.js'
+import { getHistoricoVentas, POSNET_METODOS } from '../api/sheets.js'
+import CorregirPosnetModal from '../components/CorregirPosnetModal.jsx'
 
 function esTarjetaOQR(metodo) {
   if (!metodo) return false
@@ -153,7 +154,7 @@ function armarTicketsDelDia(ventas, fechaKey) {
   const map = {}
   ventas.filter(v => v.fecha === fechaKey).forEach(v => {
     const id = v.idVenta || v.idDetalle
-    if (!map[id]) map[id] = { id, hora: v.hora || '', empleado: v.empleado || '', metodoPago: v.metodoPago || '', posnet: v.posnet || '', notas: v.notas || '', anulado: v.anulado, items: [], total: 0 }
+    if (!map[id]) map[id] = { id, hora: v.hora || '', empleado: v.empleado || '', metodoPago: v.metodoPago || '', posnet: v.posnet || '', correccionPosnet: v.correccionPosnet || '', notas: v.notas || '', anulado: v.anulado, items: [], total: 0 }
     const t = map[id]
     const precio = parsePrecio(v.precioTotalFinal) || parsePrecio(v.precioTotal)
     t.items.push({ nombre: v.nombre || v.articulo || '', cantidad: v.cantidad || 0, precio })
@@ -163,12 +164,13 @@ function armarTicketsDelDia(ventas, fechaKey) {
   return Object.values(map).sort((a, b) => b.hora.localeCompare(a.hora))
 }
 
-function DetalleDia({ dia, ventas, onCerrar }) {
+function DetalleDia({ dia, ventas, onCerrar, esAdmin = false, usuarios = [], perfilNombre = '', onPosnetCorregido }) {
+  const [corrigiendo, setCorrigiendo] = useState(null)
   useEffect(() => {
-    const onKey = e => { if (e.key === 'Escape') onCerrar() }
+    const onKey = e => { if (e.key === 'Escape' && !corrigiendo) onCerrar() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onCerrar])
+  }, [onCerrar, corrigiendo])
 
   const tickets = armarTicketsDelDia(ventas, dia.fechaKey)
   const validos = tickets.filter(t => !t.anulado)
@@ -212,6 +214,12 @@ function DetalleDia({ dia, ventas, onCerrar }) {
                   <div style={D.ticketMetodo}>
                     {t.metodoPago}
                     {t.posnet && <span style={{ ...D.posnetDot, background: t.posnet.toUpperCase() === 'AMARILLO' ? '#f5c800' : '#f0f4ff' }} title={`Posnet ${t.posnet.toLowerCase()}`} />}
+                    {t.correccionPosnet && <span style={{ color: 'var(--muted)' }} title={t.correccionPosnet}>corregido</span>}
+                    {esAdmin && !t.anulado && POSNET_METODOS.has(t.metodoPago) && (
+                      <button style={D.posnetBtn} onClick={() => setCorrigiendo({ idVenta: t.id, hora: t.hora.slice(0, 5), total: t.total, posnet: t.posnet })}>
+                        Corregir posnet
+                      </button>
+                    )}
                     {t.notas && <span style={{ color: 'var(--muted)' }}> · {t.notas}</span>}
                   </div>
                 </div>
@@ -227,6 +235,15 @@ function DetalleDia({ dia, ventas, onCerrar }) {
           ))}
         </div>
       </div>
+      {corrigiendo && (
+        <div onClick={e => e.stopPropagation()}>
+          <CorregirPosnetModal
+            venta={corrigiendo} usuarios={usuarios} perfilNombre={perfilNombre}
+            onCerrar={() => setCorrigiendo(null)}
+            onGuardado={nuevo => { onPosnetCorregido?.(corrigiendo.idVenta, nuevo); setCorrigiendo(null) }}
+          />
+        </div>
+      )}
     </div>
   )
 }
@@ -244,6 +261,7 @@ const D = {
   lista: { overflowY:'auto', display:'flex', flexDirection:'column', gap:8, paddingBottom:4 },
   vacio: { fontFamily:'Barlow, sans-serif', fontSize:14, color:'var(--muted)', padding:'16px 0' },
   ticket: { background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:10, padding:'10px 12px' },
+  posnetBtn: { background:'none', border:'1px solid rgba(245,200,0,0.45)', borderRadius:6, color:'var(--accent)', fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:11, padding:'2px 8px', cursor:'pointer', letterSpacing:0.5, textTransform:'uppercase' },
   ticketHead: { display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:10, marginBottom:4 },
   ticketMeta: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:16, color:'var(--text)' },
   ticketMetodo: { fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)', display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' },
@@ -255,7 +273,7 @@ const D = {
   badgeAnulada: { fontSize:10, fontWeight:800, color:'#ef4444', background:'rgba(239,68,68,0.15)', borderRadius:4, padding:'1px 5px', marginRight:6, letterSpacing:1 },
 }
 
-export default function Estadisticas() {
+export default function Estadisticas({ esAdmin = false, usuarios = [], perfilNombre = '' }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [datosGrafico, setDatosGrafico] = useState([])
@@ -448,7 +466,17 @@ export default function Estadisticas() {
         )}
       </div>
 
-      {diaAbierto && <DetalleDia dia={diaAbierto} ventas={ventasTodas} onCerrar={() => setDiaAbierto(null)} />}
+      {diaAbierto && (
+        <DetalleDia
+          dia={diaAbierto} ventas={ventasTodas} onCerrar={() => setDiaAbierto(null)}
+          esAdmin={esAdmin} usuarios={usuarios} perfilNombre={perfilNombre}
+          onPosnetCorregido={(idVenta, nuevo) => {
+            const nuevas = ventasTodas.map(v => v.idVenta === idVenta ? { ...v, posnet: nuevo, correccionPosnet: v.correccionPosnet || 'corregido' } : v)
+            setVentasTodas(nuevas)
+            setDatosBlanco(calcularPosnetBlancoPorMes(nuevas, datosMes, datosMetodo))
+          }}
+        />
+      )}
     </div>
   )
 }

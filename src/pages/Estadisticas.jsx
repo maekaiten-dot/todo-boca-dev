@@ -104,6 +104,13 @@ const CustomTooltip = ({ active, payload, label }) => {
 // Promedio = (hora del último ticket − hora del primero) / (tickets − 1). Días con menos de 2 tickets quedan sin barra.
 const aMin = h => { const [hh, mm = 0, ss = 0] = String(h || '').split(':').map(Number); return Number.isFinite(hh) ? hh * 60 + mm + ss / 60 : null }
 const fmtHora = m => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(Math.floor(m % 60)).padStart(2, '0')}`
+// Horario del local (minutos desde las 00:00). Lunes a viernes 9:30 a 19:00; sábados y domingos 9:00 a 19:00.
+// Se da un margen de 15 min antes de abrir y 30 min después de cerrar. Lo que queda afuera son las
+// aperturas especiales (por ejemplo, después de un partido de Boca) y se muestra aparte.
+const HORARIO = { 0: [540, 1140], 1: [570, 1140], 2: [570, 1140], 3: [570, 1140], 4: [570, 1140], 5: [570, 1140], 6: [540, 1140] }
+const diaSemana = fecha => { const [d, m, a] = String(fecha).split('/').map(Number); return new Date(Date.UTC(a, m - 1, d)).getUTCDay() }
+const enHorario = (fecha, min) => { const [ab, ci] = HORARIO[diaSemana(fecha)]; return min >= ab - 15 && min <= ci + 30 }
+
 function calcularFrecuenciaPorDia(ventas, dias) {
   const porDia = {}
   ventas.filter(v => !v.anulado && v.fecha && v.hora).forEach(v => {
@@ -113,14 +120,17 @@ function calcularFrecuenciaPorDia(ventas, dias) {
     if (d[id] == null || t < d[id]) d[id] = t
   })
   return dias.map(d => {
-    const horas = Object.values(porDia[d.fechaKey] || {}).sort((a, b) => a - b)
+    const todas = Object.values(porDia[d.fechaKey] || {}).sort((a, b) => a - b)
+    const horas = todas.filter(h => enHorario(d.fechaKey, h))
+    const fuera = todas.filter(h => !enHorario(d.fechaKey, h))
+    const extra = fuera.length ? { fueraN: fuera.length, fueraDesde: fmtHora(fuera[0]), fueraHasta: fmtHora(fuera[fuera.length - 1]) } : { fueraN: 0 }
     const n = horas.length
-    if (n < 2) return { fechaKey: d.fechaKey, label: d.label, prom: null, tickets: n }
+    if (n < 2) return { fechaKey: d.fechaKey, label: d.label, prom: null, tickets: n, ...extra }
     const gaps = horas.slice(1).map((h, i) => h - horas[i])
     const iMax = gaps.indexOf(Math.max(...gaps))
     const ord = [...gaps].sort((a, b) => a - b)
     const mediana = ord.length % 2 ? ord[(ord.length - 1) / 2] : (ord[ord.length / 2 - 1] + ord[ord.length / 2]) / 2
-    return { fechaKey: d.fechaKey, label: d.label, prom: Math.round((horas[n - 1] - horas[0]) / (n - 1) * 10) / 10, mediana: Math.round(mediana * 10) / 10, maxGap: Math.round(ord[ord.length - 1]), huecoDesde: fmtHora(horas[iMax]), huecoHasta: fmtHora(horas[iMax + 1]), tickets: n, desde: fmtHora(horas[0]), hasta: fmtHora(horas[n - 1]) }
+    return { fechaKey: d.fechaKey, label: d.label, prom: Math.round((horas[n - 1] - horas[0]) / (n - 1) * 10) / 10, mediana: Math.round(mediana * 10) / 10, maxGap: Math.round(ord[ord.length - 1]), huecoDesde: fmtHora(horas[iMax]), huecoHasta: fmtHora(horas[iMax + 1]), tickets: n, desde: fmtHora(horas[0]), hasta: fmtHora(horas[n - 1]), ...extra }
   })
 }
 const fmtMin = m => m >= 60 ? `${Math.floor(m / 60)} h ${Math.round(m % 60)} min` : `${Math.round(m)} min`
@@ -135,6 +145,7 @@ const FrecuenciaTooltip = ({ active, payload, label }) => {
         <div style={{ fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)', marginTop:2, lineHeight:1.5 }}>
           {d.tickets} tickets entre {d.desde} y {d.hasta}<br />
           Mediana: {fmtMin(d.mediana)}<br />Hueco más largo: {fmtMin(d.maxGap)} (de {d.huecoDesde} a {d.huecoHasta})
+          {d.fueraN > 0 && <><br /><span style={{ color:'var(--accent)' }}>+ {d.fueraN} {d.fueraN === 1 ? 'venta' : 'ventas'} fuera de horario ({d.fueraDesde}{d.fueraN > 1 ? ` a ${d.fueraHasta}` : ''}), no incluidas</span></>}
         </div>
       </div>
     )
@@ -155,8 +166,18 @@ function calcularMapaHoras(ventas, dias) {
     const min = aMin(v.hora); if (min == null) return
     const id = v.idVenta || v.idDetalle
     const k = `${v.fecha}|${id}`
-    if (tickets[k] == null || min < tickets[k].min) tickets[k] = { min, fecha: v.fecha, dow: new Date(t).getUTCDay() }
+    if (tickets[k] == null || min < tickets[k].min) tickets[k] = { min, fecha: v.fecha, dow: new Date(t).getUTCDay(), monto: 0 }
+    tickets[k].monto += parsePrecio(v.precioTotalFinal) || parsePrecio(v.precioTotal)
   })
+  // Ventas fuera de horario (aperturas especiales): se separan y se resumen por día
+  const fueraPorDia = {}
+  Object.entries(tickets).forEach(([k, tk]) => {
+    if (enHorario(tk.fecha, tk.min)) return
+    const f = fueraPorDia[tk.fecha] || (fueraPorDia[tk.fecha] = { fecha: tk.fecha, dow: tk.dow, n: 0, monto: 0, desde: 1e9, hasta: 0 })
+    f.n++; f.monto += tk.monto; f.desde = Math.min(f.desde, tk.min); f.hasta = Math.max(f.hasta, tk.min)
+    delete tickets[k]
+  })
+  const fuera = Object.values(fueraPorDia).sort((a, b) => { const [d1, m1, a1] = a.fecha.split('/').map(Number), [d2, m2, a2] = b.fecha.split('/').map(Number); return Date.UTC(a2, m2 - 1, d2) - Date.UTC(a1, m1 - 1, d1) })
   const conteo = {}, diasConVentas = {}, porHora = {}
   Object.values(tickets).forEach(({ min, fecha, dow }) => {
     const h = Math.floor(min / 60)
@@ -164,18 +185,9 @@ function calcularMapaHoras(ventas, dias) {
     porHora[h] = (porHora[h] || 0) + 1
     ;(diasConVentas[dow] ||= new Set()).add(fecha)
   })
-  // Horario de apertura real: desde la hora con más ventas se extiende hacia los costados mientras cada hora
-  // tenga al menos el 1% de los tickets. Así no aparecen columnas vacías por ventas cargadas tarde a la noche.
-  const totalT = Object.keys(tickets).length
-  const minimo = Math.max(2, totalT * 0.01)
-  const pico = Object.keys(porHora).map(Number).sort((x, y) => porHora[y] - porHora[x])[0]
-  let hMin = 24, hMax = 0
-  if (pico != null) {
-    hMin = hMax = pico
-    while ((porHora[hMin - 1] || 0) >= minimo) hMin--
-    while ((porHora[hMax + 1] || 0) >= minimo) hMax++
-  }
-  if (hMin > hMax) return { horas: [], celdas: {}, max: 0, diasConVentas: {} }
+  // Columnas = horario del local (de 9 a 18 h, la última franja es 18:00 a 19:00)
+  const hMin = 9, hMax = 18
+  if (Object.keys(tickets).length === 0) return { horas: [], celdas: {}, max: 0, diasConVentas: {}, fuera }
   const horas = Array.from({ length: hMax - hMin + 1 }, (_, i) => hMin + i)
   const celdas = {}
   let max = 0
@@ -185,12 +197,12 @@ function calcularMapaHoras(ventas, dias) {
     celdas[`${d}|${h}`] = prom
     if (prom != null && prom > max) max = prom
   }))
-  return { horas, celdas, max, diasConVentas: Object.fromEntries(Object.entries(diasConVentas).map(([k, v]) => [k, v.size])) }
+  return { horas, celdas, max, fuera, diasConVentas: Object.fromEntries(Object.entries(diasConVentas).map(([k, v]) => [k, v.size])) }
 }
 
 function MapaHoras({ ventas }) {
   const [rango, setRango] = useState(35)
-  const { horas, celdas, max, diasConVentas } = useMemo(() => calcularMapaHoras(ventas, rango), [ventas, rango])
+  const { horas, celdas, max, diasConVentas, fuera = [] } = useMemo(() => calcularMapaHoras(ventas, rango), [ventas, rango])
   const color = v => {
     if (v == null) return 'transparent'
     const t = max > 0 ? v / max : 0
@@ -227,6 +239,20 @@ function MapaHoras({ ventas }) {
                   )
                 })}
               </Fragment>
+            ))}
+          </div>
+        </div>
+      )}
+      {fuera.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <div style={S.chartHint}>
+            Fuera de horario (aperturas especiales, por ejemplo después de un partido): {fuera.reduce((s, f) => s + f.n, 0)} tickets · {fmt$(fuera.reduce((s, f) => s + f.monto, 0))} en {fuera.length} {fuera.length === 1 ? 'día' : 'días'}. No se incluyen en el mapa.
+          </div>
+          <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
+            {fuera.map(f => (
+              <span key={f.fecha} style={S.fueraChip}>
+                {DIAS_MAPA.find(x => x.d === f.dow)?.l} {f.fecha.split('/').slice(0, 2).join('/')} · {fmtHora(f.desde)}{f.n > 1 ? `–${fmtHora(f.hasta)}` : ''} · {f.n} {f.n === 1 ? 'ticket' : 'tickets'} · {fmt$(f.monto)}
+              </span>
             ))}
           </div>
         </div>
@@ -521,7 +547,7 @@ export default function Estadisticas({ esAdmin = false, usuarios = [], perfilNom
       {/* Frecuencia de cierre de tickets por día */}
       <div style={S.chartCard}>
         <div style={S.chartTitle}>Frecuencia de ventas por día — últimos 35 días</div>
-        <div style={S.chartHint}>Minutos promedio entre un ticket y el siguiente, desde la primera hasta la última venta del día. Barra más baja = se vende más seguido.</div>
+        <div style={S.chartHint}>Minutos promedio entre un ticket y el siguiente, dentro del horario del local. Barra más baja = se vende más seguido. Las ventas fuera de horario (aperturas después de un partido) no se cuentan y se avisan en el detalle.</div>
         <div style={S.chartWrap}>
           <ResponsiveContainer width="100%" height={420}>
             <BarChart data={datosFrecuencia} margin={{ top: 8, right: 8, left: 0, bottom: 40 }} style={{ cursor:'pointer', outline:'none' }} onClick={st => { const i = Number(st?.activeTooltipIndex ?? st?.activeIndex); const dia = datosGrafico[i] || datosGrafico.find(x => x.label === st?.activeLabel); if (dia?.fechaKey) setDiaAbierto(dia) }}>
@@ -654,6 +680,7 @@ const S = {
   chartCard: { margin:'0 20px 16px', background:'var(--surface)', borderRadius:14, border:'1.5px solid var(--border)', padding:'16px' },
   chartTitle: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:16, color:'var(--muted)', letterSpacing:1, textTransform:'uppercase', marginBottom:12 },
   chartWrap: { width:'100%' },
+  fueraChip: { fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--accent)', background:'rgba(245,200,0,0.08)', border:'1px solid rgba(245,200,0,0.3)', borderRadius:20, padding:'3px 10px' },
   rangoBtn: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:13, padding:'6px 12px', background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--muted)', cursor:'pointer' },
   rangoBtnActivo: { borderColor:'var(--accent)', color:'var(--accent)', background:'rgba(245,200,0,0.1)' },
   mapaHora: { fontFamily:'Barlow Condensed, sans-serif', fontSize:12, color:'var(--muted)', textAlign:'center', padding:'2px 0' },

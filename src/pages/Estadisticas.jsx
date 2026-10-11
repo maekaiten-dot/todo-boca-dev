@@ -105,11 +105,11 @@ const CustomTooltip = ({ active, payload, label }) => {
 const aMin = h => { const [hh, mm = 0, ss = 0] = String(h || '').split(':').map(Number); return Number.isFinite(hh) ? hh * 60 + mm + ss / 60 : null }
 const fmtHora = m => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(Math.floor(m % 60)).padStart(2, '0')}`
 // Horario del local (minutos desde las 00:00). Lunes a viernes 9:30 a 19:00; sábados y domingos 9:00 a 19:00.
-// Se da un margen de 15 min antes de abrir y 30 min después de cerrar. Lo que queda afuera son las
+// Se da un margen de 30 min antes de abrir y 30 min después de cerrar. Lo que queda afuera son las
 // aperturas especiales (por ejemplo, después de un partido de Boca) y se muestra aparte.
 const HORARIO = { 0: [540, 1140], 1: [570, 1140], 2: [570, 1140], 3: [570, 1140], 4: [570, 1140], 5: [570, 1140], 6: [540, 1140] }
 const diaSemana = fecha => { const [d, m, a] = String(fecha).split('/').map(Number); return new Date(Date.UTC(a, m - 1, d)).getUTCDay() }
-const enHorario = (fecha, min) => { const [ab, ci] = HORARIO[diaSemana(fecha)]; return min >= ab - 15 && min <= ci + 30 }
+const enHorario = (fecha, min) => { const [ab, ci] = HORARIO[diaSemana(fecha)]; return min >= ab - 30 && min <= ci + 30 }
 
 function calcularFrecuenciaPorDia(ventas, dias) {
   const porDia = {}

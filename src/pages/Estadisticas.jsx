@@ -203,17 +203,18 @@ function calcularMapaHoras(ventas, dias) {
 function MapaHoras({ ventas }) {
   const [rango, setRango] = useState(35)
   const { horas, celdas, max, diasConVentas, fuera = [] } = useMemo(() => calcularMapaHoras(ventas, rango), [ventas, rango])
+  // De rojo (menos ventas) a amarillo y verde (más ventas), relativo al casillero con más ventas
   const color = v => {
     if (v == null) return 'transparent'
-    const t = max > 0 ? v / max : 0
-    return `rgba(56,189,248,${(0.08 + t * 0.85).toFixed(2)})`
+    const t = max > 0 ? Math.min(1, v / max) : 0
+    return `hsl(${Math.round(t * 120)}, 70%, 36%)`
   }
   return (
     <div style={S.chartCard}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:12, flexWrap:'wrap' }}>
         <div>
           <div style={S.chartTitle}>Tickets por hora y día de la semana</div>
-          <div style={S.chartHint}>Promedio de ventas cerradas en cada franja horaria. Más oscuro = horario más flojo; más celeste = más ventas. Pasá el dedo o el mouse por un casillero para ver el detalle.</div>
+          <div style={S.chartHint}>Promedio de ventas cerradas en cada franja horaria. Rojo = horario más flojo; verde = más ventas. Pasá el dedo o el mouse por un casillero para ver el detalle.</div>
         </div>
         <div style={{ display:'flex', gap:6 }}>
           {[35, 90].map(r => (
@@ -232,7 +233,7 @@ function MapaHoras({ ventas }) {
                 {horas.map(h => {
                   const v = celdas[`${d}|${h}`]
                   return (
-                    <div key={h} style={{ ...S.mapaCelda, background: color(v), color: v != null && max > 0 && v / max > 0.55 ? '#00122e' : 'var(--text)' }}
+                    <div key={h} style={{ ...S.mapaCelda, background: color(v), color: '#fff' }}
                       title={v == null ? `${l} ${h}:00 · sin datos` : `${l} de ${h}:00 a ${h + 1}:00 · ${v.toFixed(1)} tickets en promedio (${diasConVentas[d]} ${l.toLowerCase()} con ventas)`}>
                       {v == null ? '' : v < 0.05 ? '0' : v.toFixed(1)}
                     </div>

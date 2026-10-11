@@ -201,7 +201,7 @@ function calcularMapaHoras(ventas, dias) {
 }
 
 function MapaHoras({ ventas }) {
-  const [rango, setRango] = useState(35)
+  const [rango, setRango] = useState(30)
   const { horas, celdas, max, diasConVentas, fuera = [] } = useMemo(() => calcularMapaHoras(ventas, rango), [ventas, rango])
   // De rojo (menos ventas) a amarillo y verde (más ventas), relativo al casillero con más ventas
   const color = v => {
@@ -217,7 +217,7 @@ function MapaHoras({ ventas }) {
           <div style={S.chartHint}>Promedio de ventas cerradas en cada franja horaria. Rojo = horario más flojo; verde = más ventas. Pasá el dedo o el mouse por un casillero para ver el detalle.</div>
         </div>
         <div style={{ display:'flex', gap:6 }}>
-          {[35, 90].map(r => (
+          {[30, 60, 90].map(r => (
             <button key={r} onClick={() => setRango(r)} style={{ ...S.rangoBtn, ...(rango === r ? S.rangoBtnActivo : {}) }}>{r} días</button>
           ))}
         </div>

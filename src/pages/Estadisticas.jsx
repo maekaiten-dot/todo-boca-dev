@@ -100,6 +100,47 @@ const CustomTooltip = ({ active, payload, label }) => {
   return null
 }
 
+// Frecuencia de cierre de tickets por día: minutos promedio entre una venta y la siguiente.
+// Promedio = (hora del último ticket − hora del primero) / (tickets − 1). Días con menos de 2 tickets quedan sin barra.
+const aMin = h => { const [hh, mm = 0, ss = 0] = String(h || '').split(':').map(Number); return Number.isFinite(hh) ? hh * 60 + mm + ss / 60 : null }
+const fmtHora = m => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(Math.floor(m % 60)).padStart(2, '0')}`
+function calcularFrecuenciaPorDia(ventas, dias) {
+  const porDia = {}
+  ventas.filter(v => !v.anulado && v.fecha && v.hora).forEach(v => {
+    const id = v.idVenta || v.idDetalle
+    const t = aMin(v.hora); if (t == null) return
+    const d = porDia[v.fecha] || (porDia[v.fecha] = {})
+    if (d[id] == null || t < d[id]) d[id] = t
+  })
+  return dias.map(d => {
+    const horas = Object.values(porDia[d.fechaKey] || {}).sort((a, b) => a - b)
+    const n = horas.length
+    if (n < 2) return { fechaKey: d.fechaKey, label: d.label, prom: null, tickets: n }
+    const gaps = horas.slice(1).map((h, i) => h - horas[i])
+    const ord = [...gaps].sort((a, b) => a - b)
+    const mediana = ord.length % 2 ? ord[(ord.length - 1) / 2] : (ord[ord.length / 2 - 1] + ord[ord.length / 2]) / 2
+    return { fechaKey: d.fechaKey, label: d.label, prom: Math.round((horas[n - 1] - horas[0]) / (n - 1) * 10) / 10, mediana: Math.round(mediana * 10) / 10, maxGap: Math.round(ord[ord.length - 1]), tickets: n, desde: fmtHora(horas[0]), hasta: fmtHora(horas[n - 1]) }
+  })
+}
+const fmtMin = m => m >= 60 ? `${Math.floor(m / 60)} h ${Math.round(m % 60)} min` : `${Math.round(m)} min`
+
+const FrecuenciaTooltip = ({ active, payload, label }) => {
+  if (active && payload && payload.length && payload[0].payload.prom != null) {
+    const d = payload[0].payload
+    return (
+      <div style={{ background:'var(--surface)', border:'1.5px solid var(--border)', borderRadius:8, padding:'10px 14px' }}>
+        <div style={{ fontFamily:'Barlow Condensed, sans-serif', fontSize:13, color:'var(--muted)', marginBottom:4 }}>{label}</div>
+        <div style={{ fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:20, color:'#38bdf8' }}>Una venta cada {fmtMin(d.prom)}</div>
+        <div style={{ fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)', marginTop:2, lineHeight:1.5 }}>
+          {d.tickets} tickets entre {d.desde} y {d.hasta}<br />
+          Mediana: {fmtMin(d.mediana)} · hueco más largo: {fmtMin(d.maxGap)}
+        </div>
+      </div>
+    )
+  }
+  return null
+}
+
 const PctTooltip = ({ active, payload, label }) => {
   if (active && payload && payload.length) {
     return (
@@ -277,6 +318,7 @@ export default function Estadisticas({ esAdmin = false, usuarios = [], perfilNom
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [datosGrafico, setDatosGrafico] = useState([])
+  const [datosFrecuencia, setDatosFrecuencia] = useState([])
   const [datosMes, setDatosMes] = useState([])
   const [datosMetodo, setDatosMetodo] = useState([])
   const [datosPct, setDatosPct] = useState([])
@@ -311,6 +353,7 @@ export default function Estadisticas({ esAdmin = false, usuarios = [], perfilNom
 
       setVentasTodas(ventas)
       setDatosGrafico(dias)
+      setDatosFrecuencia(calcularFrecuenciaPorDia(ventas, dias))
       setTotalPeriodo(total)
       setMejorDia(mejor)
       setDatosMes(mesTotales)
@@ -376,6 +419,23 @@ export default function Estadisticas({ esAdmin = false, usuarios = [], perfilNom
               <YAxis tick={{ fontFamily:'Barlow Condensed, sans-serif', fontSize:11, fill:'#6a8ccc' }} tickFormatter={v => v >= 1000000 ? `${(v/1000000).toFixed(1)}M` : v >= 1000 ? `${(v/1000).toFixed(0)}k` : v} tickLine={false} axisLine={false} width={48} />
               <Tooltip content={<CustomTooltip />} cursor={{ fill:'rgba(0,230,118,0.06)' }} />
               <Bar dataKey="total" fill="#00e676" radius={[4, 4, 0, 0]} maxBarSize={32} cursor="pointer" onClick={d => { const dia = d?.payload || d; if (dia?.fechaKey) setDiaAbierto(dia) }} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* Frecuencia de cierre de tickets por día */}
+      <div style={S.chartCard}>
+        <div style={S.chartTitle}>Frecuencia de ventas por día — últimos 35 días</div>
+        <div style={S.chartHint}>Minutos promedio entre un ticket y el siguiente, desde la primera hasta la última venta del día. Barra más baja = se vende más seguido.</div>
+        <div style={S.chartWrap}>
+          <ResponsiveContainer width="100%" height={420}>
+            <BarChart data={datosFrecuencia} margin={{ top: 8, right: 8, left: 0, bottom: 40 }} style={{ cursor:'pointer', outline:'none' }} onClick={st => { const i = Number(st?.activeTooltipIndex ?? st?.activeIndex); const dia = datosGrafico[i] || datosGrafico.find(x => x.label === st?.activeLabel); if (dia?.fechaKey) setDiaAbierto(dia) }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+              <XAxis dataKey="label" tick={{ fontFamily:'Barlow Condensed, sans-serif', fontSize:11, fill:'#6a8ccc' }} angle={-45} textAnchor="end" interval={2} tickLine={false} axisLine={false} />
+              <YAxis tick={{ fontFamily:'Barlow Condensed, sans-serif', fontSize:11, fill:'#6a8ccc' }} tickFormatter={v => `${v} min`} tickLine={false} axisLine={false} width={56} />
+              <Tooltip content={<FrecuenciaTooltip />} cursor={{ fill:'rgba(56,189,248,0.08)' }} />
+              <Bar dataKey="prom" fill="#38bdf8" radius={[4, 4, 0, 0]} maxBarSize={32} />
             </BarChart>
           </ResponsiveContainer>
         </div>

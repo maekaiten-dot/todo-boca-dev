@@ -1270,3 +1270,64 @@ export async function getMonotributoManual() {
   })
   return out
 }
+
+// ── Avisos de artículos (anotaciones de los empleados para que los admin revisen) ──
+// Hoja AVISOS ARTICULOS · A:ID  B:FECHA  C:HORA  D:ID ARTICULO  E:NOMBRE  F:TIPO  G:DETALLE  H:EMPLEADO
+//                         I:ESTADO (PENDIENTE/RESUELTO)  J:RESUELTO POR  K:FECHA RESUELTO  L:NOTA RESOLUCIÓN
+const HOJA_AVISOS = 'AVISOS ARTICULOS'
+const ENCABEZADOS_AVISOS = ['ID', 'FECHA', 'HORA', 'ID ARTICULO', 'NOMBRE', 'TIPO', 'DETALLE', 'EMPLEADO', 'ESTADO', 'RESUELTO POR', 'FECHA RESUELTO', 'NOTA RESOLUCIÓN']
+export const TIPOS_AVISO = ['Producto duplicado', 'Falta foto / foto incorrecta', 'No se pudo contar', 'Nombre o precio incorrecto', 'Otro']
+let _hojaAvisosLista = false
+
+async function asegurarHojaAvisos() {
+  if (_hojaAvisosLista) return
+  const token = await getAccessToken()
+  const metaRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}?fields=sheets.properties.title`, { headers: { Authorization: `Bearer ${token}` } })
+  if (!metaRes.ok) throw new Error(`Sheets META error: ${metaRes.status}`)
+  const meta = await metaRes.json()
+  if (!(meta.sheets || []).some(s => s.properties?.title === HOJA_AVISOS)) {
+    const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}:batchUpdate`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requests: [{ addSheet: { properties: { title: HOJA_AVISOS } } }] }),
+    })
+    if (!res.ok) throw new Error(`Sheets ADD SHEET error: ${res.status}`)
+    await sheetsUpdate(`${HOJA_AVISOS}!A1:L1`, [ENCABEZADOS_AVISOS])
+  }
+  _hojaAvisosLista = true
+}
+
+export async function getAvisosArticulos() {
+  let data
+  try { data = await sheetsGet(`${HOJA_AVISOS}!A2:L`) }
+  catch (e) { if (String(e.message).includes('400')) return []; throw e }
+  return (data.values || []).filter(r => r[0]).map((r, i) => ({
+    fila: i + 2, id: r[0], fecha: r[1] || '', hora: r[2] || '', articuloId: r[3] || '', nombre: r[4] || '',
+    tipo: r[5] || '', detalle: r[6] || '', empleado: r[7] || '', estado: (r[8] || 'PENDIENTE').toUpperCase(),
+    resueltoPor: r[9] || '', fechaResuelto: r[10] || '', notaResolucion: r[11] || '',
+    ms: fechaHoraAMsAR(r[1], r[2]),
+  }))
+}
+
+export async function registrarAvisoArticulo({ articulo, tipo, detalle = '', empleado = '' }) {
+  if (!tipo || (tipo === 'Otro' && !detalle.trim())) throw new Error('FALTA_DETALLE')
+  await asegurarHojaAvisos()
+  const dt = getArgentinaDate()
+  const data = await sheetsGet(`${HOJA_AVISOS}!A2:A`)
+  const prefix = `AV${String(dt.raw.getFullYear()).slice(2)}${String(dt.raw.getMonth()+1).padStart(2,'0')}${String(dt.raw.getDate()).padStart(2,'0')}`
+  const ids = new Set((data.values || []).map(r => r[0]).filter(x => x?.startsWith(prefix)))
+  let seq = ids.size + 1
+  while (ids.has(`${prefix}-${String(seq).padStart(3,'0')}`)) seq++
+  const id = `${prefix}-${String(seq).padStart(3,'0')}`
+  await sheetsAppend(`${HOJA_AVISOS}!A1`, [[id, `'${dt.fecha}`, `'${dt.hora}`, articulo.id, articulo.nombre, tipo, detalle.trim(), empleado, 'PENDIENTE', '', '', '']])
+  await registrarLog({ accion: 'AVISO_ARTICULO', detalle: `${articulo.id} · ${tipo}${detalle ? ` (${detalle.trim()})` : ''}`, idReferencia: id, empleado, resultado: 'OK' })
+  return id
+}
+
+export async function resolverAvisoArticulo({ id, nota = '', quien = '' }) {
+  const data = await sheetsGet(`${HOJA_AVISOS}!A2:A`)
+  const idx = (data.values || []).findIndex(r => r[0] === id)
+  if (idx < 0) throw new Error('No se encontró el aviso')
+  const dt = getArgentinaDate()
+  await sheetsUpdate(`${HOJA_AVISOS}!I${idx + 2}:L${idx + 2}`, [['RESUELTO', quien, `'${dt.fecha} ${String(dt.hora).slice(0, 5)}`, nota.trim()]])
+  await registrarLog({ accion: 'AVISO_RESUELTO', detalle: `Aviso ${id} resuelto${nota ? ` (${nota.trim()})` : ''}`, idReferencia: id, empleado: quien, resultado: 'OK' })
+}

@@ -6,6 +6,7 @@ import { useState, useEffect, useMemo } from 'react'
 import {
   getEstadoStock, registrarConteo, registrarBaja, anularMovimientoStock,
   armarListaConteoDelDia, MOTIVOS_BAJA, FRECUENCIA_CONTEO, ARTICULOS_POR_DIA,
+  getAvisosArticulos, registrarAvisoArticulo, resolverAvisoArticulo, TIPOS_AVISO,
 } from '../api/sheets.js'
 
 const fmt$ = n => (n < 0 ? '−$' : '$') + Math.abs(Math.round(n)).toLocaleString('es-AR')
@@ -18,8 +19,37 @@ function haceDias(ms) {
   return d <= 0 ? 'hoy' : d === 1 ? 'ayer' : `hace ${d} días`
 }
 
-function ItemConteo({ art, info, clase, onGuardar, guardando, recuento, resultado, esAdmin }) {
+function FormAviso({ art, onEnviar, onCancelar }) {
+  const [tipo, setTipo] = useState('')
+  const [detalle, setDetalle] = useState('')
+  const [enviando, setEnviando] = useState(false)
+  const ok = tipo && !(tipo === 'Otro' && !detalle.trim())
+  async function enviar() {
+    if (!ok) return
+    setEnviando(true)
+    const bien = await onEnviar(art, tipo, detalle)
+    if (!bien) setEnviando(false)
+  }
+  return (
+    <div style={S.avisoForm}>
+      <div style={S.avisoTitulo}>Anotar algo sobre este artículo</div>
+      <div style={S.avisoTipos}>
+        {TIPOS_AVISO.map(t => (
+          <button key={t} style={{ ...S.avisoTipo, ...(tipo === t ? S.avisoTipoActivo : {}) }} onClick={() => setTipo(t)}>{t}</button>
+        ))}
+      </div>
+      <input style={S.search} placeholder={tipo === 'Otro' ? 'Contá qué pasa (obligatorio)' : 'Detalle (opcional). Ej: está repetido con TB00123'} value={detalle} maxLength={200} onChange={e => setDetalle(e.target.value)} />
+      <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+        <button style={S.avisoCancelar} onClick={onCancelar} disabled={enviando}>Cancelar</button>
+        <button style={{ ...S.avisoEnviar, opacity: ok && !enviando ? 1 : 0.45 }} disabled={!ok || enviando} onClick={enviar}>{enviando ? 'Guardando...' : 'Guardar anotación'}</button>
+      </div>
+    </div>
+  )
+}
+
+function ItemConteo({ art, info, clase, onGuardar, guardando, recuento, resultado, esAdmin, avisosPendientes = 0, onAviso }) {
   const [valor, setValor] = useState('')
+  const [anotando, setAnotando] = useState(false)
   const [reabierto, setReabierto] = useState(null) // resultado que había al tocar "Contar de nuevo"
   useEffect(() => { if (recuento != null) setValor('') }, [recuento])
   const num = valor === '' ? null : Number(valor)
@@ -41,6 +71,11 @@ function ItemConteo({ art, info, clase, onGuardar, guardando, recuento, resultad
           </div>
         )}
         {recuento != null && !hecho && <div style={S.recuentoTxt}>No coincide con lo que espera la app. Volvé a contar con cuidado (incluí lo del depósito).</div>}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 3, flexWrap: 'wrap' }}>
+          {avisosPendientes > 0 && <span style={S.avisoBadge}>📝 {avisosPendientes} {avisosPendientes === 1 ? 'anotación pendiente' : 'anotaciones pendientes'}</span>}
+          {!anotando && onAviso && <button style={S.anotarBtn} onClick={() => setAnotando(true)}>📝 Anotar</button>}
+        </div>
+        {anotando && <FormAviso art={art} onCancelar={() => setAnotando(false)} onEnviar={async (a, t, d) => { const ok = await onAviso(a, t, d); if (ok) setAnotando(false); return ok }} />}
       </div>
       {!hecho && (
         <div style={S.itemAccion}>
@@ -81,6 +116,11 @@ export default function Conteo({ articulos = [], usuarios = [], perfilNombre = '
   const [bajaBusqueda, setBajaBusqueda] = useState('')
   const [guardandoBaja, setGuardandoBaja] = useState(false)
   const [anulando, setAnulando] = useState(null)
+  // Anotaciones (avisos) sobre artículos
+  const [avisos, setAvisos] = useState([])
+  const [verResueltos, setVerResueltos] = useState(false)
+  const [resolviendo, setResolviendo] = useState(null)
+  const [notaResolucion, setNotaResolucion] = useState('')
 
   useEffect(() => { if (perfilEsEmpleado) setEmpleado(perfilNombre) }, [perfilNombre, perfilEsEmpleado])
   useEffect(() => { if (articulos.length) cargar() }, [articulos.length])
@@ -88,12 +128,36 @@ export default function Conteo({ articulos = [], usuarios = [], perfilNombre = '
 
   async function cargar() {
     setLoading(true); setError(null)
+    getAvisosArticulos().then(setAvisos).catch(e => console.error(e))
     try { setDatos(await getEstadoStock(articulos)) }
     catch (e) { console.error(e); setError('No se pudo cargar el stock. Intentá de nuevo.') }
     finally { setLoading(false) }
   }
 
   function showToast(msg, type = 'success') { setToast({ msg, type }); setTimeout(() => setToast(null), 3000) }
+
+  const pendientesPorArt = useMemo(() => {
+    const m = {}; avisos.forEach(a => { if (a.estado !== 'RESUELTO') m[a.articuloId] = (m[a.articuloId] || 0) + 1 }); return m
+  }, [avisos])
+
+  async function guardarAviso(art, tipo, detalle) {
+    if (!empleado) { showToast('Elegí quién está contando', 'error'); return false }
+    try {
+      await registrarAvisoArticulo({ articulo: art, tipo, detalle, empleado })
+      showToast('Anotación guardada')
+      getAvisosArticulos().then(setAvisos).catch(() => {})
+      return true
+    } catch (e) { console.error(e); showToast('No se pudo guardar la anotación.', 'error'); return false }
+  }
+
+  async function resolverAviso(av) {
+    try {
+      await resolverAvisoArticulo({ id: av.id, nota: notaResolucion, quien: perfilNombre })
+      showToast('Marcado como resuelto')
+      setResolviendo(null); setNotaResolucion('')
+      setAvisos(await getAvisosArticulos())
+    } catch (e) { console.error(e); showToast('No se pudo guardar.', 'error') }
+  }
 
   const estado = datos?.estado || {}
   const clases = datos?.clases || {}
@@ -157,6 +221,7 @@ export default function Conteo({ articulos = [], usuarios = [], perfilNombre = '
             <ItemConteo
               key={a.id} art={a} info={estado[a.id]} clase={clases[a.id]} esAdmin={esAdmin}
               onGuardar={guardarConteo} guardando={!!guardando[a.id]}
+              avisosPendientes={pendientesPorArt[a.id] || 0} onAviso={guardarAviso}
               recuento={recuentos[a.id]} resultado={resultados[a.id]}
             />
           ))}
@@ -196,7 +261,7 @@ export default function Conteo({ articulos = [], usuarios = [], perfilNombre = '
     { id: 'sincontar', label: `Sin contar${datos ? ` (${sinContar.length})` : ''}` },
     { id: 'buscar', label: 'Buscar' },
     { id: 'baja', label: 'Baja' },
-    ...(esAdmin ? [{ id: 'dif', label: 'Diferencias' }] : []),
+    ...(esAdmin ? [{ id: 'dif', label: 'Diferencias' }, { id: 'avisos', label: `Anotaciones${avisos.filter(a => a.estado !== 'RESUELTO').length ? ` (${avisos.filter(a => a.estado !== 'RESUELTO').length})` : ''}` }] : []),
   ]
 
   const bajaResultados = bajaBusqueda.trim()
@@ -295,6 +360,43 @@ export default function Conteo({ articulos = [], usuarios = [], perfilNombre = '
               </div>
             )}
 
+            {modo === 'avisos' && esAdmin && (() => {
+              const lista = avisos.filter(a => verResueltos || a.estado !== 'RESUELTO').sort((x, y) => (x.estado === 'RESUELTO') - (y.estado === 'RESUELTO') || y.ms - x.ms)
+              return (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    <div style={S.ayuda}>Lo que anotaron los empleados al contar. Cuando lo corrijas (por ejemplo en la solapa Artículos), marcalo como resuelto.</div>
+                    <label style={{ ...S.ayuda, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                      <input type="checkbox" checked={verResueltos} onChange={e => setVerResueltos(e.target.checked)} /> Ver también los resueltos
+                    </label>
+                  </div>
+                  {lista.length === 0 ? <div style={S.muted}>No hay anotaciones pendientes.</div> : (
+                    <div style={S.lista}>
+                      {lista.map(av => (
+                        <div key={av.id} style={{ ...S.difRow, alignItems: 'flex-start', ...(av.estado === 'RESUELTO' ? { opacity: 0.55 } : {}) }}>
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <div style={S.itemNombre}>{av.estado === 'RESUELTO' && <span style={S.badgeResuelto}>RESUELTO</span>}{av.nombre} <span style={{ ...S.itemMeta, display: 'inline' }}>· {av.articuloId}</span></div>
+                            <div style={{ ...S.itemMeta, color: 'var(--accent)', fontWeight: 600 }}>{av.tipo}</div>
+                            {av.detalle && <div style={{ fontFamily: 'Barlow, sans-serif', fontSize: 14, color: 'var(--text)', marginTop: 2 }}>{av.detalle}</div>}
+                            <div style={S.itemMeta}>{av.fecha} {String(av.hora).slice(0, 5)} · {av.empleado}</div>
+                            {av.estado === 'RESUELTO' && <div style={S.itemMeta}>Resuelto por {av.resueltoPor} el {av.fechaResuelto}{av.notaResolucion ? ` · ${av.notaResolucion}` : ''}</div>}
+                            {resolviendo === av.id && (
+                              <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+                                <input style={{ ...S.search, flex: 1, minWidth: 180 }} placeholder="Qué se hizo (opcional)" value={notaResolucion} onChange={e => setNotaResolucion(e.target.value)} />
+                                <button style={S.avisoEnviar} onClick={() => resolverAviso(av)}>Confirmar</button>
+                                <button style={S.avisoCancelar} onClick={() => { setResolviendo(null); setNotaResolucion('') }}>Cancelar</button>
+                              </div>
+                            )}
+                          </div>
+                          {av.estado !== 'RESUELTO' && resolviendo !== av.id && <button style={S.resolverBtn} onClick={() => { setResolviendo(av.id); setNotaResolucion('') }}>Marcar resuelto</button>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )
+            })()}
+
             {modo === 'dif' && esAdmin && (
               <>
                 <div style={S.resumen}>
@@ -362,6 +464,17 @@ const S = {
   itemNombre: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 17, color: 'var(--text)', lineHeight: 1.2 },
   itemMeta: { fontFamily: 'Barlow, sans-serif', fontSize: 12, color: 'var(--muted)', marginTop: 2 },
   recontarBtn: { marginLeft: 10, background: 'none', border: 'none', color: 'var(--muted)', textDecoration: 'underline', fontFamily: 'Barlow, sans-serif', fontSize: 12, cursor: 'pointer', padding: 0 },
+  anotarBtn: { background: 'none', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--muted)', fontFamily: 'Barlow, sans-serif', fontSize: 12, padding: '2px 8px', cursor: 'pointer' },
+  avisoBadge: { fontFamily: 'Barlow, sans-serif', fontSize: 12, color: 'var(--accent)', background: 'rgba(245,200,0,0.1)', borderRadius: 6, padding: '2px 8px' },
+  avisoForm: { marginTop: 8, background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 10, padding: 10, display: 'flex', flexDirection: 'column', gap: 6 },
+  avisoTitulo: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 13, color: 'var(--muted)', letterSpacing: 1, textTransform: 'uppercase' },
+  avisoTipos: { display: 'flex', flexWrap: 'wrap', gap: 6 },
+  avisoTipo: { background: 'var(--surface)', border: '1.5px solid var(--border)', borderRadius: 20, color: 'var(--muted)', fontFamily: 'Barlow, sans-serif', fontSize: 13, padding: '6px 12px', cursor: 'pointer' },
+  avisoTipoActivo: { borderColor: 'var(--accent)', color: 'var(--accent)', background: 'rgba(245,200,0,0.1)' },
+  avisoCancelar: { flex: 1, background: 'none', border: '1.5px solid var(--border)', borderRadius: 8, color: 'var(--muted)', fontFamily: 'Barlow, sans-serif', fontSize: 14, padding: '9px', cursor: 'pointer' },
+  avisoEnviar: { flex: 2, background: 'var(--accent)', border: 'none', borderRadius: 8, color: '#000', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 15, padding: '9px 14px', cursor: 'pointer' },
+  resolverBtn: { flexShrink: 0, background: 'none', border: '1px solid rgba(34,197,94,0.5)', borderRadius: 6, color: '#22c55e', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 12, padding: '4px 10px', cursor: 'pointer', textTransform: 'uppercase' },
+  badgeResuelto: { fontSize: 10, fontWeight: 800, color: '#22c55e', background: 'rgba(34,197,94,0.15)', borderRadius: 4, padding: '1px 5px', marginRight: 6, letterSpacing: 1 },
   okTxt: { fontFamily: 'Barlow, sans-serif', fontSize: 13, color: '#22c55e', fontWeight: 600, marginTop: 3 },
   recuentoTxt: { fontFamily: 'Barlow, sans-serif', fontSize: 13, color: '#f59e0b', fontWeight: 600, marginTop: 3 },
   itemAccion: { display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 },

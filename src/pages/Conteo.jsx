@@ -123,6 +123,14 @@ export default function Conteo({ articulos = [], usuarios = [], perfilNombre = '
   const [resolviendo, setResolviendo] = useState(null)
   const [notaResolucion, setNotaResolucion] = useState('')
   const [scannerBaja, setScannerBaja] = useState(false)
+  // Tandas extra del día (se recuerdan en este dispositivo hasta medianoche)
+  const claveTandas = 'tb_conteo_tandas_' + new Date(Date.now() - 3 * 3600000).toISOString().slice(0, 10)
+  const [tandasExtra, setTandasExtra] = useState(() => { try { return Number(localStorage.getItem(claveTandas)) || 0 } catch { return 0 } })
+  function pedirOtraTanda() {
+    const n = tandasExtra + 1
+    setTandasExtra(n)
+    try { localStorage.setItem(claveTandas, String(n)) } catch {}
+  }
   // Diferencias y anotaciones solo para admins: el perfil tiene que ser admin y,
   // si se eligió quién cuenta, esa persona también (por si un empleado usa un dispositivo de admin).
   const tipoDe = n => (usuarios.find(u => u.nombre === n)?.tipo || '').toLowerCase()
@@ -168,7 +176,8 @@ export default function Conteo({ articulos = [], usuarios = [], perfilNombre = '
 
   const estado = datos?.estado || {}
   const clases = datos?.clases || {}
-  const listaHoy = useMemo(() => datos ? armarListaConteoDelDia(articulos, estado, clases) : [], [datos, articulos])
+  const listaHoy = useMemo(() => datos ? armarListaConteoDelDia(articulos, estado, clases, Date.now(), ARTICULOS_POR_DIA, tandasExtra) : [], [datos, articulos, tandasExtra])
+  const quedanParaOtraTanda = listaHoy.length < articulos.length
   const sinContar = useMemo(() => articulos.filter(a => !estado[a.id]?.contado && !resultados[a.id]?.guardado).sort((x, y) => (!x.nombre - !y.nombre) || x.nombre.localeCompare(y.nombre)), [datos, articulos, resultados])
   const contadosTotal = articulos.length - sinContar.length
   const pendientesHoy = listaHoy.filter(a => !a.contadoHoy && !resultados[a.id]?.guardado).length
@@ -322,9 +331,17 @@ export default function Conteo({ articulos = [], usuarios = [], perfilNombre = '
             {modo === 'hoy' && (
               <>
                 <div style={S.ayuda}>
-                  {pendientesHoy === 0 ? '¡Listo! Ya se contó todo lo de hoy.' : `Contá estos ${listaHoy.length} artículos. Cargá el total que hay (salón + depósito).`}
+                  {pendientesHoy === 0
+                    ? (listaHoy.length ? '¡Listo! Ya se contó todo lo de hoy.' : 'Hoy no hay artículos que toque contar.')
+                    : `Contá estos ${pendientesHoy} artículos. Cargá el total que hay (salón + depósito).`}
                 </div>
-                {renderItems(listaHoy)}
+                {pendientesHoy === 0 && quedanParaOtraTanda && (
+                  <div style={S.otraTanda}>
+                    <div style={S.otraTandaTxt}>¿Hay tiempo libre? Podés adelantar trabajo con otra tanda: son los que más cerca están de tocarles.</div>
+                    <button style={S.otraTandaBtn} onClick={pedirOtraTanda}>+ Contar otra tanda ({ARTICULOS_POR_DIA} artículos)</button>
+                  </div>
+                )}
+                {renderItems([...listaHoy].sort((x, y) => x.contadoHoy - y.contadoHoy))}
               </>
             )}
 
@@ -507,6 +524,9 @@ const S = {
   itemNombre: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 17, color: 'var(--text)', lineHeight: 1.2 },
   itemMeta: { fontFamily: 'Barlow, sans-serif', fontSize: 12, color: 'var(--muted)', marginTop: 2 },
   recontarBtn: { marginLeft: 10, background: 'none', border: 'none', color: 'var(--muted)', textDecoration: 'underline', fontFamily: 'Barlow, sans-serif', fontSize: 12, cursor: 'pointer', padding: 0 },
+  otraTanda: { display: 'flex', flexDirection: 'column', gap: 8, background: 'rgba(245,200,0,0.07)', border: '1.5px dashed var(--accent)', borderRadius: 12, padding: 14 },
+  otraTandaTxt: { fontFamily: 'Barlow, sans-serif', fontSize: 14, color: 'var(--text)' },
+  otraTandaBtn: { padding: '13px', background: 'var(--accent)', border: 'none', borderRadius: 10, color: '#000', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 18, cursor: 'pointer' },
   anotarBtn: { background: 'var(--surface2)', border: '1.5px solid var(--border)', borderRadius: 10, color: 'var(--text)', fontFamily: 'Barlow, sans-serif', fontWeight: 600, fontSize: 22, padding: '8px 18px', cursor: 'pointer' },
   avisoBadge: { fontFamily: 'Barlow, sans-serif', fontSize: 12, color: 'var(--accent)', background: 'rgba(245,200,0,0.1)', borderRadius: 6, padding: '2px 8px' },
   avisoForm: { marginTop: 8, background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 10, padding: 10, display: 'flex', flexDirection: 'column', gap: 6 },

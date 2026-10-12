@@ -876,26 +876,37 @@ export function calcularClasesABC(articulos, ventas, ahoraMs = Date.now()) {
 
 // Lista de conteo del día: los más atrasados según su frecuencia. Estable durante el día:
 // se calcula con los conteos de ANTES de hoy, y los contados hoy aparecen como hechos.
-export function armarListaConteoDelDia(articulos, estadoStock, clases, ahoraMs = Date.now(), cantidad = ARTICULOS_POR_DIA) {
+// tandasExtra: tandas adicionales pedidas a mano (días tranquilos). Suman los artículos que siguen
+// en prioridad, aunque todavía no les toque (los que están más cerca de vencer van primero).
+export function armarListaConteoDelDia(articulos, estadoStock, clases, ahoraMs = Date.now(), cantidad = ARTICULOS_POR_DIA, tandasExtra = 0) {
   const hoyAR = new Date(ahoraMs - 3 * 3600000); hoyAR.setUTCHours(0, 0, 0, 0)
   const inicioHoy = hoyAR.getTime() + 3 * 3600000
   const prioridad = a => {
     const e = estadoStock[a.id] || {}
     const ultimoAntesDeHoy = e.ultimoConteoMs && e.ultimoConteoMs < inicioHoy ? e.ultimoConteoMs : (e.ultimoConteoAnteriorMs || 0)
-    if (!ultimoAntesDeHoy) return 1e6 + (e.stock < 0 ? 1 : 0)
+    // Stock negativo suma prioridad, pero se mira el de ANTES de hoy: si no, al contarlo cambia la lista
+    const negativo = (e.stockAntesDeHoy ?? e.stock) < 0
+    if (!ultimoAntesDeHoy) return 1e6 + (negativo ? 1 : 0)
     const dias = (inicioHoy - ultimoAntesDeHoy) / 86400000
-    return dias / FRECUENCIA_CONTEO[clases[a.id] || 'C'] + (e.stock < 0 ? 0.5 : 0)
+    return dias / FRECUENCIA_CONTEO[clases[a.id] || 'C'] + (negativo ? 0.5 : 0)
   }
-  const candidatos = articulos.map(a => ({ a, p: prioridad(a) })).filter(x => x.p >= 1)
-  candidatos.sort((x, y) => y.p - x.p || x.a.nombre.localeCompare(y.a.nombre))
-  return candidatos.slice(0, cantidad).map(x => ({ ...x.a, contadoHoy: (estadoStock[x.a.id]?.ultimoConteoMs || 0) >= inicioHoy }))
+  const todos = articulos.map(a => ({ a, p: prioridad(a) }))
+  todos.sort((x, y) => y.p - x.p || x.a.nombre.localeCompare(y.a.nombre))
+  const base = Math.min(cantidad, todos.filter(x => x.p >= 1).length)
+  return todos.slice(0, base + tandasExtra * cantidad).map((x, i) => ({ ...x.a, contadoHoy: (estadoStock[x.a.id]?.ultimoConteoMs || 0) >= inicioHoy, tandaExtra: i >= base }))
 }
 
 // Estado completo para la solapa Conteo
 export async function getEstadoStock(articulos) {
   const datos = await getDatosStock()
   const estado = calcularStockDesdeDatos(articulos, datos)
-  // Para que la lista del día no cambie al contar: guardamos también el conteo anterior al de hoy
+  // Para que la lista del día no cambie al contar ni al vender: guardamos el conteo anterior al de hoy,
+  // el stock como estaba al empezar el día y las clases calculadas hasta ayer.
+  const hoy0 = new Date(Date.now() - 3 * 3600000); hoy0.setUTCHours(0, 0, 0, 0)
+  const inicioDia = hoy0.getTime() + 3 * 3600000
+  const antes = x => x.ms < inicioDia
+  const estadoInicioDia = calcularStockDesdeDatos(articulos, { ventas: datos.ventas.filter(antes), ingresos: datos.ingresos.filter(antes), movimientos: datos.movimientos.filter(antes) })
+  Object.entries(estadoInicioDia).forEach(([id, e]) => { if (estado[id]) estado[id].stockAntesDeHoy = e.stock })
   const conteosPorArt = {}
   datos.movimientos.forEach(m => { if (!m.anulado && m.tipo === 'CONTEO') (conteosPorArt[m.articuloId] ||= []).push(m.ms) })
   Object.entries(conteosPorArt).forEach(([id, lista]) => {
@@ -905,7 +916,7 @@ export async function getEstadoStock(articulos) {
     const inicioHoy = hoyAR.getTime() + 3 * 3600000
     estado[id].ultimoConteoAnteriorMs = [...lista].reverse().find(ms => ms < inicioHoy) || 0
   })
-  const clases = calcularClasesABC(articulos, datos.ventas)
+  const clases = calcularClasesABC(articulos, datos.ventas.filter(antes), inicioDia)
   return { estado, clases, movimientos: datos.movimientos }
 }
 

@@ -171,7 +171,14 @@ export default function Conteo({ articulos = [], usuarios = [], perfilNombre = '
   // ── Diferencias (Admin) ──
   const hace30 = Date.now() - 30 * 86400000
   const movs30 = (datos?.movimientos || []).filter(m => m.ms >= hace30).sort((a, b) => b.ms - a.ms)
-  const difs = movs30.filter(m => m.tipo === 'BAJA' || (m.tipo === 'CONTEO' && m.diferencia !== 0))
+  // El primer conteo de cada artículo es su punto de partida: se compara contra la cuenta vieja, que no es
+  // confiable, así que no se toma como faltante ni sobrante (vale también para los guardados antes de este cambio)
+  const primerConteo = {}
+  ;(datos?.movimientos || []).filter(m => m.tipo === 'CONTEO' && !m.anulado).forEach(m => {
+    if (!primerConteo[m.articuloId] || m.ms < primerConteo[m.articuloId].ms) primerConteo[m.articuloId] = m
+  })
+  const esInicial = m => m.tipo === 'CONTEO' && primerConteo[m.articuloId]?.id === m.id
+  const difs = movs30.filter(m => m.tipo === 'BAJA' || (m.tipo === 'CONTEO' && m.diferencia !== 0 && !esInicial(m)))
   const activos30 = difs.filter(m => !m.anulado)
   const valorFaltante = activos30.filter(m => m.tipo === 'CONTEO' && m.diferencia < 0).reduce((s, m) => s + m.valorDiferencia, 0)
   const valorSobrante = activos30.filter(m => m.tipo === 'CONTEO' && m.diferencia > 0).reduce((s, m) => s + m.valorDiferencia, 0)
@@ -180,7 +187,8 @@ export default function Conteo({ articulos = [], usuarios = [], perfilNombre = '
     const e = estado[a.id]; if (!e?.contado) return false
     return (Date.now() - e.ultimoConteoMs) / 86400000 <= FRECUENCIA_CONTEO[clases[a.id] || 'C']
   }).length
-  const conteosCuenta = (datos?.movimientos || []).filter(m => m.tipo === 'CONTEO' && !m.anulado && m.ms >= hace30)
+  // La exactitud se mide solo con recuentos (el conteo inicial no tiene contra qué comparar)
+  const conteosCuenta = (datos?.movimientos || []).filter(m => m.tipo === 'CONTEO' && !m.anulado && m.ms >= hace30 && !esInicial(m))
   const exactitud = conteosCuenta.length ? Math.round(conteosCuenta.filter(m => m.diferencia === 0).length / conteosCuenta.length * 100) : null
 
   const modos = [

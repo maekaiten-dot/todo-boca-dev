@@ -924,16 +924,19 @@ export async function registrarConteo({ articulo, cantidad, empleado = '', prime
   const contado = Math.max(0, Math.round(Number(cantidad) || 0))
   await asegurarHojaMovimientos()
   const datos = await getDatosStock()
-  const esperado = calcularStockDesdeDatos([articulo], datos)[articulo.id].stock
-  const diferencia = contado - esperado
+  // Primer conteo del artículo: no hay contra qué comparar (el stock "esperado" sale de la cuenta vieja,
+  // que no es confiable), así que se guarda directo como punto de partida, sin pedir recuento ni marcar diferencia.
+  const esInicial = !datos.movimientos.some(m => !m.anulado && m.tipo === 'CONTEO' && m.articuloId === articulo.id)
+  const esperado = esInicial ? '' : calcularStockDesdeDatos([articulo], datos)[articulo.id].stock
+  const diferencia = esInicial ? 0 : contado - esperado
   if (diferencia !== 0 && primerConteo == null) return { necesitaRecuento: true, guardado: false }
   const dt = getArgentinaDate()
   const id = nuevoIdMovimiento(dt, datos.movimientos)
   const costo = Number(articulo.costoUnitario) || 0
-  const notas = primerConteo != null ? `Recontado (1er conteo: ${primerConteo})` : ''
-  await sheetsAppend(`${HOJA_MOV}!A1`, [[id, `'${dt.fecha}`, `'${dt.hora}`, 'CONTEO', articulo.id, articulo.nombre, contado, esperado, diferencia, costo, Math.round(diferencia * costo), '', empleado, 'FALSE', notas]])
-  await registrarLog({ accion: 'STOCK_CONTEO', detalle: `${articulo.id} · contado ${contado} · esperado ${esperado} · dif ${diferencia}`, idReferencia: id, empleado, resultado: 'OK' })
-  return { guardado: true, id, esperado, diferencia }
+  const notas = esInicial ? 'Conteo inicial (punto de partida)' : primerConteo != null ? `Recontado (1er conteo: ${primerConteo})` : ''
+  await sheetsAppend(`${HOJA_MOV}!A1`, [[id, `'${dt.fecha}`, `'${dt.hora}`, 'CONTEO', articulo.id, articulo.nombre, contado, esperado, esInicial ? '' : diferencia, costo, esInicial ? '' : Math.round(diferencia * costo), '', empleado, 'FALSE', notas]])
+  await registrarLog({ accion: 'STOCK_CONTEO', detalle: esInicial ? `${articulo.id} · conteo inicial ${contado}` : `${articulo.id} · contado ${contado} · esperado ${esperado} · dif ${diferencia}`, idReferencia: id, empleado, resultado: 'OK' })
+  return { guardado: true, id, esperado, diferencia, inicial: esInicial }
 }
 
 export async function registrarBaja({ articulo, cantidad, motivo, detalle = '', empleado = '' }) {

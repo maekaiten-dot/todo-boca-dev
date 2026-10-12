@@ -3,6 +3,7 @@ import { useState, useEffect, useMemo, Fragment } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { getHistoricoVentas, POSNET_METODOS } from '../api/sheets.js'
 import CorregirPosnetModal from '../components/CorregirPosnetModal.jsx'
+import MonotributoPosnet from '../components/MonotributoPosnet.jsx'
 
 function esTarjetaOQR(metodo) {
   if (!metodo) return false
@@ -591,6 +592,8 @@ export default function Estadisticas({ esAdmin = false, usuarios = [], perfilNom
           </ResponsiveContainer>
         </div>
       </div>
+
+      <MonotributoPosnet ventas={ventasTodas} />
 
       {/* Tarjeta + QR por mes, separado por posnet */}
       <div style={S.chartCard}>

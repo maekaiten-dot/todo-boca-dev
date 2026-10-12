@@ -1233,3 +1233,37 @@ export async function quitarTutorial(id, empleado = '') {
   await sheetsUpdate(`${HOJA_TUTORIALES}!H${idx + 2}`, [['FALSE']])
   await registrarLog({ accion: 'TUTORIAL_QUITADO', detalle: `Tutorial ${id} quitado`, idReferencia: id, empleado, resultado: 'OK' })
 }
+
+// ── Monotributo: ingresos por posnet cargados a mano ─────────────────────────
+// Hoja MONOTRIBUTO POSNET · A:MES (aaaa-mm)  B:AMARILLO  C:BLANCO  D:NOTA
+// Sirve para los meses en que la app no registraba el posnet: se cargan los totales reales de cada
+// titular (de las liquidaciones del posnet o de ARCA). Si un mes está cargado acá, se usa este valor.
+const HOJA_MONO = 'MONOTRIBUTO POSNET'
+export async function getMonotributoManual() {
+  let data
+  try { data = await sheetsGet(`${HOJA_MONO}!A2:D`) }
+  catch (e) {
+    if (!String(e.message).includes('400')) throw e
+    // La hoja no existe: se crea con los encabezados para poder completarla
+    try {
+      const token = await getAccessToken()
+      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}:batchUpdate`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requests: [{ addSheet: { properties: { title: HOJA_MONO } } }] }),
+      })
+      await sheetsUpdate(`${HOJA_MONO}!A1:D1`, [['MES (aaaa-mm)', 'AMARILLO', 'BLANCO', 'NOTA']])
+    } catch (e2) { console.error(e2) }
+    return {}
+  }
+  const out = {}
+  ;(data.values || []).forEach(r => {
+    let mes = String(r[0] || '').trim().replace(/^'/, '')
+    const m1 = mes.match(/^(\d{4})-(\d{1,2})$/), m2 = mes.match(/^(\d{1,2})\/(\d{4})$/)
+    if (m1) mes = `${m1[1]}-${m1[2].padStart(2, '0')}`
+    else if (m2) mes = `${m2[2]}-${m2[1].padStart(2, '0')}`
+    else return
+    if (r[1] === undefined && r[2] === undefined) return
+    out[mes] = { amarillo: parsePrecio(r[1]), blanco: parsePrecio(r[2]), nota: r[3] || '' }
+  })
+  return out
+}

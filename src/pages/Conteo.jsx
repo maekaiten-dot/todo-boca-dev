@@ -3,6 +3,7 @@
 // contar cualquier artículo y registrar bajas. Los Admin además ven las diferencias.
 // El conteo es "a ciegas": la app no muestra cuánto espera. Si no coincide, pide contar de nuevo.
 import { useState, useEffect, useMemo } from 'react'
+import BarcodeScanner from '../components/BarcodeScanner.jsx'
 import {
   getEstadoStock, registrarConteo, registrarBaja, anularMovimientoStock,
   armarListaConteoDelDia, MOTIVOS_BAJA, FRECUENCIA_CONTEO, ARTICULOS_POR_DIA,
@@ -121,10 +122,16 @@ export default function Conteo({ articulos = [], usuarios = [], perfilNombre = '
   const [verResueltos, setVerResueltos] = useState(false)
   const [resolviendo, setResolviendo] = useState(null)
   const [notaResolucion, setNotaResolucion] = useState('')
+  const [scannerBaja, setScannerBaja] = useState(false)
+  // Diferencias y anotaciones solo para admins: el perfil tiene que ser admin y,
+  // si se eligió quién cuenta, esa persona también (por si un empleado usa un dispositivo de admin).
+  const tipoDe = n => (usuarios.find(u => u.nombre === n)?.tipo || '').toLowerCase()
+  const verAdmin = esAdmin && (!empleado || tipoDe(empleado) === 'admin')
 
   useEffect(() => { if (perfilEsEmpleado) setEmpleado(perfilNombre) }, [perfilNombre, perfilEsEmpleado])
   useEffect(() => { if (articulos.length) cargar() }, [articulos.length])
   useEffect(() => { setPagina(1) }, [modo, busqueda])
+  useEffect(() => { if (!verAdmin && (modo === 'dif' || modo === 'avisos')) setModo('hoy') }, [verAdmin, modo])
 
   async function cargar() {
     setLoading(true); setError(null)
@@ -219,7 +226,7 @@ export default function Conteo({ articulos = [], usuarios = [], perfilNombre = '
         <div style={S.lista}>
           {visibles.map(a => (
             <ItemConteo
-              key={a.id} art={a} info={estado[a.id]} clase={clases[a.id]} esAdmin={esAdmin}
+              key={a.id} art={a} info={estado[a.id]} clase={clases[a.id]} esAdmin={verAdmin}
               onGuardar={guardarConteo} guardando={!!guardando[a.id]}
               avisosPendientes={pendientesPorArt[a.id] || 0} onAviso={guardarAviso}
               recuento={recuentos[a.id]} resultado={resultados[a.id]}
@@ -261,12 +268,26 @@ export default function Conteo({ articulos = [], usuarios = [], perfilNombre = '
     { id: 'sincontar', label: `Sin contar${datos ? ` (${sinContar.length})` : ''}` },
     { id: 'buscar', label: 'Buscar' },
     { id: 'baja', label: 'Baja' },
-    ...(esAdmin ? [{ id: 'dif', label: 'Diferencias' }, { id: 'avisos', label: `Anotaciones${avisos.filter(a => a.estado !== 'RESUELTO').length ? ` (${avisos.filter(a => a.estado !== 'RESUELTO').length})` : ''}` }] : []),
+    ...(verAdmin ? [{ id: 'dif', label: 'Diferencias' }, { id: 'avisos', label: `Anotaciones${avisos.filter(a => a.estado !== 'RESUELTO').length ? ` (${avisos.filter(a => a.estado !== 'RESUELTO').length})` : ''}` }] : []),
   ]
 
   const bajaResultados = bajaBusqueda.trim()
-    ? articulos.filter(a => normalizar(a.nombre).includes(normalizar(bajaBusqueda)) || normalizar(a.id).includes(normalizar(bajaBusqueda))).slice(0, 8)
+    ? articulos.filter(a => normalizar(a.nombre).includes(normalizar(bajaBusqueda)) || normalizar(a.id).includes(normalizar(bajaBusqueda))).slice(0, 12)
     : []
+
+  function escanearBaja(codigo) {
+    const c = String(codigo || '').trim()
+    const art = articulos.find(a => a.id === c || a.id.toLowerCase() === c.toLowerCase())
+    if (!art) return { ok: false, nombre: `No encontrado: ${c}` }
+    setBajaArt(art); setBajaBusqueda('')
+    return { ok: true, nombre: art.nombre }
+  }
+
+  const fotoArt = (a, tam) => (
+    <div style={{ ...S.itemFoto, width: tam, height: tam }}>
+      {a.foto ? <img src={a.foto} alt="" style={S.img} loading="lazy" /> : <span style={{ fontSize: tam * 0.45 }}>📦</span>}
+    </div>
+  )
 
   return (
     <div style={S.page}>
@@ -331,15 +352,36 @@ export default function Conteo({ articulos = [], usuarios = [], perfilNombre = '
                 <div style={S.fieldLabel}>ARTÍCULO</div>
                 {bajaArt ? (
                   <div style={S.bajaSel}>
-                    <span style={{ minWidth: 0 }}>{bajaArt.nombre} <span style={{ color: 'var(--muted)' }}>· {bajaArt.id}</span></span>
+                    {fotoArt(bajaArt, 64)}
+                    <span style={{ minWidth: 0, flex: 1 }}>{bajaArt.nombre} <span style={{ color: 'var(--muted)' }}>· {bajaArt.id}</span></span>
                     <button style={S.linkBtn} onClick={() => setBajaArt(null)}>Cambiar</button>
                   </div>
                 ) : (
                   <>
-                    <input style={S.search} placeholder="Buscar artículo..." value={bajaBusqueda} onChange={e => setBajaBusqueda(e.target.value)} />
-                    {bajaResultados.map(a => (
-                      <button key={a.id} style={S.resBtn} onClick={() => setBajaArt(a)}>{a.nombre} <span style={{ color: 'var(--muted)' }}>· {a.id}</span></button>
-                    ))}
+                    <div style={S.buscarFila}>
+                      <input style={{ ...S.search, flex: 1 }} placeholder="Buscar por nombre o código..." value={bajaBusqueda} onChange={e => setBajaBusqueda(e.target.value)} />
+                      <button style={S.qrBtn} onClick={() => setScannerBaja(true)} aria-label="Escanear código QR">
+                        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>
+                          <path d="M14 14h3v3h-3z"/><path d="M20 14v.01"/><path d="M14 20h.01"/><path d="M17 20h4v-3"/>
+                        </svg>
+                        <span>QR</span>
+                      </button>
+                    </div>
+                    {bajaBusqueda.trim() && (
+                      <div style={S.resLista}>
+                        {bajaResultados.length === 0 && <div style={S.muted}>No se encontró ningún artículo.</div>}
+                        {bajaResultados.map(a => (
+                          <button key={a.id} style={S.resBtn} onClick={() => setBajaArt(a)}>
+                            {fotoArt(a, 56)}
+                            <span style={{ minWidth: 0 }}>
+                              <span style={S.resNombre}>{a.nombre}</span>
+                              <span style={S.resCodigo}>{a.id}</span>
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </>
                 )}
                 <div style={S.fieldLabel}>CANTIDAD</div>
@@ -360,7 +402,7 @@ export default function Conteo({ articulos = [], usuarios = [], perfilNombre = '
               </div>
             )}
 
-            {modo === 'avisos' && esAdmin && (() => {
+            {modo === 'avisos' && verAdmin && (() => {
               const lista = avisos.filter(a => verResueltos || a.estado !== 'RESUELTO').sort((x, y) => (x.estado === 'RESUELTO') - (y.estado === 'RESUELTO') || y.ms - x.ms)
               return (
                 <>
@@ -397,7 +439,7 @@ export default function Conteo({ articulos = [], usuarios = [], perfilNombre = '
               )
             })()}
 
-            {modo === 'dif' && esAdmin && (
+            {modo === 'dif' && verAdmin && (
               <>
                 <div style={S.resumen}>
                   <div style={S.resItem}><div style={S.resValor}>{contadosTotal}/{articulos.length}</div><div style={S.resLabel}>Contados alguna vez</div></div>
@@ -433,6 +475,7 @@ export default function Conteo({ articulos = [], usuarios = [], perfilNombre = '
           </>
         )}
       </div>
+      {scannerBaja && <BarcodeScanner titulo="ESCANEAR ARTÍCULO" autoCerrarMs={900} onDetected={escanearBaja} onClose={() => setScannerBaja(false)} />}
     </div>
   )
 }
@@ -464,7 +507,7 @@ const S = {
   itemNombre: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 17, color: 'var(--text)', lineHeight: 1.2 },
   itemMeta: { fontFamily: 'Barlow, sans-serif', fontSize: 12, color: 'var(--muted)', marginTop: 2 },
   recontarBtn: { marginLeft: 10, background: 'none', border: 'none', color: 'var(--muted)', textDecoration: 'underline', fontFamily: 'Barlow, sans-serif', fontSize: 12, cursor: 'pointer', padding: 0 },
-  anotarBtn: { background: 'none', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--muted)', fontFamily: 'Barlow, sans-serif', fontSize: 12, padding: '2px 8px', cursor: 'pointer' },
+  anotarBtn: { background: 'var(--surface2)', border: '1.5px solid var(--border)', borderRadius: 10, color: 'var(--text)', fontFamily: 'Barlow, sans-serif', fontWeight: 600, fontSize: 22, padding: '8px 18px', cursor: 'pointer' },
   avisoBadge: { fontFamily: 'Barlow, sans-serif', fontSize: 12, color: 'var(--accent)', background: 'rgba(245,200,0,0.1)', borderRadius: 6, padding: '2px 8px' },
   avisoForm: { marginTop: 8, background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 10, padding: 10, display: 'flex', flexDirection: 'column', gap: 6 },
   avisoTitulo: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 13, color: 'var(--muted)', letterSpacing: 1, textTransform: 'uppercase' },
@@ -487,9 +530,14 @@ const S = {
   progresoBar: { height: 8, background: 'var(--surface2)', borderRadius: 4, overflow: 'hidden' },
   progresoFill: { height: '100%', background: 'var(--accent)' },
   card: { background: 'var(--surface)', border: '1.5px solid var(--border)', borderRadius: 14, padding: 16, display: 'flex', flexDirection: 'column', gap: 8 },
-  bajaSel: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, fontFamily: 'Barlow, sans-serif', fontSize: 15, color: 'var(--text)', background: 'var(--surface2)', borderRadius: 10, padding: '10px 12px' },
+  bajaSel: { display: 'flex', alignItems: 'center', gap: 12, fontFamily: 'Barlow, sans-serif', fontSize: 15, color: 'var(--text)', background: 'var(--surface2)', borderRadius: 10, padding: '10px 12px' },
   linkBtn: { background: 'none', border: 'none', color: 'var(--accent)', fontFamily: 'Barlow, sans-serif', fontSize: 14, cursor: 'pointer', flexShrink: 0 },
-  resBtn: { textAlign: 'left', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, padding: '9px 12px', color: 'var(--text)', fontFamily: 'Barlow, sans-serif', fontSize: 14, cursor: 'pointer' },
+  resBtn: { display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 10, padding: '8px 10px', color: 'var(--text)', fontFamily: 'Barlow, sans-serif', fontSize: 14, cursor: 'pointer', width: '100%' },
+  resLista: { display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 420, overflowY: 'auto' },
+  resNombre: { display: 'block', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 17, lineHeight: 1.2 },
+  resCodigo: { display: 'block', fontSize: 12, color: 'var(--muted)', marginTop: 2 },
+  buscarFila: { display: 'flex', gap: 8, alignItems: 'stretch' },
+  qrBtn: { display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, background: 'var(--surface2)', border: '1.5px solid var(--accent)', borderRadius: 10, color: 'var(--accent)', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 17, padding: '0 14px', cursor: 'pointer' },
   motivos: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 8 },
   bajaBtn: { marginTop: 10, padding: '15px', background: '#ef4444', border: 'none', borderRadius: 12, color: '#fff', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 19, letterSpacing: 1, cursor: 'pointer' },
   resumen: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8 },

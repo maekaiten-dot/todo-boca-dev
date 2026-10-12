@@ -1,6 +1,6 @@
 // src/pages/Estadisticas.jsx
 import { useState, useEffect, useMemo, Fragment } from 'react'
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LabelList } from 'recharts'
 import { getHistoricoVentas, POSNET_METODOS } from '../api/sheets.js'
 import CorregirPosnetModal from '../components/CorregirPosnetModal.jsx'
 import MonotributoPosnet from '../components/MonotributoPosnet.jsx'
@@ -129,6 +129,58 @@ function calcularPctPorMes(mesTotales, mesTarjeta) {
     const pct = mt.total > 0 ? parseFloat(((tq?.total || 0) / mt.total * 100).toFixed(2)) : 0
     return { key: mt.key, label: mt.label, pct }
   })
+}
+
+// Proyección del mes en curso: lo vendido hasta ahora + lo que falta, estimando cada día que queda
+// con el promedio de ese día de la semana en las últimas 8 semanas (días completos, sin contar hoy).
+// Para hoy se estima el día completo y se descuenta lo que ya se vendió.
+const SEMANAS_PROYECCION = 8
+function proyectarMesActual(ventas, ahoraMs = Date.now()) {
+  const hoy = new Date(ahoraMs - 3 * 3600000) // fecha en Argentina (UTC-3)
+  const y = hoy.getUTCFullYear(), m = hoy.getUTCMonth(), d = hoy.getUTCDate()
+  const clave = (yy, mm, dd) => `${dd}/${mm + 1}/${yy}`
+  const norm = f => { const [dd, mm, yy] = String(f || '').split('/').map(Number); return dd && mm && yy ? clave(yy, mm - 1, dd) : '' }
+  const porDia = {}
+  ventas.forEach(v => { if (v.anulado) return; const k = norm(v.fecha); if (k) porDia[k] = (porDia[k] || 0) + (parsePrecio(v.precioTotalFinal) || parsePrecio(v.precioTotal)) })
+  // Promedio por día de la semana con los días completos anteriores a hoy
+  const suma = Array(7).fill(0), cuenta = Array(7).fill(0)
+  for (let i = 1; i <= SEMANAS_PROYECCION * 7; i++) {
+    const f = new Date(Date.UTC(y, m, d - i))
+    const dow = f.getUTCDay()
+    suma[dow] += porDia[clave(f.getUTCFullYear(), f.getUTCMonth(), f.getUTCDate())] || 0
+    cuenta[dow]++
+  }
+  const prom = suma.map((s, i) => cuenta[i] ? s / cuenta[i] : 0)
+  const diasMes = new Date(Date.UTC(y, m + 1, 0)).getUTCDate()
+  let vendido = 0
+  for (let i = 1; i <= d; i++) vendido += porDia[clave(y, m, i)] || 0
+  const vendidoHoy = porDia[clave(y, m, d)] || 0
+  let resto = Math.max(0, prom[new Date(Date.UTC(y, m, d)).getUTCDay()] - vendidoHoy)
+  for (let i = d + 1; i <= diasMes; i++) resto += prom[new Date(Date.UTC(y, m, i)).getUTCDay()]
+  return { key: `${y}-${String(m + 1).padStart(2, '0')}`, vendido, resto, proyectado: vendido + resto, diasQuedan: diasMes - d, diasMes }
+}
+
+const fmtCorto = v => v >= 1000000 ? `$${(v / 1000000).toFixed(1)}M` : v >= 1000 ? `$${Math.round(v / 1000)}k` : `$${Math.round(v)}`
+
+const MesTooltip = ({ active, payload, label }) => {
+  if (!active || !payload?.length) return null
+  const r = payload[0].payload
+  const caja = { background:'var(--surface)', border:'1.5px solid var(--border)', borderRadius:8, padding:'10px 14px' }
+  const t = { fontFamily:'Barlow Condensed, sans-serif' }
+  return (
+    <div style={caja}>
+      <div style={{ ...t, fontSize:13, color:'var(--muted)', marginBottom:4 }}>{label}{r.proy ? ' · mes en curso' : ''}</div>
+      <div style={{ ...t, fontWeight:800, fontSize:20, color:'var(--accent)' }}>${Math.round(r.total).toLocaleString('es-AR')}{r.proy ? <span style={{ fontSize:13, fontWeight:600, color:'var(--muted)' }}> vendido</span> : null}</div>
+      {r.proy && (
+        <>
+          <div style={{ ...t, fontWeight:800, fontSize:18, color:'#90caf9', marginTop:4 }}>≈ ${Math.round(r.proy.proyectado).toLocaleString('es-AR')} <span style={{ fontSize:13, fontWeight:600, color:'var(--muted)' }}>proyectado a fin de mes</span></div>
+          <div style={{ fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)', marginTop:4, maxWidth:240 }}>
+            Faltan {r.proy.diasQuedan} {r.proy.diasQuedan === 1 ? 'día' : 'días'}. Estimado con el promedio de cada día de la semana de las últimas {SEMANAS_PROYECCION} semanas.
+          </div>
+        </>
+      )}
+    </div>
+  )
 }
 
 const CustomTooltip = ({ active, payload, label }) => {
@@ -460,6 +512,17 @@ export default function Estadisticas({ esAdmin = false, usuarios = [], perfilNom
   const [ventasTodas, setVentasTodas] = useState([])
   const [diaAbierto, setDiaAbierto] = useState(null)
   const datosPosnet = useMemo(() => calcularTarjetaQRPorPosnet(ventasTodas, datosMes), [ventasTodas, datosMes])
+  // Mes en curso: se le suma una barra semitransparente con lo que falta según la proyección
+  const datosMesConProy = useMemo(() => {
+    if (!ventasTodas.length) return datosMes
+    const p = proyectarMesActual(ventasTodas)
+    const filas = datosMes.map(mt => mt.key === p.key ? { ...mt, resto: p.resto, proy: p } : mt)
+    if (!filas.some(f => f.key === p.key)) {
+      const [yy, mm] = p.key.split('-')
+      filas.push({ key: p.key, label: `${mm}/${yy}`, total: 0, resto: p.resto, proy: p })
+    }
+    return filas
+  }, [ventasTodas, datosMes])
   const [totalPeriodo, setTotalPeriodo] = useState(0)
   const [mejorDia, setMejorDia] = useState(null)
 
@@ -580,14 +643,18 @@ export default function Estadisticas({ esAdmin = false, usuarios = [], perfilNom
       {/* Gráfico mensual total */}
       <div style={S.chartCard}>
         <div style={S.chartTitle}>Ventas por mes — histórico</div>
+        <div style={{ fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)', margin:'-4px 0 6px' }}>En el mes en curso, la parte transparente es la proyección de lo que falta vender hasta fin de mes.</div>
         <div style={S.chartWrap}>
           <ResponsiveContainer width="100%" height={560}>
-            <BarChart data={datosMes} margin={{ top: 8, right: 8, left: 0, bottom: 40 }}>
+            <BarChart data={datosMesConProy} margin={{ top: 26, right: 8, left: 0, bottom: 40 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
               <XAxis dataKey="label" tick={{ fontFamily:'Barlow Condensed, sans-serif', fontSize:11, fill:'#6a8ccc' }} angle={-45} textAnchor="end" interval={0} tickLine={false} axisLine={false} />
               <YAxis tick={{ fontFamily:'Barlow Condensed, sans-serif', fontSize:11, fill:'#6a8ccc' }} tickFormatter={v => v >= 1000000 ? `${(v/1000000).toFixed(1)}M` : v >= 1000 ? `${(v/1000).toFixed(0)}k` : v} tickLine={false} axisLine={false} width={48} />
-              <Tooltip content={<CustomTooltip />} cursor={{ fill:'rgba(33,150,243,0.08)' }} />
-              <Bar dataKey="total" fill="#2196f3" radius={[4, 4, 0, 0]} maxBarSize={48} />
+              <Tooltip content={<MesTooltip />} cursor={{ fill:'rgba(33,150,243,0.08)' }} />
+              <Bar dataKey="total" stackId="mes" fill="#2196f3" radius={[4, 4, 0, 0]} maxBarSize={48} />
+              <Bar dataKey="resto" stackId="mes" fill="rgba(33,150,243,0.32)" stroke="#2196f3" strokeDasharray="4 3" strokeWidth={1.5} radius={[4, 4, 0, 0]} maxBarSize={48}>
+                <LabelList dataKey="proy" position="top" formatter={p => p ? `≈\u00a0${fmtCorto(p.proyectado)}` : ''} style={{ fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:12, fill:'#90caf9' }} />
+              </Bar>
             </BarChart>
           </ResponsiveContainer>
         </div>

@@ -101,11 +101,17 @@ export const TABLAS = [
       ['ALQUILER_USD', '1100', 'Alquiler mensual del local en dólares'],
       ['ALQUILER_DIA_MAX', '10', 'El blue se toma como el más alto entre el día 1 y el día de pago (máximo este día)'],
       ['REGALIAS_PORCENTAJE', '4', 'Porcentaje para cada hermano sobre (ventas − alquiler − sueldos)'],
+      ['HOME_OFFICE_HORAS', '12', 'Horas de home office por mes, a tarifa común'],
+      ['HOME_OFFICE_PERSONA', 'Adrián', 'Quién cobra el home office'],
     ] },
-  { nombre: 'HORAS', desc: 'Horas trabajadas (por día o por período)',
+  { nombre: 'HORAS', desc: 'Horas trabajadas (por día o por quincena). TIPO: COMUN, PARTIDO, FERIADO o HOME OFFICE',
     enc: ['ID', 'PERSONA', 'DESDE', 'HASTA', 'HORAS', 'TIPO', 'LUGAR', 'NOTA', 'CARGADO', 'ANULADO'] },
   { nombre: 'TARIFAS', desc: 'Valor de la hora por persona y tipo, con fecha de vigencia',
-    enc: ['PERSONA', 'TIPO', 'VALOR', 'VIGENTE DESDE', 'NOTA'] },
+    enc: ['PERSONA', 'TIPO', 'VALOR', 'VIGENTE DESDE', 'NOTA'],
+    inicial: [
+      ['Adrián', 'COMUN', '11000', '1/1/2026', 'Partido y feriado se pagan al doble'],
+      ['Jorge', 'COMUN', '11000', '1/1/2026', 'Partido y feriado se pagan al doble'],
+    ] },
   { nombre: 'PRODUCTOS 3D', desc: 'Catálogo de impresiones 3D con precio',
     enc: ['ID', 'PRODUCTO', 'PRECIO', 'VIGENTE DESDE', 'ACTIVO'] },
   { nombre: 'VENTAS 3D', desc: 'Impresiones 3D vendidas a cada local',
@@ -113,7 +119,7 @@ export const TABLAS = [
   { nombre: 'PROPIEDADES', desc: 'Direcciones con servicios y a cargo de quién están',
     enc: ['ID', 'NOMBRE', 'A CARGO DE', 'SERVICIOS', 'ACTIVO', 'NOTA'] },
   { nombre: 'SERVICIOS', desc: 'Una fila por boleta de servicio',
-    enc: ['ID', 'MES', 'PROPIEDAD', 'SERVICIO', 'MONTO', 'VENCIMIENTO', 'PAGADO POR', 'FECHA PAGO', 'A CARGO DE', 'NOTA', 'ANULADO'] },
+    enc: ['ID', 'MES', 'PROPIEDAD', 'SERVICIO', 'MONTO', 'VENCIMIENTO', 'PAGADO POR', 'FECHA PAGO', 'A CARGO DE', 'NOTA', 'ANULADO', 'LIQUIDADO EN'] },
   { nombre: 'TARJETA', desc: 'Consumos de tarjeta, con a cargo de quién',
     enc: ['ID', 'MES RESUMEN', 'TITULAR', 'FECHA', 'COMPROBANTE', 'DETALLE', 'CUOTA', 'PESOS', 'DOLARES', 'A CARGO DE', 'NOTA'] },
   { nombre: 'CUENTA CORRIENTE', desc: 'Quién le debe a quién: el libro central',
@@ -126,17 +132,102 @@ export const TABLAS = [
 
 const col = n => { let s = ''; n++; while (n) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26) } return s }
 
-// Crea las pestañas que falten (con encabezados y datos iniciales) y cuenta las filas de cada una
+// Crea las pestañas que falten (con encabezados y datos iniciales), agrega columnas nuevas al final
+// de los encabezados existentes, completa claves nuevas de CONFIG y cuenta las filas de cada tabla.
 export async function prepararTablas() {
   const out = []
   for (const t of TABLAS) {
     const creada = await admin.asegurarHoja(t.nombre, t.enc)
-    let filas = (await admin.sheetsGet(`${t.nombre}!A2:A`)).filter(r => r[0]).length
-    if (creada && filas === 0 && t.inicial?.length) {
+    if (!creada) {
+      const enc = (await admin.sheetsGet(`${t.nombre}!A1:Z1`))[0] || []
+      if (enc.length < t.enc.length && enc.every((h, i) => h === t.enc[i])) await admin.sheetsUpdate(`${t.nombre}!A1`, [t.enc])
+    }
+    const filasA = await admin.sheetsGet(`${t.nombre}!A2:A`)
+    let filas = filasA.filter(r => r[0]).length
+    if (filas === 0 && t.inicial?.length) {
       await admin.sheetsUpdate(`${t.nombre}!A2:${col(t.enc.length - 1)}${t.inicial.length + 1}`, t.inicial)
       filas = t.inicial.length
+    } else if (t.nombre === 'CONFIG') {
+      const claves = new Set(filasA.map(r => r[0]))
+      const faltan = t.inicial.filter(r => !claves.has(r[0]))
+      if (faltan.length) { await admin.sheetsAppend('CONFIG!A1', faltan); filas += faltan.length }
     }
     out.push({ nombre: t.nombre, desc: t.desc, filas, creada })
   }
   return out
+}
+
+// Se prepara una vez por instancia del servidor
+let _listo = null
+export function listo() {
+  if (!_listo) _listo = prepararTablas().catch(e => { _listo = null; throw e })
+  return _listo
+}
+
+// ── Fecha y hora de Argentina, IDs ─────────────────────────────────────────
+export function ahoraAR(ms = Date.now()) {
+  const d = new Date(ms - 3 * 3600000)
+  const p = n => String(n).padStart(2, '0')
+  return {
+    fecha: `${d.getUTCDate()}/${d.getUTCMonth() + 1}/${d.getUTCFullYear()}`,
+    hora: `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`,
+    clave: `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`,
+    compacta: `${String(d.getUTCFullYear()).slice(2)}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}`,
+  }
+}
+export function nuevoId(prefijo, existentes, n = 1) {
+  const base = `${prefijo}${ahoraAR().compacta}-`
+  const usados = new Set(existentes)
+  const ids = []
+  let i = 1
+  while (ids.length < n) { const id = base + String(i).padStart(3, '0'); if (!usados.has(id)) ids.push(id); i++ }
+  return ids
+}
+
+// ── Lectura de tablas ──────────────────────────────────────────────────────
+import { parseFecha, parsePrecio } from './cierre.js'
+const esTrue = v => String(v).toUpperCase() === 'TRUE'
+const clave = f => parseFecha(f)?.clave || ''
+
+export async function getConfig() {
+  const filas = await admin.sheetsGet('CONFIG!A2:B')
+  const c = Object.fromEntries(filas.filter(r => r[0]).map(r => [r[0], r[1] ?? '']))
+  return {
+    alquilerUsd: parsePrecio(c.ALQUILER_USD) || 1100,
+    alquilerDiaMax: Number(c.ALQUILER_DIA_MAX) || 10,
+    porcentaje: Number(String(c.REGALIAS_PORCENTAJE || '4').replace(',', '.')) || 4,
+    homeOffice: { persona: c.HOME_OFFICE_PERSONA || 'Adrián', horas: Number(String(c.HOME_OFFICE_HORAS ?? '12').replace(',', '.')) || 0 },
+  }
+}
+export async function getPersonas() {
+  return (await admin.sheetsGet('PERSONAS!A2:E')).filter(r => r[0] && r[1]).map(r => ({ id: r[0], nombre: r[1], tipo: r[2] || '', rol: r[3] || '', activo: r[4] !== 'FALSE' }))
+}
+export async function getTarifas() {
+  return (await admin.sheetsGet('TARIFAS!A2:E')).filter(r => r[0]).map((r, i) => ({ fila: i + 2, persona: r[0], tipo: r[1] || 'COMUN', valor: parsePrecio(r[2]), desdeTxt: r[3] || '', desde: clave(r[3]), nota: r[4] || '' }))
+}
+export async function getHoras() {
+  return (await admin.sheetsGet('HORAS!A2:J')).map((r, i) => ({
+    fila: i + 2, id: r[0], persona: r[1] || '', desdeTxt: r[2] || '', hastaTxt: r[3] || '', desde: clave(r[2]), hasta: clave(r[3] || r[2]),
+    horas: Number(String(r[4] || '0').replace(',', '.')) || 0, tipo: r[5] || 'COMUN', lugar: r[6] || '', nota: r[7] || '', cargado: r[8] || '', anulado: esTrue(r[9]),
+  })).filter(h => h.id)
+}
+export async function getServicios() {
+  return (await admin.sheetsGet('SERVICIOS!A2:L')).map((r, i) => ({
+    fila: i + 2, id: r[0], mes: r[1] || '', propiedad: r[2] || '', servicio: r[3] || '', monto: parsePrecio(r[4]), vencimiento: r[5] || '',
+    pagadoPor: r[6] || '', fechaPago: r[7] || '', aCargoDe: r[8] || '', nota: r[9] || '', anulado: esTrue(r[10]), liquidadoEn: r[11] || '',
+  })).filter(s => s.id)
+}
+export async function getCuenta() {
+  return (await admin.sheetsGet('CUENTA CORRIENTE!A2:Q')).map((r, i) => ({
+    fila: i + 2, id: r[0], fecha: r[1] || '', cuenta: r[2] || '', debe: r[3] || '', aFavorDe: r[4] || '', concepto: r[5] || '', ambito: r[6] || '',
+    detalle: r[7] || '', monto: parsePrecio(r[8]), moneda: r[9] || 'ARS', tipoCambio: parsePrecio(r[10]), montoPesos: parsePrecio(r[11]),
+    estado: r[12] || 'PENDIENTE', fechaPago: r[13] || '', origen: r[14] || '', nota: r[15] || '', anulado: esTrue(r[16]),
+  })).filter(m => m.id)
+}
+export async function getCierres() {
+  return (await admin.sheetsGet('CIERRES!A2:Q')).map((r, i) => ({
+    fila: i + 2, mes: r[0], fechaCierre: r[1] || '', ventas: parsePrecio(r[2]), diaPago: r[3] || '', blue: parsePrecio(r[4]), alquilerUsd: parsePrecio(r[5]),
+    alquilerPesos: parsePrecio(r[6]), sueldoAdrian: parsePrecio(r[7]), sueldoJorge: parsePrecio(r[8]), base: parsePrecio(r[9]), porcentaje: Number(r[10]) || 0,
+    porHermano: parsePrecio(r[11]), serviciosMama: parsePrecio(r[12]), netoMama: parsePrecio(r[13]), reintegroTarjeta: parsePrecio(r[14]), cerradoPor: r[15] || '', nota: r[16] || '',
+  })).filter(c => c.mes)
 }

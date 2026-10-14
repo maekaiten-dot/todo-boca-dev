@@ -68,3 +68,13 @@ Admin → Más → **Administración**. Entra solo con el PIN de administración
 - Las tablas (PERSONAS, CONFIG, HORAS, TARIFAS, PRODUCTOS 3D, VENTAS 3D, PROPIEDADES, SERVICIOS, TARJETA, CUENTA CORRIENTE, CIERRES, AHORROS) se crean solas la primera vez.
 
 **Configuración (una vez), en Vercel → Settings → Environment Variables:** `ADMIN_SHEET_ID`, `ADMIN_GOOGLE_CLIENT_EMAIL`, `ADMIN_GOOGLE_PRIVATE_KEY`, `ADMIN_PIN` y `ADMIN_SECRET` (texto al azar de 32 caracteres o más). La planilla de Administración y la del local se comparten con el email de la cuenta nueva como Editor.
+
+### Cierre de mes (Administración → Cierre de mes)
+- **Ventas del mes X**: PRECIO TOTAL FINAL de DETALLE DE VENTAS, sin anuladas.
+- **Sueldos**: horas × tarifa común vigente; PARTIDO y FERIADO al doble; HOME OFFICE 12 h/mes para Adrián (automático salvo que se cargue una fila HOME OFFICE ese mes). Jorge se carga por quincena con partido/feriado ya contados dobles.
+- **Alquiler**: US$ (CONFIG ALQUILER_USD) × el dólar blue de venta más alto entre el 1 y el día de pago del mes X+1 (fuente: api.argentinadatos.com; se puede corregir a mano).
+- **Regalías**: (ventas − alquiler − sueldo Adrián − sueldo Jorge) × 4% para cada hermano.
+- **Servicios de Mamá**: se eligen las boletas pendientes y se descuentan del alquiler.
+- Al confirmar se guarda una fila en CIERRES y los pagos pendientes en CUENTA CORRIENTE; en **Pendientes** se marcan como pagados con la fecha real. Un mes cerrado no se puede rehacer desde la app ni cambiar sus horas.
+- Los cálculos están en `api/_lib/cierre.js` (también los usa la pantalla para la vista previa).
+

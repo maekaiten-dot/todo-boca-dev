@@ -64,7 +64,8 @@ function MenuMas({ tabs, tabActual, onElegir, onCerrar }) {
 
 const M = {
   overlay: { position:'fixed', inset:0, background:'rgba(0,0,10,0.6)', zIndex:400, display:'flex', alignItems:'flex-end', justifyContent:'center' },
-  sheet: { width:'100%', maxWidth:640, background:'var(--surface)', borderTop:'2px solid var(--accent)', borderRadius:'18px 18px 0 0', padding:'10px 16px calc(16px + env(safe-area-inset-bottom, 0px))', display:'flex', flexDirection:'column', gap:12 },
+  // maxHeight + scroll: si no entran todas las secciones (pantallas bajas o zoom), se puede bajar dentro del menú
+  sheet: { width:'100%', maxWidth:900, maxHeight:'88dvh', overflowY:'auto', overscrollBehavior:'contain', background:'var(--surface)', borderTop:'2px solid var(--accent)', borderRadius:'18px 18px 0 0', padding:'10px 16px calc(16px + env(safe-area-inset-bottom, 0px))', display:'flex', flexDirection:'column', gap:12, boxSizing:'border-box' },
   handle: { width:40, height:4, borderRadius:2, background:'var(--border)', alignSelf:'center' },
   title: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:18, color:'var(--muted)', letterSpacing:1.5, textTransform:'uppercase' },
   grid: { display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(150px, 1fr))', gap:10 },

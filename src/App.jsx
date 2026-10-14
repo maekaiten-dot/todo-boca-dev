@@ -21,7 +21,7 @@ import { getArticulos, getUsuarios, registrarLog, calcularStockTodos } from './a
 // Barra inferior: solapas de uso diario. El resto de las solapas de Admin va en el menú "Más".
 const TABS_POR_TIPO = {
   Admin: [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }, { id:'caja', label:'Gastos', icon:'🧾' }, { id:'log', label:'Historial', icon:'📋' }, { id:'arts', label:'Arts.', icon:'📦' }],
-  Caja:  [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }, { id:'caja', label:'Gastos', icon:'🧾' }, { id:'conteo', label:'Conteo', icon:'🔢' }, { id:'arts', label:'Arts.', icon:'📦' }, { id:'tutos', label:'Tutoriales', icon:'📘' }],
+  Caja:  [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }, { id:'caja', label:'Gastos', icon:'🧾' }, { id:'conteo', label:'Conteo', icon:'🔢' }, { id:'arts', label:'Arts.', icon:'📦' }, { id:'asis', label:'Asistencia', icon:'🗓' }, { id:'tutos', label:'Tutoriales', icon:'📘' }],
 }
 // Solapas del menú "Más" (solo Admin). Para agregar una nueva, sumala acá y renderizala abajo con esAdmin.
 const TABS_MAS_ADMIN = [
@@ -319,8 +319,8 @@ export default function App() {
           {esAdmin && tabsVisitadas.has('pagos') && (
             <div style={tabStyle('pagos')}><Pagos empleado={empleadoActual} empleadoFijo={empleadoActual} usuarios={usuarios} /></div>
           )}
-          {esAdmin && tabsVisitadas.has('asis') && (
-            <div style={tabStyle('asis')}><Asistencia usuarios={usuarios} /></div>
+          {tabsVisitadas.has('asis') && (
+            <div style={tabStyle('asis')}><Asistencia usuarios={usuarios} esAdmin={esAdmin} /></div>
           )}
           {esAdmin && tabsVisitadas.has('fich') && (
             <div style={tabStyle('fich')}><Fichadas usuarios={usuarios} /></div>

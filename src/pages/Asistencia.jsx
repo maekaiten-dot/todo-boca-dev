@@ -1,4 +1,6 @@
-// src/pages/Asistencia.jsx — Admin: asistencia del mes por empleada (tardes, francos, fichadas faltantes)
+// src/pages/Asistencia.jsx — Asistencia del mes por empleada (tardes, francos, fichadas faltantes).
+// Todos la pueden VER (así cada empleada controla sus llegadas y sus cambios de horario).
+// Solo los administradores modifican horarios y cambios, y para eso piden el PIN de fichadas.
 import { useEffect, useMemo, useState } from 'react'
 import { asistencia, getPinFichadas, setPinFichadas } from '../api/fichadas.js'
 import {
@@ -7,7 +9,7 @@ import {
 
 const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
 
-export default function Asistencia({ usuarios = [] }) {
+export default function Asistencia({ usuarios = [], esAdmin = false }) {
   const [pin, setPinLocal] = useState(getPinFichadas())
   const [datos, setDatos] = useState(null)
   const [mes, setMes] = useState(null) // { anio, mes }
@@ -16,22 +18,29 @@ export default function Asistencia({ usuarios = [] }) {
   const [soloRevisar, setSoloRevisar] = useState(false)
   const [diaAbierto, setDiaAbierto] = useState(null) // { emp, dia }
   const [editandoHorarios, setEditandoHorarios] = useState(false)
+  const [verHorarios, setVerHorarios] = useState(false)
+  const [pidePin, setPidePin] = useState(false) // admin: falta el PIN (o era incorrecto) para modificar
 
   const setPin = (p) => { setPinLocal(p); setPinFichadas(p) }
 
   async function pedir(accion, extra) {
     setCargando(true); setError('')
     try {
+      if (accion !== 'datos' && !pin) { setPidePin(true); throw new Error('Ingresá el PIN de fichadas para guardar cambios') }
       const r = await asistencia(pin, accion, extra)
       setDatos(r)
       if (!mes) { const { m, a } = parseFecha(r.ahora.fecha); setMes({ anio: a, mes: m }) }
-      if (accion === 'datos' && r.empleadas.length === 0) setEditandoHorarios(true)
+      if (accion === 'datos' && r.empleadas.length === 0 && esAdmin) setEditandoHorarios(true)
+      if (accion !== 'datos') setPidePin(false)
       return true
-    } catch (e) { setError(e.message); return false }
+    } catch (e) {
+      if (/PIN/.test(e.message)) { setPidePin(true); if (accion !== 'datos') setPin('') }
+      setError(e.message); return false
+    }
     finally { setCargando(false) }
   }
 
-  useEffect(() => { if (pin) pedir('datos') }, [])
+  useEffect(() => { pedir('datos') }, [])
 
   const resultado = useMemo(() => {
     if (!datos || !mes) return []
@@ -43,24 +52,33 @@ export default function Asistencia({ usuarios = [] }) {
     return x < 1 ? { anio: anio - 1, mes: 12 } : x > 12 ? { anio: anio + 1, mes: 1 } : { anio, mes: x }
   })
 
+  // Admin: pedido de PIN para poder modificar (ver no lo necesita)
+  const barraPin = esAdmin && pidePin && !diaAbierto && (
+    <div style={S.card}>
+      <label style={S.label}>PIN de fichadas (para guardar cambios)</label>
+      <div style={S.fila}>
+        <input style={{ ...S.input, flex: 1 }} type="password" inputMode="numeric" value={pin} onChange={e => setPin(e.target.value)} aria-label="PIN de fichadas" />
+        <button style={S.btnSec} onClick={() => { setPidePin(false); setError('') }} disabled={!pin}>Listo</button>
+      </div>
+    </div>
+  )
+
   if (!datos) {
     return (
       <div style={S.page}>
         <div style={S.titulo}>Asistencia</div>
-        <div style={S.card}>
-          <label style={S.label}>PIN de fichadas</label>
-          <input style={S.input} type="password" inputMode="numeric" value={pin} onChange={e => setPin(e.target.value)} onKeyDown={e => e.key === 'Enter' && pedir('datos')} />
-          {error && <div style={S.error}>{error}</div>}
-          <button style={S.btn} onClick={() => pedir('datos')} disabled={cargando || !pin}>{cargando ? 'Cargando…' : 'Ver asistencia'}</button>
-        </div>
+        {error ? <div style={S.card}><div style={S.error}>{error}</div><button style={S.btnSec} onClick={() => pedir('datos')}>Reintentar</button></div>
+          : <div style={S.muted}>Cargando asistencia…</div>}
       </div>
     )
   }
 
-  if (editandoHorarios) {
-    return <EditorHorarios usuarios={usuarios} empleadas={datos.empleadas} cargando={cargando} error={error}
+  if (verHorarios) return <VerHorarios empleadas={datos.empleadas} onVolver={() => setVerHorarios(false)} />
+
+  if (editandoHorarios && esAdmin) {
+    return <><div style={{ padding: '16px 16px 0', maxWidth: 720, margin: '0 auto', width: '100%' }}>{barraPin}</div><EditorHorarios usuarios={usuarios} empleadas={datos.empleadas} cargando={cargando} error={error}
       onCancelar={datos.empleadas.length ? () => setEditandoHorarios(false) : null}
-      onGuardar={async (empleadas) => { if (await pedir('guardarHorarios', { empleadas })) setEditandoHorarios(false) }} />
+      onGuardar={async (empleadas) => { if (await pedir('guardarHorarios', { empleadas })) setEditandoHorarios(false) }} /></>
   }
 
   return (
@@ -69,7 +87,9 @@ export default function Asistencia({ usuarios = [] }) {
         <div style={S.titulo}>Asistencia</div>
         <div style={S.fila}>
           <button style={S.btnChico} onClick={() => pedir('datos')} disabled={cargando}>{cargando ? '…' : '↻'}</button>
-          <button style={S.btnChico} onClick={() => setEditandoHorarios(true)}>Horarios</button>
+          {esAdmin
+            ? <button style={S.btnChico} onClick={() => setEditandoHorarios(true)}>Horarios</button>
+            : <button style={S.btnChico} onClick={() => setVerHorarios(true)}>Ver horarios</button>}
         </div>
       </div>
 
@@ -78,6 +98,7 @@ export default function Asistencia({ usuarios = [] }) {
         <div style={S.mesTxt}>{MESES[mes.mes - 1]} {mes.anio}</div>
         <button style={S.flecha} onClick={() => moverMes(1)}>›</button>
       </div>
+      {barraPin}
       <label style={S.check}><input type="checkbox" checked={soloRevisar} onChange={e => setSoloRevisar(e.target.checked)} /> Mostrar solo tardes y días para revisar</label>
       {error && <div style={S.error}>{error}</div>}
 
@@ -113,10 +134,14 @@ export default function Asistencia({ usuarios = [] }) {
           </div>
         </div>
       ))}
-      <div style={S.muted}>Columnas: día · entrada esperada · fichada. Tolerancia {TOLERANCIA_MIN} min. Tocá un día para cargar un franco, un cambio de horario o un olvido de fichada.</div>
+      <div style={S.muted}>Columnas: día · entrada esperada · fichada. Tolerancia {TOLERANCIA_MIN} min. {esAdmin
+        ? 'Tocá un día para cargar un franco, un cambio de horario o un olvido de fichada.'
+        : 'Tocá un día para ver el detalle. Si ves algo mal (un franco, un cambio de horario o una fichada), avisale al encargado para que lo corrija.'}</div>
 
       {diaAbierto && (
-        <ModalDia {...diaAbierto} cargando={cargando} onCerrar={() => setDiaAbierto(null)}
+        <ModalDia {...diaAbierto} soloVer={!esAdmin} cargando={cargando} error={error}
+          campoPin={esAdmin && pidePin ? <input style={S.input} type="password" inputMode="numeric" placeholder="PIN de fichadas" value={pin} onChange={e => setPin(e.target.value)} aria-label="PIN de fichadas" /> : null}
+          onCerrar={() => setDiaAbierto(null)}
           onAgregar={async (cambio) => { if (await pedir('agregarCambio', { cambio })) setDiaAbierto(null) }}
           onBorrar={async (id) => { if (await pedir('borrarCambio', { id })) setDiaAbierto(null) }} />
       )}
@@ -128,7 +153,7 @@ function Chip({ n, t, color }) {
   return <span style={{ ...S.chip, ...(color ? { borderColor: color, color } : {}) }}><b>{n}</b> {t}</span>
 }
 
-function ModalDia({ emp, dia, cargando, onCerrar, onAgregar, onBorrar }) {
+function ModalDia({ emp, dia, soloVer, cargando, error, campoPin, onCerrar, onAgregar, onBorrar }) {
   const [tipo, setTipo] = useState(dia.estado === 'francoProbable' ? 'FRANCO' : dia.estado === 'falta' ? 'OLVIDO' : 'HORARIO')
   const [entrada, setEntrada] = useState(dia.esperado?.entrada || '')
   const [nota, setNota] = useState('')
@@ -145,9 +170,17 @@ function ModalDia({ emp, dia, cargando, onCerrar, onAgregar, onBorrar }) {
         </div>
         {est.texto && <div style={{ ...S.estado, color: est.color }}>{est.texto}{dia.estado === 'tarde' ? ` ${dia.minutosTarde} min` : ''}</div>}
 
-        {dia.cambio ? (
+        {soloVer ? (
+          <div style={S.cambioBox}>
+            <div style={S.textoChico}>{dia.cambio
+              ? <>Cambio cargado: <b>{TIPOS_CAMBIO[dia.cambio.tipo]}{dia.cambio.tipo === 'HORARIO' ? ` · entrada ${dia.cambio.entrada}` : ''}</b>{dia.cambio.nota ? ` — ${dia.cambio.nota}` : ''}</>
+              : 'No hay cambios cargados para este día.'}</div>
+            <div style={S.muted}>Si algo no está bien, avisale al encargado para que lo corrija.</div>
+          </div>
+        ) : dia.cambio ? (
           <div style={S.cambioBox}>
             <div style={S.textoChico}>Cambio cargado: <b>{TIPOS_CAMBIO[dia.cambio.tipo]}{dia.cambio.tipo === 'HORARIO' ? ` · entrada ${dia.cambio.entrada}` : ''}</b>{dia.cambio.nota ? ` — ${dia.cambio.nota}` : ''}</div>
+            {campoPin}
             <button style={S.btnBaja} onClick={() => onBorrar(dia.cambio.id)} disabled={cargando}>Quitar cambio</button>
           </div>
         ) : (
@@ -163,13 +196,40 @@ function ModalDia({ emp, dia, cargando, onCerrar, onAgregar, onBorrar }) {
               </label>
             )}
             <input style={S.input} value={nota} onChange={e => setNota(e.target.value)} placeholder="Nota (opcional)" />
+            {campoPin}
             <button style={S.btn} disabled={cargando} onClick={() => onAgregar({ fecha: dia.fecha, idUsuario: emp.idUsuario, nombre: emp.nombre, tipo, entrada: entrada.trim(), nota })}>
               {cargando ? 'Guardando…' : 'Guardar'}
             </button>
           </>
         )}
+        {campoPin && error && <div style={S.error}>{error}</div>}
         <button style={S.btnSec} onClick={onCerrar}>Cerrar</button>
       </div>
+    </div>
+  )
+}
+
+// Horarios habituales, solo lectura (empleadas)
+function VerHorarios({ empleadas, onVolver }) {
+  return (
+    <div style={S.page}>
+      <div style={S.filaTitulo}>
+        <div style={S.titulo}>Horarios habituales</div>
+        <button style={S.btnChico} onClick={onVolver}>Volver</button>
+      </div>
+      <div style={S.muted}>Los horarios los cargan los administradores. Si hay un error, avisale al encargado.</div>
+      {empleadas.length === 0 && <div style={S.muted}>Todavía no hay horarios cargados.</div>}
+      {empleadas.map(e => (
+        <div key={e.idUsuario} style={S.card}>
+          <div style={S.empNombre}>{e.nombre}</div>
+          <div style={S.muted}>Franco habitual: {DIAS[e.franco] || '—'}</div>
+          <div style={S.gridDias}>
+            {[1, 2, 3, 4, 5, 6, 7].map(d => (
+              <div key={d} style={S.labelDia}>{DIAS_CORTOS[d]}<span style={S.textoChico}>{e.dias[d] || '—'}</span></div>
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   )
 }

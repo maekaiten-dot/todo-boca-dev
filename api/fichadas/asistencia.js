@@ -1,5 +1,6 @@
 // POST /api/fichadas/asistencia  { pin, accion, ... }
-//   accion 'datos'             → { empleadas, cambios, fichadas }
+//   accion 'datos'             → { empleadas, cambios, fichadas }   (SIN PIN: todos pueden ver su asistencia)
+// Las acciones que modifican (horarios y cambios) exigen el PIN de fichadas.
 //   accion 'guardarHorarios'   { empleadas: [{ idUsuario, nombre, franco, dias: {1..7: '9:30-14:30'} }] }
 //   accion 'agregarCambio'     { cambio: { fecha, idUsuario, nombre, tipo, entrada, nota } }
 //   accion 'borrarCambio'      { id }
@@ -39,7 +40,7 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return responder(res, 405, { error: 'Método no permitido' })
   try {
     const body = leerBody(req)
-    if (!(await verificarPinAdmin(body.pin))) return responder(res, 401, { error: 'PIN de fichadas incorrecto' })
+    if (body.accion !== 'datos' && !(await verificarPinAdmin(body.pin))) return responder(res, 401, { error: 'PIN de fichadas incorrecto', pin: false })
 
     if (body.accion === 'guardarHorarios') {
       const lista = Array.isArray(body.empleadas) ? body.empleadas : []

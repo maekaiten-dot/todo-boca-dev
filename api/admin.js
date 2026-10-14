@@ -7,7 +7,8 @@
 //   horas.agregar       { persona, desde, hasta, horas, tipo, lugar, nota }
 //   horas.anular        { id }
 //   tarifas.agregar     { persona, valor, desde, nota }
-//   servicios.agregar   { propiedad, servicio, monto, fechaPago, pagadoPor, aCargoDe, nota }
+//   servicios.agregar   { propiedad, servicio, monto, estado: 'A PAGAR'|'PAGADA', vencimiento, fechaPago, pagadoPor, aCargoDe, nota }
+//   servicios.pagar     { id, monto, fechaPago, pagadoPor }   (el monto real puede ser distinto al de la boleta)
 //   servicios.anular    { id }
 //   cierre.preparar     { mes: 'aaaa-mm', diaPago }    → todos los números del cierre (no guarda nada)
 //   cierre.confirmar    { mes, diaPago, blue, serviciosIds, nota }
@@ -81,11 +82,14 @@ async function prepararCierre({ mes, diaPago }) {
   const sueldos = SOCIOS.map(p => calcularSueldo({ horas, tarifas, persona: p, mes, homeOffice: config.homeOffice }))
   const cotizaciones = await bluesDelPeriodo(mesPago, dia)
   const max = blueMaximo(cotizaciones)
-  const pendientes = servicios.filter(s => !s.anulado && !s.liquidadoEn && s.aCargoDe === MAMA)
+  // solo se descuentan del alquiler las boletas de Mamá ya pagadas
+  const pendientes = servicios.filter(s => !s.anulado && !s.liquidadoEn && s.aCargoDe === MAMA && s.estado === 'PAGADA')
+  const mamaAPagar = servicios.filter(s => !s.anulado && s.aCargoDe === MAMA && s.estado === 'A PAGAR')
   return {
     mes, nombre: nombreMes(mes), mesPago, nombrePago: nombreMes(mesPago), diaPago: dia, diaMax: config.alquilerDiaMax,
     ventas, sueldos, porcentaje: config.porcentaje, alquilerUsd: config.alquilerUsd,
     blue: { cotizaciones, max }, serviciosPendientes: pendientes,
+    serviciosAPagar: { cantidad: mamaAPagar.length, total: mamaAPagar.reduce((s, x) => s + x.monto, 0) },
     cierreExistente: cierres.find(c => c.mes === mes) || null,
   }
 }
@@ -186,15 +190,34 @@ async function ejecutar(accion, body, sesion) {
     return [200, { ok: true }]
   }
   if (accion === 'servicios.agregar') {
-    const { propiedad, servicio, monto, fechaPago, pagadoPor = 'Adrián', aCargoDe = MAMA, nota = '' } = body
+    const { propiedad, servicio, monto, estado = 'PAGADA', vencimiento = '', fechaPago, pagadoPor = sesion.quien || 'Adrián', aCargoDe = MAMA, nota = '' } = body
     if (!String(propiedad || '').trim() || !String(servicio || '').trim()) fallar('Completá propiedad y servicio')
+    if (!['A PAGAR', 'PAGADA'].includes(estado)) fallar('Estado inválido')
     const m = num(monto)
     if (!(m > 0)) fallar('Monto inválido')
-    const fp = parseFecha(fechaPago)
-    if (!fp) fallar('Fecha de pago inválida')
+    const fv = vencimiento ? parseFecha(vencimiento) : null
+    if (vencimiento && !fv) fallar('Fecha de vencimiento inválida')
+    const fp = estado === 'PAGADA' ? parseFecha(fechaPago) : null
+    if (estado === 'PAGADA' && !fp) fallar('Fecha de pago inválida')
     const [id] = nuevoId('S', (await getServicios()).map(x => x.id))
-    await admin.sheetsAppend('SERVICIOS!A1', [[id, fp.mes, String(propiedad).trim(), String(servicio).trim(), m, '', pagadoPor, fechaAR(fp.clave), aCargoDe, String(nota).slice(0, 200), 'FALSE', '']])
+    const mes = (fp || fv || parseFecha(ahoraAR().fecha)).mes
+    await admin.sheetsAppend('SERVICIOS!A1', [[id, mes, String(propiedad).trim(), String(servicio).trim(), m, fv ? fechaAR(fv.clave) : '',
+      fp ? pagadoPor : '', fp ? fechaAR(fp.clave) : '', aCargoDe, String(nota).slice(0, 200), 'FALSE', '', estado, m]])
     return [200, { ok: true, id }]
+  }
+  if (accion === 'servicios.pagar') {
+    const s = (await getServicios()).find(x => x.id === body.id && !x.anulado)
+    if (!s) fallar('No se encontró esa boleta')
+    if (s.estado === 'PAGADA') fallar('Esa boleta ya figura como pagada')
+    const m = num(body.monto)
+    if (!(m > 0)) fallar('Monto pagado inválido')
+    const fp = parseFecha(body.fechaPago)
+    if (!fp) fallar('Fecha de pago inválida')
+    await admin.sheetsUpdate(`SERVICIOS!B${s.fila}`, [[fp.mes]])
+    await admin.sheetsUpdate(`SERVICIOS!E${s.fila}`, [[m]])
+    await admin.sheetsUpdate(`SERVICIOS!G${s.fila}:H${s.fila}`, [[body.pagadoPor || sesion.quien || 'Adrián', fechaAR(fp.clave)]])
+    await admin.sheetsUpdate(`SERVICIOS!M${s.fila}:N${s.fila}`, [['PAGADA', s.montoBoleta || s.monto]])
+    return [200, { ok: true }]
   }
   if (accion === 'servicios.anular') {
     const s = (await getServicios()).find(x => x.id === body.id)

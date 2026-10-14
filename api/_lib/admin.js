@@ -119,7 +119,8 @@ export const TABLAS = [
   { nombre: 'PROPIEDADES', desc: 'Direcciones con servicios y a cargo de quién están',
     enc: ['ID', 'NOMBRE', 'A CARGO DE', 'SERVICIOS', 'ACTIVO', 'NOTA'] },
   { nombre: 'SERVICIOS', desc: 'Una fila por boleta de servicio',
-    enc: ['ID', 'MES', 'PROPIEDAD', 'SERVICIO', 'MONTO', 'VENCIMIENTO', 'PAGADO POR', 'FECHA PAGO', 'A CARGO DE', 'NOTA', 'ANULADO', 'LIQUIDADO EN'] },
+    // MONTO = lo que se pagó de verdad (o el de la boleta mientras está A PAGAR); MONTO BOLETA = el que figuraba en la boleta
+    enc: ['ID', 'MES', 'PROPIEDAD', 'SERVICIO', 'MONTO', 'VENCIMIENTO', 'PAGADO POR', 'FECHA PAGO', 'A CARGO DE', 'NOTA', 'ANULADO', 'LIQUIDADO EN', 'ESTADO', 'MONTO BOLETA'] },
   { nombre: 'TARJETA', desc: 'Consumos de tarjeta, con a cargo de quién',
     enc: ['ID', 'MES RESUMEN', 'TITULAR', 'FECHA', 'COMPROBANTE', 'DETALLE', 'CUOTA', 'PESOS', 'DOLARES', 'A CARGO DE', 'NOTA'] },
   { nombre: 'CUENTA CORRIENTE', desc: 'Quién le debe a quién: el libro central',
@@ -212,9 +213,11 @@ export async function getHoras() {
   })).filter(h => h.id)
 }
 export async function getServicios() {
-  return (await admin.sheetsGet('SERVICIOS!A2:L')).map((r, i) => ({
+  return (await admin.sheetsGet('SERVICIOS!A2:N')).map((r, i) => ({
     fila: i + 2, id: r[0], mes: r[1] || '', propiedad: r[2] || '', servicio: r[3] || '', monto: parsePrecio(r[4]), vencimiento: r[5] || '',
     pagadoPor: r[6] || '', fechaPago: r[7] || '', aCargoDe: r[8] || '', nota: r[9] || '', anulado: esTrue(r[10]), liquidadoEn: r[11] || '',
+    // las boletas cargadas antes de existir ESTADO se cargaban ya pagadas
+    estado: r[12] || (r[7] ? 'PAGADA' : 'A PAGAR'), montoBoleta: parsePrecio(r[13]) || parsePrecio(r[4]),
   })).filter(s => s.id)
 }
 export async function getCuenta() {

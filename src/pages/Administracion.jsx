@@ -255,8 +255,9 @@ function Cierre({ toast, irA }) {
 
           <div style={S.card}>
             <div style={S.cardTitulo}>5 · Servicios de Mamá a descontar</div>
+            {p.serviciosAPagar?.cantidad > 0 && <div style={S.alerta}>Hay {p.serviciosAPagar.cantidad} {p.serviciosAPagar.cantidad === 1 ? 'boleta' : 'boletas'} de Mamá todavía a pagar ({fmt$(p.serviciosAPagar.total)}). Se descuentan recién cuando las marques como pagadas. <button style={S.link} onClick={() => irA('serv')}>Ir a Servicios</button></div>}
             {p.serviciosPendientes.length === 0
-              ? <div style={S.ayuda}>No hay boletas de Mamá pendientes de descontar. <button style={S.link} onClick={() => irA('serv')}>Cargar boletas</button></div>
+              ? <div style={S.ayuda}>No hay boletas de Mamá pagadas pendientes de descontar. <button style={S.link} onClick={() => irA('serv')}>Cargar boletas</button></div>
               : p.serviciosPendientes.map(s => (
                 <label key={s.id} style={S.servFila}>
                   <input type="checkbox" checked={elegidos.has(s.id)} onChange={e => setElegidos(prev => { const n = new Set(prev); e.target.checked ? n.add(s.id) : n.delete(s.id); return n })} />
@@ -402,22 +403,31 @@ function Horas({ toast }) {
 }
 
 // ── Servicios ──────────────────────────────────────────────────────────────
+// Las boletas se pueden cargar cuando llegan ("A pagar", con vencimiento) y marcarse como pagadas
+// después, corrigiendo el monto si se pagó otro (por ejemplo, con recargo por pagar vencida).
 const SERVICIOS_TIPOS = ['AySA', 'Edesur', 'Metrogas', 'ABL', 'Internet', 'Otro']
+const claveFecha = f => parseFecha(f)?.clave || ''
 function Servicios({ toast }) {
   const [datos, setDatos] = useState(null)
   const [error, setError] = useState(null)
-  const [f, setF] = useState({ propiedad: '', servicio: 'AySA', monto: '', fechaPago: fechaHoy(), aCargoDe: 'Mamá', nota: '' })
+  const [f, setF] = useState({ estado: 'A PAGAR', propiedad: '', servicio: 'AySA', monto: '', vencimiento: '', fechaPago: fechaHoy(), aCargoDe: 'Mamá', nota: '' })
   const [guardando, setGuardando] = useState(false)
-  const [verLiquidados, setVerLiquidados] = useState(false)
+  const [verTodas, setVerTodas] = useState(false)
+  const [pagando, setPagando] = useState(null) // { id, monto, fechaPago }
   async function cargar() { setError(null); try { setDatos(await pedirAdmin('datos')) } catch (e) { setError(e.message) } }
   useEffect(() => { cargar() }, [])
   const propiedades = useMemo(() => [...new Set((datos?.servicios || []).map(s => s.propiedad))].sort(), [datos])
+  const hoy = parseFecha(fechaHoy()).clave
 
   async function agregar() {
     setGuardando(true)
-    try { await pedirAdmin('servicios.agregar', f); toast('Boleta guardada'); setF(x => ({ ...x, monto: '', nota: '' })); cargar() }
+    try { await pedirAdmin('servicios.agregar', f); toast(f.estado === 'A PAGAR' ? 'Boleta guardada como a pagar' : 'Boleta guardada'); setF(x => ({ ...x, monto: '', vencimiento: '', nota: '' })); cargar() }
     catch (e) { toast(e.message, 'error') }
     finally { setGuardando(false) }
+  }
+  async function pagar() {
+    try { await pedirAdmin('servicios.pagar', pagando); toast('Pago registrado'); setPagando(null); cargar() }
+    catch (e) { toast(e.message, 'error') }
   }
   async function anular(s) {
     if (!window.confirm(`¿Borrar ${s.servicio} ${s.propiedad} ${fmt$(s.monto)}?`)) return
@@ -426,36 +436,85 @@ function Servicios({ toast }) {
 
   if (error) return <div style={S.card}><div style={S.error}>{error}</div><button style={S.btnSec} onClick={cargar}>Reintentar</button></div>
   if (!datos) return <div style={S.muted}>Cargando…</div>
-  const lista = datos.servicios.filter(s => verLiquidados || !s.liquidadoEn).sort((x, y) => (parseFecha(y.fechaPago)?.clave || '').localeCompare(parseFecha(x.fechaPago)?.clave || ''))
+  const aPagar = datos.servicios.filter(s => s.estado === 'A PAGAR')
+    .sort((x, y) => (claveFecha(x.vencimiento) || '9999').localeCompare(claveFecha(y.vencimiento) || '9999'))
+  const pagadas = datos.servicios.filter(s => s.estado === 'PAGADA' && (verTodas || (s.aCargoDe === 'Mamá' && !s.liquidadoEn)))
+    .sort((x, y) => claveFecha(y.fechaPago).localeCompare(claveFecha(x.fechaPago)))
+  const totalAPagar = aPagar.reduce((t, s) => t + s.monto, 0)
+  const valido = f.propiedad.trim() && f.monto && (f.estado === 'A PAGAR' || f.fechaPago)
+
   return (
     <>
       <div style={S.card}>
-        <div style={S.cardTitulo}>Cargar boleta pagada</div>
-        <div style={S.ayuda}>Las de <strong>Mamá</strong> se descuentan del alquiler en el próximo cierre. Las del <strong>Local</strong> quedan registradas como gasto del local.</div>
+        <div style={S.cardTitulo}>Cargar boleta</div>
+        <div style={S.grid2}>
+          {[['A PAGAR', 'Todavía no la pagué'], ['PAGADA', 'Ya la pagué']].map(([v, t]) => <button key={v} style={{ ...S.optBtn, ...(f.estado === v ? S.optBtnActivo : {}) }} onClick={() => setF(x => ({ ...x, estado: v }))}>{t}</button>)}
+        </div>
         <div style={S.grid2}>
           {['Mamá', 'Esquina'].map(a => <button key={a} style={{ ...S.optBtn, ...(f.aCargoDe === a ? S.optBtnActivo : {}) }} onClick={() => setF(x => ({ ...x, aCargoDe: a }))}>{a === 'Esquina' ? 'Del local' : 'De Mamá'}</button>)}
         </div>
+        <div style={S.ayuda}>Las de <strong>Mamá</strong>, una vez pagadas, se descuentan del alquiler en el próximo cierre. Las del <strong>local</strong> quedan registradas como gasto del local.</div>
         <input style={S.inputAncho} list="adm-propiedades" placeholder="Propiedad (ej. Hernandarias, Brandsen 758, Local Esquina)" value={f.propiedad} onChange={e => setF(x => ({ ...x, propiedad: e.target.value }))} />
         <datalist id="adm-propiedades">{propiedades.map(p => <option key={p} value={p} />)}</datalist>
         <div style={S.tipos}>{SERVICIOS_TIPOS.map(t => <button key={t} style={{ ...S.tipoBtn, ...(f.servicio === t ? S.optBtnActivo : {}) }} onClick={() => setF(x => ({ ...x, servicio: t }))}>{t}</button>)}</div>
         <div style={S.filaInput}>
-          <span style={S.fieldLabel}>MONTO</span><input style={{ ...S.input, width: 120 }} inputMode="decimal" value={f.monto} onChange={e => setF(x => ({ ...x, monto: e.target.value }))} aria-label="Monto" />
-          <span style={S.fieldLabel}>PAGADO EL</span><input style={{ ...S.input, width: 120 }} value={f.fechaPago} onChange={e => setF(x => ({ ...x, fechaPago: e.target.value }))} aria-label="Fecha de pago" />
+          <span style={S.fieldLabel}>{f.estado === 'A PAGAR' ? 'MONTO DE LA BOLETA' : 'MONTO PAGADO'}</span>
+          <input style={{ ...S.input, width: 130 }} inputMode="decimal" value={f.monto} onChange={e => setF(x => ({ ...x, monto: e.target.value }))} aria-label="Monto" />
+          {f.estado === 'A PAGAR'
+            ? <><span style={S.fieldLabel}>VENCE EL</span><input style={{ ...S.input, width: 130 }} placeholder="dd/mm/aaaa" value={f.vencimiento} onChange={e => setF(x => ({ ...x, vencimiento: e.target.value }))} aria-label="Vencimiento" /></>
+            : <><span style={S.fieldLabel}>PAGADO EL</span><input style={{ ...S.input, width: 130 }} value={f.fechaPago} onChange={e => setF(x => ({ ...x, fechaPago: e.target.value }))} aria-label="Fecha de pago" /></>}
         </div>
         <input style={S.inputAncho} placeholder="Nota (opcional)" value={f.nota} maxLength={200} onChange={e => setF(x => ({ ...x, nota: e.target.value }))} />
-        <button style={{ ...S.btn, opacity: f.propiedad && f.monto && !guardando ? 1 : 0.45 }} disabled={!f.propiedad || !f.monto || guardando} onClick={agregar}>{guardando ? 'Guardando…' : 'Guardar boleta'}</button>
+        <button style={{ ...S.btn, opacity: valido && !guardando ? 1 : 0.45 }} disabled={!valido || guardando} onClick={agregar}>{guardando ? 'Guardando…' : f.estado === 'A PAGAR' ? 'Guardar como a pagar' : 'Guardar boleta pagada'}</button>
       </div>
+
       <div style={S.card}>
-        <div style={S.cardTitulo}>{verLiquidados ? 'Todas las boletas' : 'Pendientes de descontar'}</div>
-        {lista.length === 0 && <div style={S.muted}>No hay boletas.</div>}
-        {lista.map(s => (
+        <div style={S.grupoTop}>
+          <div style={S.cardTitulo}>Boletas a pagar</div>
+          {aPagar.length > 0 && <div style={S.grupoMonto}>{fmt$(totalAPagar)}</div>}
+        </div>
+        {aPagar.length === 0 && <div style={S.muted}>No hay boletas a pagar.</div>}
+        {aPagar.map(s => {
+          const venc = claveFecha(s.vencimiento)
+          const vencida = venc && venc < hoy
+          return (
+            <div key={s.id} style={{ ...S.registro, flexWrap: 'wrap', ...(vencida ? { border: '1px solid rgba(239,68,68,0.6)' } : {}) }}>
+              <span style={{ minWidth: 0, flex: 1 }}>{s.servicio} · {s.propiedad} <span style={S.sub}>· {s.aCargoDe === 'Mamá' ? 'Mamá' : 'Local'}</span><br />
+                <span style={{ ...S.sub, ...(vencida ? { color: '#ef4444', fontWeight: 700 } : {}) }}>{s.vencimiento ? `${vencida ? 'Venció' : 'Vence'} el ${s.vencimiento}` : 'Sin vencimiento'}</span></span>
+              <strong style={{ flexShrink: 0 }}>{fmt$(s.monto)}</strong>
+              {pagando?.id === s.id ? (
+                <div style={{ ...S.pagarFila, width: '100%' }}>
+                  <span style={S.fieldLabel}>PAGADO</span>
+                  <input style={{ ...S.input, width: 120 }} inputMode="decimal" value={pagando.monto} onChange={e => setPagando(p => ({ ...p, monto: e.target.value }))} aria-label="Monto pagado" />
+                  <span style={S.fieldLabel}>EL</span>
+                  <input style={{ ...S.input, width: 120 }} value={pagando.fechaPago} onChange={e => setPagando(p => ({ ...p, fechaPago: e.target.value }))} aria-label="Fecha de pago" />
+                  <button style={S.btnOk} onClick={pagar}>Confirmar</button>
+                  <button style={S.btnSec} onClick={() => setPagando(null)}>Cancelar</button>
+                </div>
+              ) : (
+                <>
+                  <button style={{ ...S.btnPagar, marginTop: 0 }} onClick={() => setPagando({ id: s.id, monto: String(Math.round(s.monto * 100) / 100).replace('.', ','), fechaPago: fechaHoy() })}>Pagué</button>
+                  <button style={S.borrar} onClick={() => anular(s)} aria-label="Borrar boleta">✕</button>
+                </>
+              )}
+            </div>
+          )
+        })}
+        {pagando && <div style={S.ayuda}>Si pagaste otro monto (por ejemplo, con recargo por vencida), corregilo antes de confirmar: se guarda el monto real y también el de la boleta.</div>}
+      </div>
+
+      <div style={S.card}>
+        <div style={S.cardTitulo}>{verTodas ? 'Boletas pagadas' : 'Pagadas de Mamá, a descontar del alquiler'}</div>
+        {pagadas.length === 0 && <div style={S.muted}>No hay boletas.</div>}
+        {pagadas.map(s => (
           <div key={s.id} style={S.registro}>
-            <span style={{ minWidth: 0, flex: 1 }}>{s.servicio} · {s.propiedad} <span style={S.sub}>· {s.fechaPago} · {s.aCargoDe === 'Mamá' ? 'Mamá' : 'Local'}{s.liquidadoEn ? ` · descontada en ${s.liquidadoEn.toLowerCase()}` : ''}</span></span>
+            <span style={{ minWidth: 0, flex: 1 }}>{s.servicio} · {s.propiedad} <span style={S.sub}>· pagada {s.fechaPago} · {s.aCargoDe === 'Mamá' ? 'Mamá' : 'Local'}{s.liquidadoEn ? ` · descontada en ${s.liquidadoEn.toLowerCase()}` : ''}</span>
+              {s.montoBoleta && Math.round(s.montoBoleta) !== Math.round(s.monto) && <><br /><span style={S.sub}>boleta {fmt$(s.montoBoleta)} → pagado {fmt$(s.monto)}</span></>}</span>
             <strong style={{ flexShrink: 0 }}>{fmt$(s.monto)}</strong>
             {!s.liquidadoEn && <button style={S.borrar} onClick={() => anular(s)} aria-label="Borrar boleta">✕</button>}
           </div>
         ))}
-        <label style={S.check}><input type="checkbox" checked={verLiquidados} onChange={e => setVerLiquidados(e.target.checked)} /> Ver también las ya descontadas</label>
+        <label style={S.check}><input type="checkbox" checked={verTodas} onChange={e => setVerTodas(e.target.checked)} /> Ver todas las pagadas (también las del local y las ya descontadas)</label>
       </div>
     </>
   )

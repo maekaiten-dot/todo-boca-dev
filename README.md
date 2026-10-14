@@ -58,3 +58,13 @@ src/
 
 ### Asistencia
 Admin → Más → **Asistencia**: por mes y por empleada muestra cada día como a tiempo, tarde (tolerancia 10 min), franco, "¿franco?" (franco movido a confirmar), sin fichar o ausencia. El horario habitual se edita en **Horarios** (pestaña `HORARIOS`) y los cambios puntuales se cargan tocando el día (pestaña `CAMBIOS_HORARIO`). El cálculo está en `src/lib/asistencia.js`.
+
+## Administración (finanzas del local y de la familia)
+
+Admin → Más → **Administración**. Entra solo con el PIN de administración (distinto del de fichadas) y la sesión dura 12 horas en ese dispositivo.
+
+- Los datos viven en una planilla **aparte** ("TODO BOCA – Administración") con una cuenta de servicio **propia**. La clave de la app del local (`VITE_*`, que viaja en el navegador) no tiene acceso a esa planilla.
+- Todo pasa por una sola función del servidor, `/api/admin` (`api/admin.js` + `api/_lib/admin.js`), que verifica la sesión antes de leer o escribir.
+- Las tablas (PERSONAS, CONFIG, HORAS, TARIFAS, PRODUCTOS 3D, VENTAS 3D, PROPIEDADES, SERVICIOS, TARJETA, CUENTA CORRIENTE, CIERRES, AHORROS) se crean solas la primera vez.
+
+**Configuración (una vez), en Vercel → Settings → Environment Variables:** `ADMIN_SHEET_ID`, `ADMIN_GOOGLE_CLIENT_EMAIL`, `ADMIN_GOOGLE_PRIVATE_KEY`, `ADMIN_PIN` y `ADMIN_SECRET` (texto al azar de 32 caracteres o más). La planilla de Administración y la del local se comparten con el email de la cuenta nueva como Editor.

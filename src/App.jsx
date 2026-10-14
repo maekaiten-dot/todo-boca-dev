@@ -14,6 +14,7 @@ import Tutoriales from './pages/Tutoriales.jsx'
 import Conteo from './pages/Conteo.jsx'
 import Fichadas from './pages/Fichadas.jsx'
 import Asistencia from './pages/Asistencia.jsx'
+import Administracion from './pages/Administracion.jsx'
 import FicharTablet from './components/FicharTablet.jsx'
 import { getArticulos, getUsuarios, registrarLog, calcularStockTodos } from './api/sheets.js'
 
@@ -33,6 +34,7 @@ const TABS_MAS_ADMIN = [
   { id:'tutos', label:'Tutoriales', icon:'📘', desc:'Instructivos para el equipo' },
   { id:'asis', label:'Asistencia', icon:'🗓', desc:'Tardes, francos y fichadas faltantes' },
   { id:'fich', label:'Fichadas', icon:'⏱', desc:'Tablet y celulares para fichar' },
+  { id:'admin', label:'Administración', icon:'🔒', desc:'Cierre de mes, regalías, cuentas y ahorros' },
 ]
 
 function MenuMas({ tabs, tabActual, onElegir, onCerrar }) {
@@ -321,6 +323,9 @@ export default function App() {
           )}
           {esAdmin && tabsVisitadas.has('fich') && (
             <div style={tabStyle('fich')}><Fichadas usuarios={usuarios} /></div>
+          )}
+          {esAdmin && tabsVisitadas.has('admin') && (
+            <div style={tabStyle('admin')}><Administracion perfilNombre={empleadoActual} /></div>
           )}
           {esAdmin && tabsVisitadas.has('gastos') && (
             <div style={tabStyle('gastos')}><GastosFijos soloLectura={!esAdrian} /></div>

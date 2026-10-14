@@ -24,6 +24,7 @@ export default function Asistencia({ usuarios = [], esAdmin = false }) {
   const setPin = (p) => { setPinLocal(p); setPinFichadas(p) }
 
   async function pedir(accion, extra) {
+    if (accion !== 'datos' && !esAdmin) return false // perfiles de empleadas: solo ver, nunca guardar
     setCargando(true); setError('')
     try {
       if (accion !== 'datos' && !pin) { setPidePin(true); throw new Error('Ingresá el PIN de fichadas para guardar cambios') }

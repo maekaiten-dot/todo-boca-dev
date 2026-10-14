@@ -1,6 +1,6 @@
 // src/pages/LogVentas.jsx
-import { useState } from 'react'
-import { getHistoricoVentas, registrarLog } from '../api/sheets.js'
+import { useState, useMemo, useEffect } from 'react'
+import { getHistoricoVentas, getVentasDesde, registrarLog } from '../api/sheets.js'
 import DetalleVentaModal from '../components/DetalleVentaModal.jsx'
 
 const METODO_ICONS = {
@@ -12,20 +12,29 @@ const METODO_ICONS = {
   'Efectivo Euros':'🇪🇺','Efectivo EUR':'🇪🇺',
 }
 
+const DIAS_POR_TANDA = 30
+// Fecha de hace 12 meses (aaaa-mm-dd), en hora de Argentina
+function hace12Meses() {
+  const h = new Date(Date.now() - 3 * 3600000)
+  return `${h.getUTCFullYear() - 1}-${String(h.getUTCMonth() + 1).padStart(2, '0')}-${String(h.getUTCDate()).padStart(2, '0')}`
+}
+
 export default function LogVentas() {
   const [ventas, setVentas] = useState([])
+  const [rango, setRango] = useState('12m') // '12m' | 'todo'
+  const [diasVisibles, setDiasVisibles] = useState(DIAS_POR_TANDA)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [busqueda, setBusqueda] = useState('')
   const [ventaSeleccionada, setVentaSeleccionada] = useState(null)
 
-  async function cargar() {
+  async function cargar(r = rango) {
     setLoading(true)
     setError(null)
     try {
-      const data = await getHistoricoVentas()
-      setVentas(data)
-      await registrarLog({ accion: 'HISTORIAL_CARGADO', detalle: `${data.length} registros`, resultado: 'OK' })
+      const data = r === 'todo' ? await getHistoricoVentas() : await getVentasDesde(hace12Meses())
+      setVentas(data); setRango(r); setDiasVisibles(DIAS_POR_TANDA)
+      await registrarLog({ accion: 'HISTORIAL_CARGADO', detalle: `${data.length} registros (${r === 'todo' ? 'todo' : 'últimos 12 meses'})`, resultado: 'OK' })
     } catch (e) {
       await registrarLog({ accion: 'ERROR_CARGA_HISTORIAL', detalle: e?.message || 'Error desconocido', resultado: 'ERROR' })
       setError('No se pudo cargar el historial.')
@@ -34,6 +43,9 @@ export default function LogVentas() {
     }
   }
 
+  useEffect(() => { setDiasVisibles(DIAS_POR_TANDA) }, [busqueda])
+
+  const todasVentas = useMemo(() => {
   const ventasAgrupadas = ventas.reduce((acc, v) => {
     const key = v.idVenta || v.idDetalle
     if (!acc[key]) {
@@ -49,27 +61,29 @@ export default function LogVentas() {
     v.anulado = v.items.length > 0 && v.items.every(i => i.anulado)
   })
 
-  const todasVentas = Object.values(ventasAgrupadas).sort((a, b) => {
-    const fa = a.fecha?.split('/').reverse().join('') + a.hora
-    const fb = b.fecha?.split('/').reverse().join('') + b.hora
-    return fb.localeCompare(fa)
-  })
+  // orden por fecha real (aaaammdd con ceros), más nuevas primero
+  const orden = v => { const [d, m, a] = String(v.fecha || '').split('/'); return `${a}${String(m).padStart(2, '0')}${String(d).padStart(2, '0')}${String(v.hora || '').padStart(8, '0')}` }
+  return Object.values(ventasAgrupadas).sort((a, b) => orden(b).localeCompare(orden(a)))
+  }, [ventas])
 
-  const ventasFiltradas = busqueda.trim()
+  const ventasFiltradas = useMemo(() => busqueda.trim()
     ? todasVentas.filter(v =>
         v.idVenta?.toLowerCase().includes(busqueda.toLowerCase()) ||
         v.metodoPago?.toLowerCase().includes(busqueda.toLowerCase()) ||
         v.empleado?.toLowerCase().includes(busqueda.toLowerCase()) ||
         v.items.some(i => i.nombre?.toLowerCase().includes(busqueda.toLowerCase()))
       )
-    : todasVentas
+    : todasVentas, [todasVentas, busqueda])
 
-  const porFecha = ventasFiltradas.reduce((acc, v) => {
+  const porFecha = useMemo(() => ventasFiltradas.reduce((acc, v) => {
     const f = v.fecha || 'Sin fecha'
     if (!acc[f]) acc[f] = []
     acc[f].push(v)
     return acc
-  }, {})
+  }, {}), [ventasFiltradas])
+  // Se dibujan los días de a tandas: dibujar miles de filas con foto es lo que más tarda
+  const diasTodos = Object.entries(porFecha)
+  const diasMostrados = diasTodos.slice(0, diasVisibles)
 
   const totalGeneral = todasVentas.filter(v => !v.anulado).reduce((s, v) => s + v.total, 0)
   const cantTotal = todasVentas.filter(v => !v.anulado).length
@@ -77,9 +91,9 @@ export default function LogVentas() {
 
   if (ventas.length === 0 && !loading && !error) return (
     <div style={S.center}>
-      <button style={S.loadBtn} onClick={cargar}>Cargar historial</button>
+      <button style={S.loadBtn} onClick={() => cargar('12m')}>Cargar historial</button>
       <div style={{fontFamily:'Barlow, sans-serif', fontSize:14, color:'var(--muted)', marginTop:8}}>
-        Puede tardar unos segundos
+        Últimos 12 meses
       </div>
     </div>
   )
@@ -94,7 +108,7 @@ export default function LogVentas() {
   if (error) return (
     <div style={S.center}>
       <div style={S.errorText}>{error}</div>
-      <button style={S.retryBtn} onClick={cargar}>Reintentar</button>
+      <button style={S.retryBtn} onClick={() => cargar()}>Reintentar</button>
     </div>
   )
 
@@ -102,13 +116,13 @@ export default function LogVentas() {
     <div style={S.page}>
       <div style={S.header}>
         <div style={S.headerTitle}>REGISTRO DE VENTAS HISTÓRICO</div>
-        <button style={S.refreshBtn} onClick={cargar}>↻</button>
+        <button style={S.refreshBtn} onClick={() => cargar()}>↻</button>
       </div>
 
       <div style={S.statsRow}>
         <div style={S.statCard}>
           <div style={S.statValue}>${Math.round(totalGeneral).toLocaleString('es-AR')}</div>
-          <div style={S.statLabel}>Total histórico</div>
+          <div style={S.statLabel}>{rango === 'todo' ? 'Total histórico' : 'Total últimos 12 meses'}</div>
         </div>
         <div style={S.statCard}>
           <div style={S.statValue}>{cantTotal}</div>
@@ -149,7 +163,7 @@ export default function LogVentas() {
               </tr>
             </thead>
             <tbody>
-              {Object.entries(porFecha).map(([fecha, ventasDelDia]) => (
+              {diasMostrados.map(([fecha, ventasDelDia]) => (
                 <>
                   {/* Separador de fecha */}
                   <tr key={`fecha-${fecha}`}>
@@ -216,6 +230,19 @@ export default function LogVentas() {
             </tbody>
           </table>
         )}
+        <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:8, padding:'16px 0 24px' }}>
+          {diasMostrados.length < diasTodos.length && (
+            <button style={S.retryBtn} onClick={() => setDiasVisibles(n => n + DIAS_POR_TANDA)}>
+              Mostrar {Math.min(DIAS_POR_TANDA, diasTodos.length - diasMostrados.length)} días más ({diasTodos.length - diasMostrados.length} restantes)
+            </button>
+          )}
+          {rango !== 'todo' && diasMostrados.length >= diasTodos.length && (
+            <>
+              <div style={{ fontFamily:'Barlow, sans-serif', fontSize:13, color:'var(--muted)' }}>Se muestran los últimos 12 meses.</div>
+              <button style={S.retryBtn} onClick={() => cargar('todo')}>Cargar también las ventas más viejas (tarda más)</button>
+            </>
+          )}
+        </div>
       </div>
 
       {ventaSeleccionada && (

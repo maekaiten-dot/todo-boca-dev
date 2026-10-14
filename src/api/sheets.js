@@ -267,6 +267,19 @@ export async function getHistoricoVentas() {
   return rows.filter(r => r[0]).map(mapRow)
 }
 
+// Ventas desde una fecha (aaaa-mm-dd). Primero lee solo la columna FECHA (liviana) para ubicar
+// la primera fila del período, y después baja completas solo las filas desde ahí. Así el Historial
+// no descarga todas las ventas desde que arrancó el negocio.
+export async function getVentasDesde(desde) {
+  const fechas = (await sheetsGet('DETALLE DE VENTAS!C2:C')).values || []
+  const clave = f => { const [d, m, a] = String(f || '').replace(/^'/, '').split(' ')[0].split('/').map(Number); return d && m && a ? `${a}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}` : '' }
+  // la primera fila con fecha dentro del período (aunque haya alguna fila fuera de orden)
+  const idx = fechas.findIndex(r => clave(r[0]) >= desde)
+  if (idx < 0) return []
+  const data = await sheetsGet(`DETALLE DE VENTAS!A${idx + 2}:AJ`)
+  return (data.values || []).filter(r => r[0] && clave(r[2]) >= desde).map(mapRow)
+}
+
 export async function anularVenta(idVenta, empleado = '') {
   const data = await sheetsGet('DETALLE DE VENTAS!A2:U')
   const rows = data.values || []

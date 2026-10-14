@@ -1,6 +1,6 @@
 // src/pages/Estadisticas.jsx
 import { useState, useEffect, useMemo, Fragment } from 'react'
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LabelList } from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LabelList, Cell } from 'recharts'
 import { getHistoricoVentas, POSNET_METODOS } from '../api/sheets.js'
 import CorregirPosnetModal from '../components/CorregirPosnetModal.jsx'
 import MonotributoPosnet from '../components/MonotributoPosnet.jsx'
@@ -157,26 +157,80 @@ function proyectarMesActual(ventas, ahoraMs = Date.now()) {
   const vendidoHoy = porDia[clave(y, m, d)] || 0
   let resto = Math.max(0, prom[new Date(Date.UTC(y, m, d)).getUTCDay()] - vendidoHoy)
   for (let i = d + 1; i <= diasMes; i++) resto += prom[new Date(Date.UTC(y, m, i)).getUTCDay()]
-  return { key: `${y}-${String(m + 1).padStart(2, '0')}`, vendido, resto, proyectado: vendido + resto, diasQuedan: diasMes - d, diasMes }
+  const temporada = factorTemporada(porDia, clave, y, m, d, diasMes - d)
+  return {
+    key: `${y}-${String(m + 1).padStart(2, '0')}`, vendido, resto, proyectado: vendido + resto, diasQuedan: diasMes - d, diasMes,
+    temporada: temporada ? { factor: temporada, proyectado: vendido + resto * temporada } : null,
+  }
 }
 
-const fmtCorto = v => v >= 1000000 ? `$${(v / 1000000).toFixed(1)}M` : v >= 1000 ? `$${Math.round(v / 1000)}k` : `$${Math.round(v)}`
+// "Si se repite la temporada del año pasado": hace la misma proyección hace 364 días (mismo día de la
+// semana) y mira cuánto se equivocó con lo que realmente se vendió el resto de ese mes. Ese desvío
+// (limitado entre ×0,6 y ×1,6) se aplica a lo que falta de este mes. null si no hay datos del año pasado.
+function factorTemporada(porDia, clave, y, m, d, diasQuedan) {
+  const base = Date.UTC(y, m, d) - 364 * 86400000
+  const dia = i => { const f = new Date(base + i * 86400000); return { v: porDia[clave(f.getUTCFullYear(), f.getUTCMonth(), f.getUTCDate())], dow: f.getUTCDay() } }
+  const suma = Array(7).fill(0), cuenta = Array(7).fill(0)
+  let conDatos = 0
+  for (let i = 1; i <= SEMANAS_PROYECCION * 7; i++) { const x = dia(-i); suma[x.dow] += x.v || 0; cuenta[x.dow]++; if (x.v) conDatos++ }
+  if (conDatos < SEMANAS_PROYECCION * 7 * 0.6) return null // el año pasado todavía no había suficientes ventas cargadas
+  const prom = suma.map((s, i) => cuenta[i] ? s / cuenta[i] : 0)
+  let previsto = 0, real = 0
+  for (let i = 1; i <= diasQuedan; i++) { const x = dia(i); previsto += prom[x.dow]; real += x.v || 0 }
+  if (!(previsto > 0) || !(real > 0)) return null
+  return Math.min(1.6, Math.max(0.6, real / previsto))
+}
 
-const MesTooltip = ({ active, payload, label }) => {
+// ── Pesos, pesos de hoy (IPC) o dólares (blue promedio del mes) ────────────
+const MODOS_MONEDA = [
+  { id: 'ARS', label: 'Pesos' },
+  { id: 'REAL', label: 'Pesos de hoy' },
+  { id: 'USD', label: 'Dólares' },
+]
+// Devuelve una función mes ('aaaa-mm') → multiplicador, o null si no hay datos para ese modo
+function conversorMoneda(modo, indices) {
+  if (modo === 'ARS' || !indices) return () => 1
+  if (modo === 'REAL') {
+    const meses = Object.keys(indices.inflacion || {}).sort()
+    if (!meses.length) return null
+    // factor de cada mes = inflación acumulada desde el mes siguiente hasta el último IPC publicado
+    const acum = {}; let f = 1
+    for (let i = meses.length - 1; i >= 0; i--) { acum[meses[i]] = f; f *= 1 + indices.inflacion[meses[i]] / 100 }
+    const primero = meses[0]
+    return mes => mes > meses[meses.length - 1] ? 1 : (acum[mes] ?? (mes < primero ? null : 1))
+  }
+  const meses = Object.keys(indices.blue || {}).sort()
+  if (!meses.length) return null
+  return mes => { const k = meses.filter(x => x <= mes).pop() || meses[0]; return 1 / indices.blue[k] }
+}
+const prefijo = modo => modo === 'USD' ? 'US$' : '$'
+const nombreMesCorto = mes => { const [a, m] = mes.split('-'); return `${['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'][Number(m) - 1]} ${a}` }
+
+const fmtCorto = (v, p = '$') => v >= 1000000 ? `${p}${(v / 1000000).toFixed(1)}M` : v >= 1000 ? `${p}${Math.round(v / 1000)}k` : `${p}${Math.round(v)}`
+
+const MesTooltip = ({ active, payload, label, modo = 'ARS' }) => {
   if (!active || !payload?.length) return null
   const r = payload[0].payload
+  const pf = prefijo(modo)
   const caja = { background:'var(--surface)', border:'1.5px solid var(--border)', borderRadius:8, padding:'10px 14px' }
   const t = { fontFamily:'Barlow Condensed, sans-serif' }
   return (
     <div style={caja}>
       <div style={{ ...t, fontSize:13, color:'var(--muted)', marginBottom:4 }}>{label}{r.proy ? ' · mes en curso' : ''}</div>
-      <div style={{ ...t, fontWeight:800, fontSize:20, color:'var(--accent)' }}>${Math.round(r.total).toLocaleString('es-AR')}{r.proy ? <span style={{ fontSize:13, fontWeight:600, color:'var(--muted)' }}> vendido</span> : null}</div>
+      <div style={{ ...t, fontWeight:800, fontSize:20, color:'var(--accent)' }}>{pf}{Math.round(r.total).toLocaleString('es-AR')}{r.proy ? <span style={{ fontSize:13, fontWeight:600, color:'var(--muted)' }}> vendido</span> : null}</div>
       {r.proy && (
         <>
-          <div style={{ ...t, fontWeight:800, fontSize:18, color:'#90caf9', marginTop:4 }}>≈ ${Math.round(r.proy.proyectado).toLocaleString('es-AR')} <span style={{ fontSize:13, fontWeight:600, color:'var(--muted)' }}>proyectado a fin de mes</span></div>
-          <div style={{ fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)', marginTop:4, maxWidth:240 }}>
-            Faltan {r.proy.diasQuedan} {r.proy.diasQuedan === 1 ? 'día' : 'días'}. Estimado con el promedio de cada día de la semana de las últimas {SEMANAS_PROYECCION} semanas.
-          </div>
+          <div style={{ ...t, fontWeight:800, fontSize:18, color:'#90caf9', marginTop:4 }}>≈ {pf}{Math.round(r.proy.proyectado).toLocaleString('es-AR')} <span style={{ fontSize:13, fontWeight:600, color:'var(--muted)' }}>proyectado a fin de mes</span></div>
+          <div style={{ fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)', maxWidth:260 }}>según el ritmo de las últimas {SEMANAS_PROYECCION} semanas</div>
+          {r.proy.temporada && (
+            <>
+              <div style={{ ...t, fontWeight:800, fontSize:18, color:'#c4b5fd', marginTop:6 }}>≈ {pf}{Math.round(r.proy.temporada.proyectado).toLocaleString('es-AR')} <span style={{ fontSize:13, fontWeight:600, color:'var(--muted)' }}>si se repite la temporada</span></div>
+              <div style={{ fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)', maxWidth:260 }}>
+                El año pasado, el resto de este mes se vendió {r.proy.temporada.factor >= 1 ? `un ${Math.round((r.proy.temporada.factor - 1) * 100)}% más` : `un ${Math.round((1 - r.proy.temporada.factor) * 100)}% menos`} de lo que marcaba el ritmo de las semanas anteriores.
+              </div>
+            </>
+          )}
+          <div style={{ fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)', marginTop:6 }}>Faltan {r.proy.diasQuedan} {r.proy.diasQuedan === 1 ? 'día' : 'días'}.</div>
         </>
       )}
     </div>
@@ -523,6 +577,43 @@ export default function Estadisticas({ esAdmin = false, usuarios = [], perfilNom
     }
     return filas
   }, [ventasTodas, datosMes])
+  // Pesos / pesos de hoy / dólares
+  const [modoMoneda, setModoMoneda] = useState('ARS')
+  const [indices, setIndices] = useState(null)
+  const [errorIndices, setErrorIndices] = useState(null)
+  useEffect(() => {
+    if (modoMoneda === 'ARS' || indices) return
+    fetch('/api/indices').then(r => r.ok ? r.json() : r.json().then(j => Promise.reject(new Error(j.error || r.status))))
+      .then(setIndices).catch(e => { setErrorIndices('No se pudieron traer la inflación y el dólar. Probá más tarde.'); console.error(e) })
+  }, [modoMoneda, indices])
+  const datosMesMoneda = useMemo(() => {
+    if (modoMoneda === 'ARS') return datosMesConProy
+    if (!indices) return []
+    const conv = conversorMoneda(modoMoneda, indices)
+    if (!conv) return []
+    return datosMesConProy.map(f => {
+      const k = conv(f.key)
+      if (k == null) return null
+      const proy = f.proy && { ...f.proy, proyectado: f.proy.proyectado * k, temporada: f.proy.temporada && { ...f.proy.temporada, proyectado: f.proy.temporada.proyectado * k } }
+      return { ...f, total: f.total * k, resto: f.resto != null ? f.resto * k : f.resto, proy }
+    }).filter(Boolean)
+  }, [datosMesConProy, modoMoneda, indices])
+  const notaMoneda = modoMoneda === 'REAL' && indices?.ultimoIpc
+    ? `Cada mes ajustado por la inflación del INDEC hasta ${nombreMesCorto(indices.ultimoIpc)} (último dato publicado): todos los meses en pesos de ese momento.`
+    : modoMoneda === 'USD' && indices ? 'Cada mes dividido por el dólar blue promedio de ese mes.' : null
+  // Unidades vendidas por mes (no tienen inflación: muestran la estacionalidad real)
+  const unidadesMes = useMemo(() => {
+    const m = {}
+    ventasTodas.forEach(v => {
+      if (v.anulado || !v.fecha) return
+      const [dd, mm, aa] = String(v.fecha).split('/')
+      if (!aa) return
+      const key = `${aa}-${String(mm).padStart(2, '0')}`
+      ;(m[key] ||= { key, label: `${String(mm).padStart(2, '0')}/${aa}`, unidades: 0 }).unidades += Number(v.cantidad) || 0
+    })
+    const actual = (() => { const h = new Date(Date.now() - 3 * 3600000); return `${h.getUTCFullYear()}-${String(h.getUTCMonth() + 1).padStart(2, '0')}` })()
+    return Object.values(m).sort((a, b) => a.key.localeCompare(b.key)).map(x => ({ ...x, enCurso: x.key === actual }))
+  }, [ventasTodas])
   const [totalPeriodo, setTotalPeriodo] = useState(0)
   const [mejorDia, setMejorDia] = useState(null)
 
@@ -642,18 +733,56 @@ export default function Estadisticas({ esAdmin = false, usuarios = [], perfilNom
 
       {/* Gráfico mensual total */}
       <div style={S.chartCard}>
-        <div style={S.chartTitle}>Ventas por mes — histórico</div>
-        <div style={{ fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)', margin:'-4px 0 6px' }}>En el mes en curso, la parte transparente es la proyección de lo que falta vender hasta fin de mes.</div>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+          <div style={S.chartTitle}>Ventas por mes — histórico</div>
+          <div style={{ display:'flex', gap:4, background:'var(--surface2)', borderRadius:10, padding:3 }} role="group" aria-label="Moneda del gráfico">
+            {MODOS_MONEDA.map(m => (
+              <button key={m.id} onClick={() => setModoMoneda(m.id)} aria-pressed={modoMoneda === m.id}
+                style={{ fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:14, padding:'6px 12px', borderRadius:8, border:'none', cursor:'pointer',
+                  background: modoMoneda === m.id ? 'var(--accent)' : 'transparent', color: modoMoneda === m.id ? '#000' : 'var(--muted)' }}>{m.label}</button>
+            ))}
+          </div>
+        </div>
+        <div style={{ fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)', margin:'2px 0 6px' }}>
+          En el mes en curso, la parte transparente es la proyección de lo que falta vender hasta fin de mes.{notaMoneda ? ` ${notaMoneda}` : ''}
+        </div>
+        {modoMoneda !== 'ARS' && !indices ? (
+          <div style={{ fontFamily:'Barlow, sans-serif', fontSize:14, color: errorIndices ? '#ef4444' : 'var(--muted)', padding:'40px 0', textAlign:'center' }}>{errorIndices || 'Trayendo inflación y dólar…'}</div>
+        ) : (
         <div style={S.chartWrap}>
           <ResponsiveContainer width="100%" height={560}>
-            <BarChart data={datosMesConProy} margin={{ top: 26, right: 8, left: 0, bottom: 40 }}>
+            <BarChart data={datosMesMoneda} margin={{ top: 26, right: 8, left: 0, bottom: 40 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
               <XAxis dataKey="label" tick={{ fontFamily:'Barlow Condensed, sans-serif', fontSize:11, fill:'#6a8ccc' }} angle={-45} textAnchor="end" interval={0} tickLine={false} axisLine={false} />
-              <YAxis tick={{ fontFamily:'Barlow Condensed, sans-serif', fontSize:11, fill:'#6a8ccc' }} tickFormatter={v => v >= 1000000 ? `${(v/1000000).toFixed(1)}M` : v >= 1000 ? `${(v/1000).toFixed(0)}k` : v} tickLine={false} axisLine={false} width={48} />
-              <Tooltip content={<MesTooltip />} cursor={{ fill:'rgba(33,150,243,0.08)' }} />
+              <YAxis tick={{ fontFamily:'Barlow Condensed, sans-serif', fontSize:11, fill:'#6a8ccc' }} tickFormatter={v => v >= 1000000 ? `${(v/1000000).toFixed(1)}M` : v >= 1000 ? `${(v/1000).toFixed(0)}k` : Math.round(v)} tickLine={false} axisLine={false} width={48} />
+              <Tooltip content={<MesTooltip modo={modoMoneda} />} cursor={{ fill:'rgba(33,150,243,0.08)' }} />
               <Bar dataKey="total" stackId="mes" fill="#2196f3" radius={[4, 4, 0, 0]} maxBarSize={48} />
               <Bar dataKey="resto" stackId="mes" fill="rgba(33,150,243,0.32)" stroke="#2196f3" strokeDasharray="4 3" strokeWidth={1.5} radius={[4, 4, 0, 0]} maxBarSize={48}>
-                <LabelList dataKey="proy" position="top" formatter={p => p ? `≈\u00a0${fmtCorto(p.proyectado)}` : ''} style={{ fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:12, fill:'#90caf9' }} />
+                <LabelList dataKey="proy" position="top" formatter={p => p ? `≈\u00a0${fmtCorto(p.proyectado, prefijo(modoMoneda))}` : ''} style={{ fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:12, fill:'#90caf9' }} />
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+        )}
+      </div>
+
+      {/* Unidades vendidas por mes */}
+      <div style={S.chartCard}>
+        <div style={S.chartTitle}>Unidades vendidas por mes</div>
+        <div style={{ fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)', margin:'-4px 0 6px' }}>Cantidad de productos vendidos. No tiene inflación: muestra la temporada real y sirve para planificar compras. El mes en curso va más claro porque todavía no terminó.</div>
+        <div style={S.chartWrap}>
+          <ResponsiveContainer width="100%" height={420}>
+            <BarChart data={unidadesMes} margin={{ top: 8, right: 8, left: 0, bottom: 40 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+              <XAxis dataKey="label" tick={{ fontFamily:'Barlow Condensed, sans-serif', fontSize:11, fill:'#6a8ccc' }} angle={-45} textAnchor="end" interval={0} tickLine={false} axisLine={false} />
+              <YAxis tick={{ fontFamily:'Barlow Condensed, sans-serif', fontSize:11, fill:'#6a8ccc' }} tickLine={false} axisLine={false} width={48} />
+              <Tooltip cursor={{ fill:'rgba(245,200,0,0.06)' }} content={({ active, payload, label }) => active && payload?.length ? (
+                <div style={{ background:'var(--surface)', border:'1.5px solid var(--border)', borderRadius:8, padding:'10px 14px' }}>
+                  <div style={{ fontFamily:'Barlow Condensed, sans-serif', fontSize:13, color:'var(--muted)' }}>{label}{payload[0].payload.enCurso ? ' · mes en curso' : ''}</div>
+                  <div style={{ fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:20, color:'var(--accent)' }}>{Math.round(payload[0].value).toLocaleString('es-AR')} unidades</div>
+                </div>) : null} />
+              <Bar dataKey="unidades" fill="#f5c800" radius={[4, 4, 0, 0]} maxBarSize={48}>
+                {unidadesMes.map(x => <Cell key={x.key} fill={x.enCurso ? 'rgba(245,200,0,0.4)' : '#f5c800'} />)}
               </Bar>
             </BarChart>
           </ResponsiveContainer>

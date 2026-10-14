@@ -1,6 +1,6 @@
 // src/pages/Estadisticas.jsx
 import { useState, useEffect, useMemo, Fragment } from 'react'
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LabelList, Cell } from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LabelList } from 'recharts'
 import { getHistoricoVentas, POSNET_METODOS } from '../api/sheets.js'
 import CorregirPosnetModal from '../components/CorregirPosnetModal.jsx'
 import MonotributoPosnet from '../components/MonotributoPosnet.jsx'
@@ -135,13 +135,13 @@ function calcularPctPorMes(mesTotales, mesTarjeta) {
 // con el promedio de ese día de la semana en las últimas 8 semanas (días completos, sin contar hoy).
 // Para hoy se estima el día completo y se descuenta lo que ya se vendió.
 const SEMANAS_PROYECCION = 8
-function proyectarMesActual(ventas, ahoraMs = Date.now()) {
+function proyectarMesActual(ventas, ahoraMs = Date.now(), valor = v => parsePrecio(v.precioTotalFinal) || parsePrecio(v.precioTotal)) {
   const hoy = new Date(ahoraMs - 3 * 3600000) // fecha en Argentina (UTC-3)
   const y = hoy.getUTCFullYear(), m = hoy.getUTCMonth(), d = hoy.getUTCDate()
   const clave = (yy, mm, dd) => `${dd}/${mm + 1}/${yy}`
   const norm = f => { const [dd, mm, yy] = String(f || '').split('/').map(Number); return dd && mm && yy ? clave(yy, mm - 1, dd) : '' }
   const porDia = {}
-  ventas.forEach(v => { if (v.anulado) return; const k = norm(v.fecha); if (k) porDia[k] = (porDia[k] || 0) + (parsePrecio(v.precioTotalFinal) || parsePrecio(v.precioTotal)) })
+  ventas.forEach(v => { if (v.anulado) return; const k = norm(v.fecha); if (k) porDia[k] = (porDia[k] || 0) + valor(v) })
   // Promedio por día de la semana con los días completos anteriores a hoy
   const suma = Array(7).fill(0), cuenta = Array(7).fill(0)
   for (let i = 1; i <= SEMANAS_PROYECCION * 7; i++) {
@@ -227,6 +227,34 @@ const MesTooltip = ({ active, payload, label, modo = 'ARS' }) => {
               <div style={{ ...t, fontWeight:800, fontSize:18, color:'#c4b5fd', marginTop:6 }}>≈ {pf}{Math.round(r.proy.temporada.proyectado).toLocaleString('es-AR')} <span style={{ fontSize:13, fontWeight:600, color:'var(--muted)' }}>si se repite la temporada</span></div>
               <div style={{ fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)', maxWidth:260 }}>
                 El año pasado, el resto de este mes se vendió {r.proy.temporada.factor >= 1 ? `un ${Math.round((r.proy.temporada.factor - 1) * 100)}% más` : `un ${Math.round((1 - r.proy.temporada.factor) * 100)}% menos`} de lo que marcaba el ritmo de las semanas anteriores.
+              </div>
+            </>
+          )}
+          <div style={{ fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)', marginTop:6 }}>Faltan {r.proy.diasQuedan} {r.proy.diasQuedan === 1 ? 'día' : 'días'}.</div>
+        </>
+      )}
+    </div>
+  )
+}
+
+const UnidadesTooltip = ({ active, payload, label }) => {
+  if (!active || !payload?.length) return null
+  const r = payload[0].payload
+  const t = { fontFamily:'Barlow Condensed, sans-serif' }
+  const n = v => Math.round(v).toLocaleString('es-AR')
+  return (
+    <div style={{ background:'var(--surface)', border:'1.5px solid var(--border)', borderRadius:8, padding:'10px 14px' }}>
+      <div style={{ ...t, fontSize:13, color:'var(--muted)', marginBottom:4 }}>{label}{r.proy ? ' · mes en curso' : ''}</div>
+      <div style={{ ...t, fontWeight:800, fontSize:20, color:'var(--accent)' }}>{n(r.unidades)} unidades{r.proy ? <span style={{ fontSize:13, fontWeight:600, color:'var(--muted)' }}> vendidas</span> : null}</div>
+      {r.proy && (
+        <>
+          <div style={{ ...t, fontWeight:800, fontSize:18, color:'#fde68a', marginTop:4 }}>≈ {n(r.proy.proyectado)} <span style={{ fontSize:13, fontWeight:600, color:'var(--muted)' }}>proyectadas a fin de mes</span></div>
+          <div style={{ fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)', maxWidth:260 }}>según el ritmo de las últimas {SEMANAS_PROYECCION} semanas</div>
+          {r.proy.temporada && (
+            <>
+              <div style={{ ...t, fontWeight:800, fontSize:18, color:'#c4b5fd', marginTop:6 }}>≈ {n(r.proy.temporada.proyectado)} <span style={{ fontSize:13, fontWeight:600, color:'var(--muted)' }}>si se repite la temporada</span></div>
+              <div style={{ fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)', maxWidth:260 }}>
+                El año pasado, el resto de este mes se vendieron {r.proy.temporada.factor >= 1 ? `un ${Math.round((r.proy.temporada.factor - 1) * 100)}% más` : `un ${Math.round((1 - r.proy.temporada.factor) * 100)}% menos`} unidades de lo que marcaba el ritmo de las semanas anteriores.
               </div>
             </>
           )}
@@ -611,8 +639,9 @@ export default function Estadisticas({ esAdmin = false, usuarios = [], perfilNom
       const key = `${aa}-${String(mm).padStart(2, '0')}`
       ;(m[key] ||= { key, label: `${String(mm).padStart(2, '0')}/${aa}`, unidades: 0 }).unidades += Number(v.cantidad) || 0
     })
-    const actual = (() => { const h = new Date(Date.now() - 3 * 3600000); return `${h.getUTCFullYear()}-${String(h.getUTCMonth() + 1).padStart(2, '0')}` })()
-    return Object.values(m).sort((a, b) => a.key.localeCompare(b.key)).map(x => ({ ...x, enCurso: x.key === actual }))
+    const p = proyectarMesActual(ventasTodas, Date.now(), v => Number(v.cantidad) || 0)
+    if (!m[p.key]) { const [aa, mm] = p.key.split('-'); m[p.key] = { key: p.key, label: `${mm}/${aa}`, unidades: 0 } }
+    return Object.values(m).sort((a, b) => a.key.localeCompare(b.key)).map(x => x.key === p.key ? { ...x, enCurso: true, resto: p.resto, proy: p } : x)
   }, [ventasTodas])
   const [totalPeriodo, setTotalPeriodo] = useState(0)
   const [mejorDia, setMejorDia] = useState(null)
@@ -769,20 +798,17 @@ export default function Estadisticas({ esAdmin = false, usuarios = [], perfilNom
       {/* Unidades vendidas por mes */}
       <div style={S.chartCard}>
         <div style={S.chartTitle}>Unidades vendidas por mes</div>
-        <div style={{ fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)', margin:'-4px 0 6px' }}>Cantidad de productos vendidos. No tiene inflación: muestra la temporada real y sirve para planificar compras. El mes en curso va más claro porque todavía no terminó.</div>
+        <div style={{ fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)', margin:'-4px 0 6px' }}>Cantidad de productos vendidos. No tiene inflación: muestra la temporada real y sirve para planificar compras. En el mes en curso, la parte transparente es la proyección de lo que falta vender.</div>
         <div style={S.chartWrap}>
           <ResponsiveContainer width="100%" height={420}>
-            <BarChart data={unidadesMes} margin={{ top: 8, right: 8, left: 0, bottom: 40 }}>
+            <BarChart data={unidadesMes} margin={{ top: 26, right: 8, left: 0, bottom: 40 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
               <XAxis dataKey="label" tick={{ fontFamily:'Barlow Condensed, sans-serif', fontSize:11, fill:'#6a8ccc' }} angle={-45} textAnchor="end" interval={0} tickLine={false} axisLine={false} />
               <YAxis tick={{ fontFamily:'Barlow Condensed, sans-serif', fontSize:11, fill:'#6a8ccc' }} tickLine={false} axisLine={false} width={48} />
-              <Tooltip cursor={{ fill:'rgba(245,200,0,0.06)' }} content={({ active, payload, label }) => active && payload?.length ? (
-                <div style={{ background:'var(--surface)', border:'1.5px solid var(--border)', borderRadius:8, padding:'10px 14px' }}>
-                  <div style={{ fontFamily:'Barlow Condensed, sans-serif', fontSize:13, color:'var(--muted)' }}>{label}{payload[0].payload.enCurso ? ' · mes en curso' : ''}</div>
-                  <div style={{ fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:20, color:'var(--accent)' }}>{Math.round(payload[0].value).toLocaleString('es-AR')} unidades</div>
-                </div>) : null} />
-              <Bar dataKey="unidades" fill="#f5c800" radius={[4, 4, 0, 0]} maxBarSize={48}>
-                {unidadesMes.map(x => <Cell key={x.key} fill={x.enCurso ? 'rgba(245,200,0,0.4)' : '#f5c800'} />)}
+              <Tooltip cursor={{ fill:'rgba(245,200,0,0.06)' }} content={<UnidadesTooltip />} />
+              <Bar dataKey="unidades" stackId="u" fill="#f5c800" radius={[4, 4, 0, 0]} maxBarSize={48} />
+              <Bar dataKey="resto" stackId="u" fill="rgba(245,200,0,0.28)" stroke="#f5c800" strokeDasharray="4 3" strokeWidth={1.5} radius={[4, 4, 0, 0]} maxBarSize={48}>
+                <LabelList dataKey="proy" position="top" formatter={p => p ? `≈\u00a0${Math.round(p.proyectado).toLocaleString('es-AR')}` : ''} style={{ fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:12, fill:'#fde68a' }} />
               </Bar>
             </BarChart>
           </ResponsiveContainer>

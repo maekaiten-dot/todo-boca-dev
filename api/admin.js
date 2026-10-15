@@ -161,6 +161,24 @@ async function confirmarCierre({ mes, diaPago, blue, serviciosIds = [], nota = '
   return { ok: true, mes, regalias: reg, alquilerPesos, neto, movimientos: filas.length }
 }
 
+// ── Saldo corrido con Mitad de cuadra ──────────────────────────────────────
+async function saldoMdc() {
+  const [filasPagos, cuenta, config] = await Promise.all([local.sheetsGet('PAGOS!A2:O'), getCuenta(), getConfig()])
+  const pagos = filasPagos.filter(r => r[0] && PROVEEDORES_MDC.includes(String(r[10] || '').trim().toLowerCase()) && String(r[14]).toUpperCase() !== 'TRUE').map(r => {
+    const cant = Number(r[6]) || 0, cu = parsePrecioLocal(r[7]), total = parsePrecioLocal(r[8]) || cant * cu
+    const pagado = String(r[12]).toUpperCase() === 'TRUE', montoPagado = parsePrecioLocal(r[11])
+    return { id: r[0], fecha: r[2] || '', articulo: r[5] || r[9] || '', cantidad: cant, costoUnitario: cu, total, pagado, pendiente: pagado ? 0 : Math.max(0, total - montoPagado), sinPrecio: !(total > 0) }
+  })
+  const movimientos = cuenta.filter(m => !m.anulado && m.cuenta === CUENTA_MDC)
+  const deudaMercaderia = pagos.reduce((t, p) => t + p.pendiente, 0)
+  const aFavorMdc = movimientos.reduce((t, m) => t + (m.aFavorDe === MDC ? m.montoPesos : -m.montoPesos), 0)
+  return {
+    saldo: Math.round((deudaMercaderia + aFavorMdc) * 100) / 100, // > 0: el local le debe a Mitad de cuadra
+    deudaMercaderia, aFavorMdc, pagos: pagos.filter(p => p.pendiente > 0 || p.sinPrecio), movimientos, coberturaDia: config.coberturaDia,
+    sinPrecio: pagos.filter(p => p.sinPrecio).length,
+  }
+}
+
 // ── Acciones ───────────────────────────────────────────────────────────────
 async function ejecutar(accion, body, sesion) {
   if (accion === 'estado') {
@@ -392,21 +410,7 @@ async function ejecutar(accion, body, sesion) {
   }
 
   // ── Cuenta Esquina ↔ Mitad de cuadra ──
-  if (accion === 'mdc') {
-    const [filasPagos, cuenta, config] = await Promise.all([local.sheetsGet('PAGOS!A2:O'), getCuenta(), getConfig()])
-    const pagos = filasPagos.filter(r => r[0] && PROVEEDORES_MDC.includes(String(r[10] || '').trim().toLowerCase()) && String(r[14]).toUpperCase() !== 'TRUE').map(r => {
-      const cant = Number(r[6]) || 0, cu = parsePrecioLocal(r[7]), total = parsePrecioLocal(r[8]) || cant * cu
-      const pagado = String(r[12]).toUpperCase() === 'TRUE', montoPagado = parsePrecioLocal(r[11])
-      return { id: r[0], fecha: r[2] || '', articulo: r[5] || r[9] || '', cantidad: cant, costoUnitario: cu, total, pagado, pendiente: pagado ? 0 : Math.max(0, total - montoPagado), sinPrecio: !(total > 0) }
-    })
-    const movimientos = cuenta.filter(m => !m.anulado && m.cuenta === CUENTA_MDC)
-    const deudaMercaderia = pagos.reduce((t, p) => t + p.pendiente, 0)
-    const aFavorMdc = movimientos.reduce((t, m) => t + (m.aFavorDe === MDC ? m.montoPesos : -m.montoPesos), 0)
-    return [200, {
-      saldo: Math.round((deudaMercaderia + aFavorMdc) * 100) / 100, // > 0: el local le debe a Mitad de cuadra
-      deudaMercaderia, aFavorMdc, pagos: pagos.filter(p => p.pendiente > 0 || p.sinPrecio), movimientos, coberturaDia: config.coberturaDia,
-    }]
-  }
+  if (accion === 'mdc') return [200, await saldoMdc()]
   if (accion === 'mdc.agregar') {
     const t = TIPOS_MDC[body.tipo]
     if (!t) fallar('Tipo de movimiento inválido')
@@ -439,9 +443,10 @@ async function ejecutar(accion, body, sesion) {
   }
 
   if (accion === 'cuentas') {
-    const [movimientos, cierres] = await Promise.all([getCuenta(), getCierres()])
-    // la cuenta con Mitad de cuadra es un saldo corrido (se ve en su sección), no pagos pendientes
-    return [200, { movimientos: movimientos.filter(m => !m.anulado && m.estado !== 'REGISTRADO'), cierres }]
+    const [movimientos, cierres, mdc] = await Promise.all([getCuenta(), getCierres(), saldoMdc().catch(() => null)])
+    // la cuenta con Mitad de cuadra es un saldo corrido (se ve en su sección), no pagos pendientes;
+    // acá solo va su saldo para el resumen por persona
+    return [200, { movimientos: movimientos.filter(m => !m.anulado && m.estado !== 'REGISTRADO'), cierres, mdc: mdc && { saldo: mdc.saldo, sinPrecio: mdc.sinPrecio } }]
   }
   if (accion === 'cuentas.pagar') {
     const ids = Array.isArray(body.ids) ? body.ids : []

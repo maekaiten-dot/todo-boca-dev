@@ -66,12 +66,13 @@ const Fila = ({ izq, der, fuerte, sub }) => (
 )
 
 // ── Pendientes ─────────────────────────────────────────────────────────────
-function Pendientes({ toast }) {
+function Pendientes({ toast, irA }) {
   const [datos, setDatos] = useState(null)
   const [error, setError] = useState(null)
   const [pagando, setPagando] = useState(null)
   const [fecha, setFecha] = useState(fechaHoy())
   const [verPagados, setVerPagados] = useState(false)
+  const [persona, setPersona] = useState(null) // filtro elegido desde el resumen de saldos
   async function cargar() { setError(null); try { setDatos(await pedirAdmin('cuentas')) } catch (e) { setError(e.message) } }
   useEffect(() => { cargar() }, [])
 
@@ -103,11 +104,49 @@ function Pendientes({ toast }) {
   if (error) return <div style={S.card}><div style={S.error}>{error}</div><button style={S.btnSec} onClick={cargar}>Reintentar</button></div>
   if (!datos) return <div style={S.muted}>Cargando…</div>
   const pend = grupos.filter(g => g.estado === 'PENDIENTE')
+  // Resumen por persona: todo lo pendiente entre el local y cada uno, sumando todos los cierres,
+  // reintegros y liquidaciones (pesos y dólares por separado). Más el saldo corrido con Mitad de cuadra.
+  const saldos = {}
+  pend.forEach(gr => {
+    const otro = gr.cuenta.split(' ↔ ').find(x => x !== 'Esquina') || gr.cuenta
+    const o = (saldos[otro] ||= { persona: otro, ars: 0, usd: 0, n: 0 })
+    const signo = gr.paga === 'Esquina' ? 1 : -1 // + = el local le debe
+    o.ars += signo * gr.neto; o.usd += signo * gr.netoUsd; o.n++
+  })
+  const listaSaldos = Object.values(saldos).filter(o => Math.abs(o.ars) >= 1 || Math.abs(o.usd) >= 0.01).sort((a, b) => Math.abs(b.ars) - Math.abs(a.ars))
+  const totalLocal = listaSaldos.reduce((t, o) => t + o.ars, 0)
+  const totalLocalUsd = listaSaldos.reduce((t, o) => t + o.usd, 0)
+  const montoTxt = o => [Math.abs(o.ars) >= 1 && fmt$(Math.abs(o.ars)), Math.abs(o.usd) >= 0.01 && fmtUSD(Math.abs(o.usd))].filter(Boolean).join(' + ')
+  const mdc = datos.mdc
+  const visibles = grupos.filter(gr => !persona || gr.cuenta.split(' ↔ ').includes(persona))
   return (
     <>
+      <div style={S.card}>
+        <div style={S.cardTitulo}>Saldos por persona</div>
+        {listaSaldos.length === 0 && !(mdc && Math.abs(mdc.saldo) >= 1) && <div style={S.muted}>El local está al día con todos.</div>}
+        {listaSaldos.map(o => (
+          <button key={o.persona} style={{ ...S.saldoFila, ...(persona === o.persona ? { borderColor: 'var(--accent)' } : {}) }} onClick={() => setPersona(p => p === o.persona ? null : o.persona)}>
+            <span style={{ flex: 1, minWidth: 0, textAlign: 'left' }}><strong>{o.persona}</strong><br />
+              <span style={S.sub}>{o.ars >= 0 && o.usd >= 0 ? `el local le debe` : `le debe al local`} · {o.n} {o.n === 1 ? 'pago pendiente' : 'pagos pendientes'}</span></span>
+            <span style={{ ...S.grupoMonto, fontSize: 20, color: o.ars >= 0 && o.usd >= 0 ? 'var(--accent)' : '#22c55e' }}>{montoTxt(o)}</span>
+          </button>
+        ))}
+        {mdc && Math.abs(mdc.saldo) >= 1 && (
+          <button style={S.saldoFila} onClick={() => irA('mdc')}>
+            <span style={{ flex: 1, minWidth: 0, textAlign: 'left' }}><strong>Mitad de cuadra</strong><br />
+              <span style={S.sub}>{mdc.saldo > 0 ? 'el local le debe' : 'le debe al local'} · cuenta corrida{mdc.sinPrecio ? ` · ${mdc.sinPrecio} sin precio` : ''} →</span></span>
+            <span style={{ ...S.grupoMonto, fontSize: 20, color: mdc.saldo > 0 ? 'var(--accent)' : '#22c55e' }}>{fmt$(Math.abs(mdc.saldo))}</span>
+          </button>
+        )}
+        {listaSaldos.length > 0 && (
+          <Fila izq="Total que debe pagar el local (sin Mitad de cuadra)" der={[fmt$(totalLocal), Math.abs(totalLocalUsd) >= 0.01 && fmtUSD(totalLocalUsd)].filter(Boolean).join(' + ')} fuerte />
+        )}
+        {listaSaldos.length > 0 && <div style={S.ayuda}>Tocá una persona para ver solo sus pagos pendientes.</div>}
+      </div>
+      {persona && <button style={S.btnSec} onClick={() => setPersona(null)}>✕ Mostrando solo {persona} · ver todos</button>}
       <div style={S.ayuda}>Lo que falta pagar de cada cierre. Cuando lo pagás, tocá <strong>Marcar pagado</strong> y poné la fecha real.</div>
       {pend.length === 0 && <div style={S.card}><div style={S.muted}>No hay pagos pendientes.</div></div>}
-      {grupos.map(gr => (
+      {visibles.map(gr => (
         <div key={`${gr.origen}|${gr.cuenta}|${gr.estado}`} style={{ ...S.card, ...(gr.estado === 'PAGADO' ? { opacity: 0.6 } : {}) }}>
           <div style={S.grupoTop}>
             <div style={{ minWidth: 0 }}>
@@ -975,7 +1014,7 @@ export default function Administracion({ perfilNombre = '' }) {
               {SECCIONES.map(s => <button key={s.id} style={{ ...S.secBtn, ...(seccion === s.id ? S.secBtnActivo : {}) }} onClick={() => setSeccion(s.id)}>{s.label}</button>)}
             </div>
             <div key={`${seccion}-${version}`} style={S.contenido}>
-              {seccion === 'pend' && <Pendientes toast={toastSeguro} />}
+              {seccion === 'pend' && <Pendientes toast={toastSeguro} irA={setSeccion} />}
               {seccion === 'cierre' && <Cierre toast={toastSeguro} irA={setSeccion} />}
               {seccion === 'horas' && <Horas toast={toastSeguro} />}
               {seccion === 'serv' && <Servicios toast={toastSeguro} />}
@@ -1057,6 +1096,7 @@ const S = {
   pagarFila: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' },
   prod3dGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: 6 },
   prod3d: { display: 'flex', alignItems: 'center', gap: 8, fontFamily: 'Barlow, sans-serif', fontSize: 14, color: 'var(--text)', background: 'var(--surface2)', border: '1.5px solid var(--border)', borderRadius: 10, padding: '6px 8px' },
+  saldoFila: { display: 'flex', alignItems: 'center', gap: 12, width: '100%', background: 'var(--surface2)', border: '1.5px solid var(--border)', borderRadius: 10, padding: '10px 12px', cursor: 'pointer', color: 'var(--text)', fontFamily: 'Barlow, sans-serif', fontSize: 15 },
   saldoGrande: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 24, color: 'var(--accent)', lineHeight: 1.2 },
   check: { display: 'flex', alignItems: 'center', gap: 8, fontFamily: 'Barlow, sans-serif', fontSize: 13, color: 'var(--muted)', cursor: 'pointer' },
 }

@@ -164,15 +164,23 @@ const col = n => { let s = ''; n++; while (n) { const m = (n - 1) % 26; s = Stri
 
 // Crea las pestañas que falten (con encabezados y datos iniciales), agrega columnas nuevas al final
 // de los encabezados existentes, completa claves nuevas de CONFIG y cuenta las filas de cada tabla.
+// Todo en pocas consultas (Google limita las lecturas por minuto): 1 para ver qué pestañas hay,
+// 1 para crear las que faltan, 1 para leer todos los encabezados y la columna A de cada tabla.
 export async function prepararTablas() {
+  const meta = await admin.metadatos()
+  const existentes = new Set((meta.sheets || []).map(x => x.properties?.title))
+  const nuevas = TABLAS.filter(t => !existentes.has(t.nombre)).map(t => t.nombre)
+  await admin.crearHojas(nuevas)
+  const datos = await admin.batchGet([...TABLAS.map(t => `${t.nombre}!A1:Z1`), ...TABLAS.map(t => `${t.nombre}!A2:A`)])
+  const n = TABLAS.length
   const out = []
-  for (const t of TABLAS) {
-    const creada = await admin.asegurarHoja(t.nombre, t.enc)
-    if (!creada) {
-      const enc = (await admin.sheetsGet(`${t.nombre}!A1:Z1`))[0] || []
-      if (enc.length < t.enc.length && enc.every((h, i) => h === t.enc[i])) await admin.sheetsUpdate(`${t.nombre}!A1`, [t.enc])
-    }
-    const filasA = await admin.sheetsGet(`${t.nombre}!A2:A`)
+  for (let k = 0; k < n; k++) {
+    const t = TABLAS[k]
+    const creada = nuevas.includes(t.nombre)
+    const enc = datos[k][0] || []
+    if (enc.length === 0) await admin.sheetsUpdate(`${t.nombre}!A1`, [t.enc])
+    else if (enc.length < t.enc.length && enc.every((h, i) => h === t.enc[i])) await admin.sheetsUpdate(`${t.nombre}!A1`, [t.enc])
+    const filasA = datos[n + k]
     let filas = filasA.filter(r => r[0]).length
     if (filas === 0 && t.inicial?.length) {
       await admin.sheetsUpdate(`${t.nombre}!A2:${col(t.enc.length - 1)}${t.inicial.length + 1}`, t.inicial)

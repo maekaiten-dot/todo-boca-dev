@@ -47,11 +47,18 @@ export function crearSheets(cfg) {
   async function api(path, { method = 'GET', body } = {}) {
     const { sheetId, email, key } = cfg()
     const token = await getAccessToken(email, key)
-    const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}${path}`, {
-      method,
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: body ? JSON.stringify(body) : undefined,
-    })
+    let res
+    // Si Google responde 429 (demasiadas consultas por minuto) o 5xx, se reintenta esperando cada vez más
+    for (let intento = 0; ; intento++) {
+      res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}${path}`, {
+        method,
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: body ? JSON.stringify(body) : undefined,
+      })
+      if (!(res.status === 429 || res.status >= 500) || intento >= 4) break
+      const espera = Number(res.headers?.get?.('retry-after')) * 1000 || Math.min(16000, 1000 * 2 ** intento) + Math.random() * 500
+      await new Promise(r => setTimeout(r, espera))
+    }
     if (!res.ok) {
       const err = new Error(`Sheets ${method} ${path}: ${res.status}`)
       err.status = res.status
@@ -64,6 +71,14 @@ export function crearSheets(cfg) {
   const sheetsUpdate = (range, values) => api(`/values/${encodeURIComponent(range)}?valueInputOption=RAW`, { method: 'PUT', body: { values } })
   const sheetsClear = (range) => api(`/values/${encodeURIComponent(range)}:clear`, { method: 'POST', body: {} })
   const metadatos = () => api('?fields=properties.title,sheets.properties.title')
+  // Varias lecturas en una sola consulta (cuenta como una sola para el límite de Google)
+  const batchGet = async (rangos) => {
+    if (!rangos.length) return []
+    const q = rangos.map(r => `ranges=${encodeURIComponent(r)}`).join('&')
+    const d = await api(`/values:batchGet?${q}`)
+    return (d.valueRanges || []).map(v => v.values || [])
+  }
+  const crearHojas = (titulos) => titulos.length ? api(':batchUpdate', { method: 'POST', body: { requests: titulos.map(title => ({ addSheet: { properties: { title } } })) } }) : null
 
   // Crea la pestaña con sus encabezados si todavía no existe. Devuelve true si la creó.
   const hojasOk = new Set()
@@ -80,7 +95,7 @@ export function crearSheets(cfg) {
     hojasOk.add(titulo)
     return creada
   }
-  return { api, sheetsGet, sheetsAppend, sheetsUpdate, sheetsClear, asegurarHoja, metadatos }
+  return { api, sheetsGet, sheetsAppend, sheetsUpdate, sheetsClear, asegurarHoja, metadatos, batchGet, crearHojas }
 }
 
 // Cliente por defecto: el de las fichadas (mismas funciones que antes)

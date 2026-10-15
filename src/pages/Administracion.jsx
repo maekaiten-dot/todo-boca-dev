@@ -7,6 +7,9 @@ import { calcularSueldo, parseFecha, ultimoDiaMes, nombreMes } from '../../api/_
 
 const QUIENES = ['Adrián', 'Jorge']
 const fmt$ = n => (n < 0 ? '−$' : '$') + Math.abs(Math.round(n || 0)).toLocaleString('es-AR')
+const fmtUSD = n => (n < 0 ? '−US$ ' : 'US$ ') + Math.abs(Math.round((n || 0) * 100) / 100).toLocaleString('es-AR')
+// Un movimiento en dólares sin tipo de cambio se paga en dólares (ej. reintegro de tarjeta en USD)
+const enDolares = m => m.moneda === 'USD' && !(m.tipoCambio > 0)
 const horaCorta = ms => new Date(ms).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
 const hoyAR = () => { const d = new Date(Date.now() - 3 * 3600000); return { d: d.getUTCDate(), m: d.getUTCMonth() + 1, a: d.getUTCFullYear() } }
 const mesClave = (a, m) => `${a}-${String(m).padStart(2, '0')}`
@@ -87,8 +90,11 @@ function Pendientes({ toast }) {
     return Object.values(g).map(gr => {
       // Neto: quién le paga a quién dentro de la cuenta
       const [a, b] = gr.cuenta.split(' ↔ ')
-      const neto = gr.movs.reduce((s, m) => s + (m.debe === a ? m.montoPesos : -m.montoPesos), 0)
-      return { ...gr, paga: neto >= 0 ? a : b, cobra: neto >= 0 ? b : a, neto: Math.abs(neto) }
+      const signo = m => (m.debe === a ? 1 : -1)
+      const neto = gr.movs.filter(m => !enDolares(m)).reduce((s, m) => s + signo(m) * m.montoPesos, 0)
+      const netoUsd = gr.movs.filter(enDolares).reduce((s, m) => s + signo(m) * m.monto, 0)
+      const dir = neto !== 0 ? neto : netoUsd
+      return { ...gr, paga: dir >= 0 ? a : b, cobra: dir >= 0 ? b : a, neto: Math.abs(neto), netoUsd: Math.abs(netoUsd) }
     }).sort((x, y) => (x.estado === 'PAGADO') - (y.estado === 'PAGADO') || y.origen.localeCompare(x.origen) || x.cuenta.localeCompare(y.cuenta))
   }, [datos, verPagados])
 
@@ -111,12 +117,12 @@ function Pendientes({ toast }) {
           <div style={S.grupoTop}>
             <div style={{ minWidth: 0 }}>
               <div style={S.grupoTitulo}>{gr.paga} → {gr.cobra}</div>
-              <div style={S.sub}>{gr.origen.replace(/^CIERRE (\d{4}-\d{2})$/, (_, m) => `Cierre de ${nombreMes(m)}`)}{gr.estado === 'PAGADO' ? ` · pagado ${gr.movs[0].fechaPago}` : ''}</div>
+              <div style={S.sub}>{gr.origen.replace(/^CIERRE (\d{4}-\d{2})$/, (_, m) => `Cierre de ${nombreMes(m)}`).replace(/^TARJETA (\d{4}-\d{2})$/, (_, m) => `Reintegro de tarjeta · resumen de ${nombreMes(m)}`)}{gr.estado === 'PAGADO' ? ` · pagado ${gr.movs[0].fechaPago}` : ''}</div>
             </div>
-            <div style={S.grupoMonto}>{fmt$(gr.neto)}</div>
+            <div style={{ ...S.grupoMonto, textAlign: 'right' }}>{gr.neto > 0 && <div>{fmt$(gr.neto)}</div>}{gr.netoUsd > 0 && <div>{fmtUSD(gr.netoUsd)}</div>}</div>
           </div>
           {gr.movs.map(m => (
-            <Fila key={m.id} izq={m.detalle} sub={m.moneda === 'USD' ? `(US$ ${m.monto.toLocaleString('es-AR')} × ${fmt$(m.tipoCambio)})` : ''} der={`${m.debe === gr.paga ? '' : '−'}${fmt$(m.montoPesos)}`} />
+            <Fila key={m.id} izq={m.detalle} sub={m.moneda === 'USD' && !enDolares(m) ? `(US$ ${m.monto.toLocaleString('es-AR')} × ${fmt$(m.tipoCambio)})` : ''} der={`${m.debe === gr.paga ? '' : '−'}${enDolares(m) ? fmtUSD(m.monto) : fmt$(m.montoPesos)}`} />
           ))}
           {gr.estado === 'PENDIENTE' && (pagando === gr ? (
             <div style={S.pagarFila}>
@@ -520,6 +526,149 @@ function Servicios({ toast }) {
   )
 }
 
+// ── Tarjeta ────────────────────────────────────────────────────────────────
+// Gastos del local pagados con tarjetas propias. Se cargan a mano (en cuotas: una vez, y la app reparte
+// cada cuota en su resumen). Cada mes se genera el reintegro del resumen: pesos y dólares por separado.
+function Tarjeta({ toast, irA }) {
+  const [datos, setDatos] = useState(null)
+  const [error, setError] = useState(null)
+  const vacio = { tarjeta: '', titular: 'Adrián', fecha: fechaHoy(), detalle: '', moneda: 'ARS', monto: '', cuotas: '1', mesResumen: mesActual(), nota: '' }
+  const [f, setF] = useState(vacio)
+  const [nuevaTarjeta, setNuevaTarjeta] = useState(false)
+  const [guardando, setGuardando] = useState(false)
+  const [reintegrando, setReintegrando] = useState(null)
+  const [verReintegrados, setVerReintegrados] = useState(false)
+  async function cargar() {
+    setError(null)
+    try {
+      const r = await pedirAdmin('tarjeta'); setDatos(r)
+      setF(x => x.tarjeta || !r.tarjetas.length ? x : { ...x, tarjeta: r.tarjetas[0].tarjeta, titular: r.tarjetas[0].titular })
+      if (!r.tarjetas.length) setNuevaTarjeta(true)
+    } catch (e) { setError(e.message) }
+  }
+  useEffect(() => { cargar() }, [])
+
+  async function agregar() {
+    setGuardando(true)
+    try {
+      const r = await pedirAdmin('tarjeta.agregar', f)
+      toast(r.filas > 1 ? `Guardado en ${r.filas} cuotas` : 'Consumo guardado')
+      setF(x => ({ ...x, detalle: '', monto: '', cuotas: '1', nota: '' })); setNuevaTarjeta(false); cargar()
+    } catch (e) { toast(e.message, 'error') }
+    finally { setGuardando(false) }
+  }
+  async function anular(t) {
+    if (!window.confirm(`¿Borrar "${t.detalle}"${t.cuota ? ` cuota ${t.cuota}` : ''}?`)) return
+    try { await pedirAdmin('tarjeta.anular', { id: t.id }); toast('Consumo borrado'); cargar() } catch (e) { toast(e.message, 'error') }
+  }
+  async function reintegrar(mes) {
+    try { await pedirAdmin('tarjeta.reintegrar', { mesResumen: mes }); toast(`Reintegro de ${nombreMes(mes)} generado: quedó en Pendientes`); setReintegrando(null); cargar() }
+    catch (e) { toast(e.message, 'error') }
+  }
+
+  if (error) return <div style={S.card}><div style={S.error}>{error}</div><button style={S.btnSec} onClick={cargar}>Reintentar</button></div>
+  if (!datos) return <div style={S.muted}>Cargando…</div>
+  const actual = mesActual()
+  const pendientes = datos.consumos.filter(t => !t.liquidadoEn)
+  const porMes = {}
+  pendientes.forEach(t => { (porMes[t.mesResumen] ||= []).push(t) })
+  const meses = Object.keys(porMes).sort()
+  const totales = lista => {
+    const out = {}
+    lista.forEach(t => { const o = (out[t.titular] ||= { ars: 0, usd: 0 }); o.ars += t.pesos; o.usd += t.dolares })
+    return out
+  }
+  const reintegrados = datos.consumos.filter(t => t.liquidadoEn).sort((x, y) => y.mesResumen.localeCompare(x.mesResumen))
+  const n = Number(f.cuotas) || 1
+  const valido = f.tarjeta.trim() && f.detalle.trim() && f.monto && n >= 1
+
+  const filaConsumo = t => (
+    <div key={t.id} style={S.registro}>
+      <span style={{ minWidth: 0, flex: 1 }}>{t.detalle}{t.cuota && <span style={S.badge}> cuota {t.cuota}</span>}<br />
+        <span style={S.sub}>{t.tarjeta} ({t.titular}) · {t.fecha}{t.nota ? ` · ${t.nota}` : ''}{t.liquidadoEn ? ` · reintegrado (${t.liquidadoEn.replace('TARJETA ', 'resumen ')})` : ''}</span></span>
+      <strong style={{ flexShrink: 0 }}>{t.dolares ? fmtUSD(t.dolares) : fmt$(t.pesos)}</strong>
+      {!t.liquidadoEn && <button style={S.borrar} onClick={() => anular(t)} aria-label="Borrar consumo">✕</button>}
+    </div>
+  )
+
+  return (
+    <>
+      <div style={S.card}>
+        <div style={S.cardTitulo}>Cargar gasto del local con tarjeta</div>
+        <div style={S.fieldLabel}>TARJETA</div>
+        <div style={S.tipos}>
+          {datos.tarjetas.map(t => (
+            <button key={`${t.tarjeta}|${t.titular}`} style={{ ...S.tipoBtn, ...(!nuevaTarjeta && f.tarjeta === t.tarjeta && f.titular === t.titular ? S.optBtnActivo : {}) }}
+              onClick={() => { setNuevaTarjeta(false); setF(x => ({ ...x, tarjeta: t.tarjeta, titular: t.titular })) }}>{t.tarjeta} · {t.titular}</button>
+          ))}
+          <button style={{ ...S.tipoBtn, ...(nuevaTarjeta ? S.optBtnActivo : {}) }} onClick={() => { setNuevaTarjeta(true); setF(x => ({ ...x, tarjeta: '' })) }}>+ Otra tarjeta</button>
+        </div>
+        {nuevaTarjeta && (
+          <div style={S.filaInput}>
+            <input style={{ ...S.inputAncho, flex: 1, minWidth: 180 }} placeholder="Nombre de la tarjeta (ej. Visa Galicia)" value={f.tarjeta} maxLength={40} onChange={e => setF(x => ({ ...x, tarjeta: e.target.value }))} />
+            {QUIENES.map(q => <button key={q} style={{ ...S.tipoBtn, ...(f.titular === q ? S.optBtnActivo : {}) }} onClick={() => setF(x => ({ ...x, titular: q }))}>de {q}</button>)}
+          </div>
+        )}
+        <input style={S.inputAncho} placeholder="Qué se compró (ej. filamento, Internet del local)" value={f.detalle} maxLength={120} onChange={e => setF(x => ({ ...x, detalle: e.target.value }))} />
+        <div style={S.filaInput}>
+          <span style={S.fieldLabel}>FECHA</span>
+          <input style={{ ...S.input, width: 120 }} value={f.fecha} onChange={e => setF(x => ({ ...x, fecha: e.target.value }))} aria-label="Fecha de compra" />
+          {['ARS', 'USD'].map(m => <button key={m} style={{ ...S.tipoBtn, ...(f.moneda === m ? S.optBtnActivo : {}) }} onClick={() => setF(x => ({ ...x, moneda: m }))}>{m === 'ARS' ? 'Pesos' : 'Dólares'}</button>)}
+        </div>
+        <div style={S.filaInput}>
+          <span style={S.fieldLabel}>{n > 1 ? 'MONTO DE CADA CUOTA' : 'MONTO'}</span>
+          <input style={{ ...S.input, width: 130 }} inputMode="decimal" value={f.monto} onChange={e => setF(x => ({ ...x, monto: e.target.value }))} aria-label="Monto" />
+          <span style={S.fieldLabel}>CUOTAS</span>
+          <input style={{ ...S.input, width: 70 }} inputMode="numeric" value={f.cuotas} onChange={e => setF(x => ({ ...x, cuotas: e.target.value.replace(/\D/g, '') }))} aria-label="Cuotas" />
+        </div>
+        <div style={S.filaInput}>
+          <span style={S.fieldLabel}>{n > 1 ? 'PRIMERA CUOTA EN EL RESUMEN DE' : 'SALE EN EL RESUMEN DE'}</span>
+          <div style={{ flex: 1, minWidth: 220 }}><SelectorMes mes={f.mesResumen} onCambiar={m => setF(x => ({ ...x, mesResumen: m }))} /></div>
+        </div>
+        {n > 1 && <div style={S.ayuda}>Se van a cargar {n} cuotas: una en cada resumen, de {nombreMes(f.mesResumen)} en adelante.</div>}
+        <input style={S.inputAncho} placeholder="Nota (opcional)" value={f.nota} maxLength={200} onChange={e => setF(x => ({ ...x, nota: e.target.value }))} />
+        <button style={{ ...S.btn, opacity: valido && !guardando ? 1 : 0.45 }} disabled={!valido || guardando} onClick={agregar}>{guardando ? 'Guardando…' : 'Guardar'}</button>
+      </div>
+
+      {meses.length === 0 && <div style={S.card}><div style={S.muted}>No hay gastos con tarjeta pendientes de reintegro.</div></div>}
+      {meses.map(mes => {
+        const lista = porMes[mes]
+        const tot = totales(lista)
+        const futuro = mes > actual
+        return (
+          <div key={mes} style={{ ...S.card, ...(futuro ? { opacity: 0.7 } : {}) }}>
+            <div style={S.grupoTop}>
+              <div style={{ minWidth: 0 }}>
+                <div style={S.cardTitulo}>Resumen de {nombreMes(mes)}</div>
+                <div style={S.sub}>{futuro ? 'Cuotas que todavía no llegaron' : 'Pendiente de reintegro'}</div>
+              </div>
+              <div style={{ ...S.grupoMonto, textAlign: 'right' }}>
+                {Object.entries(tot).map(([tit, o]) => <div key={tit} style={{ fontSize: 16 }}>{tit}: {o.ars > 0 && fmt$(o.ars)}{o.ars > 0 && o.usd > 0 && ' + '}{o.usd > 0 && fmtUSD(o.usd)}</div>)}
+              </div>
+            </div>
+            {lista.map(filaConsumo)}
+            {!futuro && (reintegrando === mes ? (
+              <div style={S.confirmBox}>
+                <div style={S.ayuda}>Se genera el pago del local {Object.entries(tot).map(([tit, o]) => `a ${tit}: ${[o.ars > 0 && fmt$(o.ars), o.usd > 0 && fmtUSD(o.usd)].filter(Boolean).join(' y ')}`).join('; ')}. Queda en Pendientes hasta que lo marques como pagado. Estos consumos ya no se pueden borrar.</div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button style={S.btnSec} onClick={() => setReintegrando(null)}>Volver</button>
+                  <button style={{ ...S.btnOk, flex: 1 }} onClick={() => reintegrar(mes)}>Confirmar reintegro</button>
+                </div>
+              </div>
+            ) : <button style={S.btnPagar} onClick={() => setReintegrando(mes)}>Generar reintegro de {nombreMes(mes)}</button>)}
+          </div>
+        )
+      })}
+
+      <div style={S.card}>
+        <label style={S.check}><input type="checkbox" checked={verReintegrados} onChange={e => setVerReintegrados(e.target.checked)} /> Ver gastos ya reintegrados</label>
+        {verReintegrados && (reintegrados.length ? reintegrados.map(filaConsumo) : <div style={S.muted}>Todavía no hay reintegros.</div>)}
+        {verReintegrados && reintegrados.length > 0 && <button style={S.link} onClick={() => irA('pend')}>Ver los pagos en Pendientes</button>}
+      </div>
+    </>
+  )
+}
+
 // ── Estado (conexiones y tablas) ───────────────────────────────────────────
 function Estado() {
   const [estado, setEstado] = useState(null)
@@ -556,6 +705,7 @@ const SECCIONES = [
   { id: 'cierre', label: 'Cierre de mes' },
   { id: 'horas', label: 'Horas' },
   { id: 'serv', label: 'Servicios' },
+  { id: 'tarj', label: 'Tarjeta' },
   { id: 'estado', label: 'Estado' },
 ]
 
@@ -600,6 +750,7 @@ export default function Administracion({ perfilNombre = '' }) {
               {seccion === 'cierre' && <Cierre toast={toastSeguro} irA={setSeccion} />}
               {seccion === 'horas' && <Horas toast={toastSeguro} />}
               {seccion === 'serv' && <Servicios toast={toastSeguro} />}
+              {seccion === 'tarj' && <Tarjeta toast={toastSeguro} irA={setSeccion} />}
               {seccion === 'estado' && <Estado />}
             </div>
           </>

@@ -78,3 +78,6 @@ Admin → Más → **Administración**. Entra solo con el PIN de administración
 - Al confirmar se guarda una fila en CIERRES y los pagos pendientes en CUENTA CORRIENTE; en **Pendientes** se marcan como pagados con la fecha real. Un mes cerrado no se puede rehacer desde la app ni cambiar sus horas.
 - Los cálculos están en `api/_lib/cierre.js` (también los usa la pantalla para la vista previa).
 
+
+### Tarjeta (Administración → Tarjeta)
+Solo gastos del local pagados con tarjetas propias, cargados a mano. Cada consumo indica la tarjeta y su titular (a quién se le reintegra). Las compras en cuotas se cargan una vez y la app crea una fila por cuota en su mes de resumen. Los consumos en dólares se reintegran en dólares. "Generar reintegro" de un resumen crea los pagos pendientes del local a cada titular (pesos y dólares por separado) en CUENTA CORRIENTE, con origen `TARJETA aaaa-mm`.

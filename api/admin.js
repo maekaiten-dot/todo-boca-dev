@@ -12,11 +12,16 @@
 //   servicios.anular    { id }
 //   cierre.preparar     { mes: 'aaaa-mm', diaPago }    → todos los números del cierre (no guarda nada)
 //   cierre.confirmar    { mes, diaPago, blue, serviciosIds, nota }
+//   tarjeta                                            → { consumos, tarjetas }
+//   tarjeta.agregar     { tarjeta, titular, fecha, detalle, moneda: 'ARS'|'USD', monto, cuotas, mesResumen, nota }
+//                       (en cuotas crea una fila por cuota, cada una en su mes de resumen)
+//   tarjeta.anular      { id }
+//   tarjeta.reintegrar  { mesResumen }  → pagos pendientes del local a cada titular (pesos y dólares por separado)
 //   cuentas                                            → { movimientos, cierres }
 //   cuentas.pagar       { ids, fecha }
 import {
   admin, local, variablesFaltantes, verificarPin, crearSesion, leerSesion, prepararTablas, listo, ahoraAR, nuevoId,
-  getConfig, getPersonas, getTarifas, getHoras, getServicios, getCuenta, getCierres,
+  getConfig, getPersonas, getTarifas, getHoras, getServicios, getCuenta, getCierres, getTarjeta,
 } from './_lib/admin.js'
 import {
   TIPOS_HORA, parseFecha, fechaAR, mesSiguiente, nombreMes, calcularSueldo, ventasDelMes, blueMaximo, calcularRegalias,
@@ -228,6 +233,64 @@ async function ejecutar(accion, body, sesion) {
   }
   if (accion === 'cierre.preparar') return [200, await prepararCierre(body)]
   if (accion === 'cierre.confirmar') return [200, await confirmarCierre(body, sesion.quien)]
+  if (accion === 'tarjeta') {
+    const consumos = (await getTarjeta()).filter(t => !t.anulado)
+    const tarjetas = [...new Map(consumos.map(t => [`${t.tarjeta}|${t.titular}`, { tarjeta: t.tarjeta, titular: t.titular }])).values()].filter(t => t.tarjeta)
+    return [200, { consumos, tarjetas }]
+  }
+  if (accion === 'tarjeta.agregar') {
+    const { tarjeta, titular = 'Adrián', fecha, detalle, moneda = 'ARS', monto, cuotas = 1, mesResumen, nota = '' } = body
+    if (!String(tarjeta || '').trim()) fallar('Elegí con qué tarjeta se pagó')
+    if (!SOCIOS.includes(titular)) fallar('Titular inválido')
+    if (!String(detalle || '').trim()) fallar('Poné qué se compró')
+    const f = parseFecha(fecha)
+    if (!f) fallar('Fecha inválida')
+    if (!['ARS', 'USD'].includes(moneda)) fallar('Moneda inválida')
+    const m = num(monto)
+    if (!(m > 0)) fallar('Monto inválido')
+    const n = Math.round(Number(cuotas) || 1)
+    if (n < 1 || n > 36) fallar('Cantidad de cuotas inválida')
+    if (!esMes(mesResumen)) fallar('Elegí el mes del resumen')
+    const ids = nuevoId('T', (await getTarjeta()).map(x => x.id), n)
+    let mes = mesResumen
+    const filas = []
+    for (let k = 1; k <= n; k++) {
+      filas.push([ids[k - 1], mes, titular, fechaAR(f.clave), '', String(detalle).trim().slice(0, 120), n > 1 ? `${k}/${n}` : '',
+        moneda === 'ARS' ? m : '', moneda === 'USD' ? m : '', 'Local', String(nota).slice(0, 200), String(tarjeta).trim().slice(0, 40), '', 'FALSE'])
+      mes = mesSiguiente(mes)
+    }
+    await admin.sheetsAppend('TARJETA!A1', filas)
+    return [200, { ok: true, filas: n }]
+  }
+  if (accion === 'tarjeta.anular') {
+    const t = (await getTarjeta()).find(x => x.id === body.id && !x.anulado)
+    if (!t) fallar('No se encontró ese consumo')
+    if (t.liquidadoEn) fallar(`Ese consumo ya se reintegró (${t.liquidadoEn})`)
+    await admin.sheetsUpdate(`TARJETA!N${t.fila}`, [['TRUE']])
+    return [200, { ok: true }]
+  }
+  if (accion === 'tarjeta.reintegrar') {
+    const mes = body.mesResumen
+    if (!esMes(mes)) fallar('Mes inválido')
+    const delMes = (await getTarjeta()).filter(t => !t.anulado && !t.liquidadoEn && t.mesResumen === mes)
+    if (!delMes.length) fallar(`No hay consumos sin reintegrar en el resumen de ${nombreMes(mes)}`)
+    const origen = `TARJETA ${mes}`
+    const { fecha } = ahoraAR()
+    // un movimiento por titular y moneda
+    const grupos = {}
+    for (const t of delMes) {
+      if (t.pesos) (grupos[`${t.titular}|ARS`] ||= { titular: t.titular, moneda: 'ARS', monto: 0, n: 0 }), grupos[`${t.titular}|ARS`].monto += t.pesos, grupos[`${t.titular}|ARS`].n++
+      if (t.dolares) (grupos[`${t.titular}|USD`] ||= { titular: t.titular, moneda: 'USD', monto: 0, n: 0 }), grupos[`${t.titular}|USD`].monto += t.dolares, grupos[`${t.titular}|USD`].n++
+    }
+    const lista = Object.values(grupos)
+    const ids = nuevoId('CC', (await getCuenta()).map(x => x.id), lista.length)
+    const filas = lista.map((g, i) => [ids[i], fecha, `${LOCAL} ↔ ${g.titular}`, LOCAL, g.titular, 'REINTEGRO TARJETA', 'LOCAL',
+      `Tarjeta: resumen de ${nombreMes(mes)} (${g.n} ${g.n === 1 ? 'consumo' : 'consumos'})`, Math.round(g.monto * 100) / 100, g.moneda, '',
+      g.moneda === 'ARS' ? Math.round(g.monto * 100) / 100 : '', 'PENDIENTE', '', origen, '', 'FALSE'])
+    await admin.sheetsAppend('CUENTA CORRIENTE!A1', filas)
+    for (const t of delMes) await admin.sheetsUpdate(`TARJETA!M${t.fila}`, [[origen]])
+    return [200, { ok: true, movimientos: filas.length }]
+  }
   if (accion === 'cuentas') {
     const [movimientos, cierres] = await Promise.all([getCuenta(), getCierres()])
     return [200, { movimientos: movimientos.filter(m => !m.anulado), cierres }]

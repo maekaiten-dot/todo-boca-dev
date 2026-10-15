@@ -121,8 +121,9 @@ export const TABLAS = [
   { nombre: 'SERVICIOS', desc: 'Una fila por boleta de servicio',
     // MONTO = lo que se pagó de verdad (o el de la boleta mientras está A PAGAR); MONTO BOLETA = el que figuraba en la boleta
     enc: ['ID', 'MES', 'PROPIEDAD', 'SERVICIO', 'MONTO', 'VENCIMIENTO', 'PAGADO POR', 'FECHA PAGO', 'A CARGO DE', 'NOTA', 'ANULADO', 'LIQUIDADO EN', 'ESTADO', 'MONTO BOLETA'] },
-  { nombre: 'TARJETA', desc: 'Consumos de tarjeta, con a cargo de quién',
-    enc: ['ID', 'MES RESUMEN', 'TITULAR', 'FECHA', 'COMPROBANTE', 'DETALLE', 'CUOTA', 'PESOS', 'DOLARES', 'A CARGO DE', 'NOTA'] },
+  { nombre: 'TARJETA', desc: 'Gastos del local pagados con tarjeta (una fila por cuota), para el reintegro mensual',
+    // TITULAR = dueño de la tarjeta (a quién se le reintegra). PESOS o DOLARES según la moneda del consumo.
+    enc: ['ID', 'MES RESUMEN', 'TITULAR', 'FECHA', 'COMPROBANTE', 'DETALLE', 'CUOTA', 'PESOS', 'DOLARES', 'A CARGO DE', 'NOTA', 'TARJETA', 'LIQUIDADO EN', 'ANULADO'] },
   { nombre: 'CUENTA CORRIENTE', desc: 'Quién le debe a quién: el libro central',
     enc: ['ID', 'FECHA', 'CUENTA', 'DEBE', 'A FAVOR DE', 'CONCEPTO', 'AMBITO', 'DETALLE', 'MONTO', 'MONEDA', 'TIPO CAMBIO', 'MONTO PESOS', 'ESTADO', 'FECHA PAGO', 'ORIGEN', 'NOTA', 'ANULADO'] },
   { nombre: 'CIERRES', desc: 'Un registro por mes con todos los números del cierre',
@@ -219,6 +220,13 @@ export async function getServicios() {
     // las boletas cargadas antes de existir ESTADO se cargaban ya pagadas
     estado: r[12] || (r[7] ? 'PAGADA' : 'A PAGAR'), montoBoleta: parsePrecio(r[13]) || parsePrecio(r[4]),
   })).filter(s => s.id)
+}
+export async function getTarjeta() {
+  return (await admin.sheetsGet('TARJETA!A2:N')).map((r, i) => ({
+    fila: i + 2, id: r[0], mesResumen: r[1] || '', titular: r[2] || '', fecha: r[3] || '', comprobante: r[4] || '', detalle: r[5] || '',
+    cuota: r[6] || '', pesos: parsePrecio(r[7]), dolares: parsePrecio(r[8]), aCargoDe: r[9] || '', nota: r[10] || '',
+    tarjeta: r[11] || '', liquidadoEn: r[12] || '', anulado: esTrue(r[13]),
+  })).filter(t => t.id)
 }
 export async function getCuenta() {
   return (await admin.sheetsGet('CUENTA CORRIENTE!A2:Q')).map((r, i) => ({

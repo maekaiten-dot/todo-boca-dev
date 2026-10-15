@@ -7,7 +7,7 @@ import DetalleVentaModal from '../components/DetalleVentaModal.jsx'
 const METODO_ICONS = {
   'Efectivo Pesos':'💵','Efectivo ARS':'💵',
   'Tarjeta de Crédito':'💳','Tarjeta de Débito':'💳','Tarjeta':'💳',
-  'QR':'📱','Transferencia':'🏦',
+  'QR':'📱','Transferencia':'🏦','Pix':'💠',
   'Efectivo Dólares':'🇺🇸','Efectivo USD':'🇺🇸',
   'Efectivo Reales':'🇧🇷','Efectivo BRL':'🇧🇷',
   'Efectivo Euros':'🇪🇺','Efectivo EUR':'🇪🇺',
@@ -134,6 +134,12 @@ export default function VentasDelDia({ refreshKey, usuarios = [], perfilNombre =
     const m = String(nota).match(/^(USD|BRL|EUR)\s*([\d.,]+)/)
     if (m) divisas[m[1]] = (divisas[m[1]] || 0) + (Number(m[2].replace(',', '.')) || 0)
   })
+  // Pix: reales cobrados por Pix (no están en la caja). La nota queda "PIX BRL 150"
+  const pixReales = ventasActivas.reduce((s, v) => {
+    const nota = v.items.find(i => !i.anulado && i.notas)?.notas || ''
+    const m = String(nota).match(/^PIX\s+BRL\s*([\d.,]+)/)
+    return s + (m ? Number(m[1].replace(',', '.')) || 0 : 0)
+  }, 0)
 
   if (loading) return (
     <div style={S.center}><div style={S.loadingText}>Cargando ventas...</div></div>
@@ -198,6 +204,7 @@ export default function VentasDelDia({ refreshKey, usuarios = [], perfilNombre =
               {Object.keys(divisas).length > 0 && (
                 <> Además, en divisas: {Object.entries(divisas).map(([c, v]) => `${DIVISAS[c]} ${v.toLocaleString('es-AR')}`).join(' · ')}.</>
               )}
+              {pixReales > 0 && <> Cobrado por Pix (no está en la caja): R$ {pixReales.toLocaleString('es-AR')}.</>}
             </div>
           </div>
 

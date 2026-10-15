@@ -12,6 +12,7 @@ const METODOS_PAGO = [
   { valor: 'Tarjeta de Débito',  icon: '💳', label: 'Débito' },
   { valor: 'QR',                icon: '📱', label: 'QR' },
   { valor: 'Transferencia',     icon: '🏦', label: 'Transfer.' },
+  { valor: 'Pix',               icon: '💠', label: 'Pix' },
 ]
 
 const DTO_SOCIO = 10 // % de descuento para socios del Club Atlético Boca Juniors
@@ -234,6 +235,8 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
     'Efectivo Dólares': { code: 'USD', simbolo: 'US$', label: 'MONTO EN DÓLARES' },
     'Efectivo Euros':   { code: 'EUR', simbolo: '€',   label: 'MONTO EN EUROS' },
     'Efectivo Reales':  { code: 'BRL', simbolo: 'R$',  label: 'MONTO EN REALES' },
+    // Pix: se cobra en reales pero no entra a la caja. Se anota "PIX BRL 150" para no sumarlo a las divisas en efectivo
+    'Pix':              { code: 'BRL', simbolo: 'R$',  label: 'MONTO EN REALES (PIX)', prefijo: 'PIX ' },
   }
   const divisaActual = DIVISA_INFO[metodoPago] || null
 
@@ -325,7 +328,7 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
   const posnetAuto = posnetSugerido(totales.subtotalConDesc)
   const posnet = usaPosnet ? posnetAuto : ''
 
-  // Socio: no corresponde pagando con dólares, euros o reales (se apaga solo si cambian el método)
+  // Socio: no corresponde pagando con dólares, euros, reales o Pix (se apaga solo si cambian el método)
   const socioHabilitado = socioPermitido(metodoPago)
   useEffect(() => {
     if (socio && !socioHabilitado) setSocio(false)
@@ -342,7 +345,7 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
     if (carrito.length === 0) return
     setSaving(true)
     try {
-      const notas = divisaActual && montoDivisa ? `${divisaActual.code} ${montoDivisa}` : ''
+      const notas = divisaActual && montoDivisa ? `${divisaActual.prefijo || ''}${divisaActual.code} ${montoDivisa}` : ''
       const idVenta = await registrarVenta({
         items: carrito,
         metodoPago,

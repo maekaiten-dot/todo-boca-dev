@@ -438,8 +438,8 @@ export function posnetSugerido(brutoMenosPromos) {
 }
 
 // ── Moneda extranjera: sin descuentos ────────────────────────────────────────
-// Pagando en efectivo con dólares, euros o reales no hay descuento de socio ni de efectivo.
-export const METODOS_MONEDA_EXTRANJERA = new Set(['Efectivo Dólares', 'Efectivo Euros', 'Efectivo Reales'])
+// Pagando en efectivo con dólares, euros o reales, o con Pix, no hay descuento de socio ni de efectivo.
+export const METODOS_MONEDA_EXTRANJERA = new Set(['Efectivo Dólares', 'Efectivo Euros', 'Efectivo Reales', 'Pix'])
 export function socioPermitido(metodoPago) {
   return !METODOS_MONEDA_EXTRANJERA.has(metodoPago)
 }

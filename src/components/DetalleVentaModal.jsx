@@ -10,13 +10,18 @@ export default function DetalleVentaModal({ venta, onClose, onActualizar }) {
   const METODO_ICONS = {
     'Efectivo Pesos':'💵','Efectivo ARS':'💵',
     'Tarjeta de Crédito':'💳','Tarjeta de Débito':'💳','Tarjeta':'💳',
-    'QR':'📱','Transferencia':'🏦',
+    'QR':'📱','Transferencia':'🏦','Pix':'💠',
     'Efectivo Dólares':'🇺🇸','Efectivo USD':'🇺🇸',
     'Efectivo Reales':'🇧🇷','Efectivo BRL':'🇧🇷',
     'Efectivo Euros':'🇪🇺','Efectivo EUR':'🇪🇺',
   }
 
   const itemsActivos = venta.items.filter(i => !i.anulado)
+  // Monto cobrado en moneda extranjera o por Pix (queda en NOTAS: "USD 20", "PIX BRL 150")
+  const montoDivisa = (() => {
+    const m = String(venta.items.find(i => i.notas)?.notas || '').match(/^(?:PIX\s+)?(USD|BRL|EUR)\s*([\d.,]+)/)
+    return m ? `${{ USD: 'US$', BRL: 'R$', EUR: '€' }[m[1]]} ${m[2]}` : ''
+  })()
   const totalActivo = itemsActivos.reduce((s, i) => s + (i.precioTotalFinal || i.precioTotal || 0), 0)
   const totalOriginal = venta.items.reduce((s, i) => s + (i.precioTotalFinal || i.precioTotal || 0), 0)
   const tieneParcial = !venta.anulado && venta.items.some(i => i.anulado)
@@ -57,6 +62,7 @@ export default function DetalleVentaModal({ venta, onClose, onActualizar }) {
             <div style={S.ventaId}>{venta.idVenta}</div>
             <div style={S.ventaMeta}>
               {METODO_ICONS[venta.metodoPago] || '💰'} {venta.metodoPago}
+              {montoDivisa ? ` (${montoDivisa})` : ''}
               {venta.empleado ? ` · ${venta.empleado}` : ''}
               {' · '}{venta.hora}
             </div>

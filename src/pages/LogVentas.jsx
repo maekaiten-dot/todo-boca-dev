@@ -6,7 +6,7 @@ import DetalleVentaModal from '../components/DetalleVentaModal.jsx'
 const METODO_ICONS = {
   'Efectivo Pesos':'💵','Efectivo ARS':'💵',
   'Tarjeta de Crédito':'💳','Tarjeta de Débito':'💳','Tarjeta':'💳',
-  'QR':'📱','Transferencia':'🏦',
+  'QR':'📱','Transferencia':'🏦','Pix':'💠',
   'Efectivo Dólares':'🇺🇸','Efectivo USD':'🇺🇸',
   'Efectivo Reales':'🇧🇷','Efectivo BRL':'🇧🇷',
   'Efectivo Euros':'🇪🇺','Efectivo EUR':'🇪🇺',

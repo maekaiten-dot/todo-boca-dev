@@ -81,3 +81,10 @@ Admin → Más → **Administración**. Entra solo con el PIN de administración
 
 ### Tarjeta (Administración → Tarjeta)
 Solo gastos del local pagados con tarjetas propias, cargados a mano. Cada consumo indica la tarjeta y su titular (a quién se le reintegra). Las compras en cuotas se cargan una vez y la app crea una fila por cuota en su mes de resumen. Los consumos en dólares se reintegran en dólares. "Generar reintegro" de un resumen crea los pagos pendientes del local a cada titular (pesos y dólares por separado) en CUENTA CORRIENTE, con origen `TARJETA aaaa-mm`.
+
+### PINs de Administración
+Cada administrador tiene su PIN y el PIN decide quién entra: `ADMIN_PIN` es el de Adrián y `ADMIN_PIN_JORGE` el de Jorge. Las ventas 3D a Mitad de cuadra solo las ve y carga Adrián (lo controla el servidor).
+
+### Impresiones 3D y Mitad de cuadra (Administración)
+- **Impresiones 3D**: catálogo con precio y vigencia (PRODUCTOS 3D; un aumento es una fila nueva). Ventas a la Esquina y a Mitad de cuadra (VENTAS 3D). Las de la Esquina se "liquidan" y quedan como pago pendiente del local a Adrián; las de Mitad de cuadra se marcan cobradas.
+- **Mitad de cuadra**: saldo corrido entre los dos locales. Suma la mercadería de Pagos con proveedor "Mitad de cuadra" o "Mamá" que no está pagada (las que no tienen precio se listan aparte) y los movimientos de la cuenta (lo que se llevó Mitad de cuadra, cobertura de empleadas, pagos en efectivo o transferencia y ajustes), guardados en CUENTA CORRIENTE con estado REGISTRADO.

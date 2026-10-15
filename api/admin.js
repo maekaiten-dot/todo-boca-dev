@@ -17,11 +17,20 @@
 //                       (en cuotas crea una fila por cuota, cada una en su mes de resumen)
 //   tarjeta.anular      { id }
 //   tarjeta.reintegrar  { mesResumen }  → pagos pendientes del local a cada titular (pesos y dólares por separado)
+//   3d                                                 → { productos, ventas }   (lo de Mitad de cuadra, solo Adrián)
+//   3d.producto         { producto, precio, desde }    (producto nuevo o aumento)
+//   3d.agregar          { fecha, cliente, items: [{ producto, cantidad }], nota }
+//   3d.anular           { id }
+//   3d.liquidar         { ids }        Esquina: crea el pago pendiente del local a Adrián
+//   3d.cobrar           { ids, fecha } Mitad de cuadra: marca cobradas (solo Adrián)
+//   mdc                                                → cuenta Esquina ↔ Mitad de cuadra: saldo, mercadería de Pagos y movimientos
+//   mdc.agregar         { tipo, fecha, detalle, monto | cantidad+precio, medio }
+//   mdc.anular          { id }
 //   cuentas                                            → { movimientos, cierres }
 //   cuentas.pagar       { ids, fecha }
 import {
   admin, local, variablesFaltantes, verificarPin, crearSesion, leerSesion, prepararTablas, listo, ahoraAR, nuevoId,
-  getConfig, getPersonas, getTarifas, getHoras, getServicios, getCuenta, getCierres, getTarjeta,
+  getConfig, getPersonas, getTarifas, getHoras, getServicios, getCuenta, getCierres, getTarjeta, getProductos3D, getVentas3D,
 } from './_lib/admin.js'
 import {
   TIPOS_HORA, parseFecha, fechaAR, mesSiguiente, nombreMes, calcularSueldo, ventasDelMes, blueMaximo, calcularRegalias,
@@ -47,10 +56,25 @@ function mensajeError(e, planilla) {
 }
 
 const HERMANOS = ['Adrián', 'Jorge', 'Kathy', 'Euge']
+const MDC = 'Mitad de cuadra'
+const PROVEEDORES_MDC = ['mitad de cuadra', 'mamá', 'mama'] // cómo figura Mitad de cuadra en Pagos
+const CUENTA_MDC = 'Esquina ↔ Mitad de cuadra'
+// Tipos de movimiento de la cuenta con Mitad de cuadra. "a favor de Mitad de cuadra" = el local le debe más
+const TIPOS_MDC = {
+  MERCADERIA: { concepto: 'MERCADERIA', debe: MDC, aFavor: 'Esquina' },     // Mitad de cuadra se llevó mercadería de la Esquina
+  COBERTURA: { concepto: 'COBERTURA', debe: MDC, aFavor: 'Esquina' },       // una empleada de la Esquina trabajó en Mitad de cuadra
+  PAGO_ESQUINA: { concepto: 'PAGO', debe: MDC, aFavor: 'Esquina' },         // el local le pagó a Mitad de cuadra
+  PAGO_MDC: { concepto: 'PAGO', debe: 'Esquina', aFavor: MDC },             // Mitad de cuadra le pagó al local
+  AJUSTE_MDC: { concepto: 'AJUSTE', debe: 'Esquina', aFavor: MDC },         // saldo inicial / ajuste: el local le debía
+  AJUSTE_ESQ: { concepto: 'AJUSTE', debe: MDC, aFavor: 'Esquina' },         // saldo inicial / ajuste: Mitad de cuadra le debía
+}
+const puedeVerMdc = sesion => sesion.quien === 'Adrián'
 const SOCIOS = ['Adrián', 'Jorge']
 const LOCAL = 'Esquina'
 const MAMA = 'Mamá'
 const esMes = m => /^\d{4}-\d{2}$/.test(String(m || ''))
+// Montos que vienen de la planilla del local (pueden venir como "$8.000" o como número)
+const parsePrecioLocal = v => { const s = String(v ?? '').replace(/[^\d,.-]/g, ''); if (!s) return 0; const n = Number(s.includes(',') ? s.replace(/\./g, '').replace(',', '.') : s.replace(/\.(?=\d{3}(\D|$))/g, '')); return Number.isFinite(n) ? n : 0 }
 // Montos en formato argentino ("1.545", "1.545,50") o número; horas aceptan coma o punto decimal
 const num = v => { if (typeof v === 'number') return v; const n = Number(String(v ?? '').trim().replace(/\./g, '').replace(',', '.')); return Number.isFinite(n) ? n : NaN }
 const numHoras = v => { if (typeof v === 'number') return v; const n = Number(String(v ?? '').trim().replace(',', '.')); return Number.isFinite(n) ? n : NaN }
@@ -291,9 +315,133 @@ async function ejecutar(accion, body, sesion) {
     for (const t of delMes) await admin.sheetsUpdate(`TARJETA!M${t.fila}`, [[origen]])
     return [200, { ok: true, movimientos: filas.length }]
   }
+  // ── Impresiones 3D ──
+  if (accion === '3d') {
+    const [productos, ventas] = await Promise.all([getProductos3D(), getVentas3D()])
+    // precio vigente hoy de cada producto (la fila más nueva con fecha <= hoy)
+    const hoy = ahoraAR().clave
+    const vig = {}
+    for (const p of productos.filter(x => x.desde <= hoy).sort((a, b) => a.desde.localeCompare(b.desde))) vig[p.producto.toLowerCase()] = p
+    const lista = Object.values(vig).filter(p => p.activo).sort((a, b) => a.producto.localeCompare(b.producto))
+    return [200, {
+      productos: lista, verMdc: puedeVerMdc(sesion),
+      ventas: ventas.filter(v => !v.anulado && (v.cliente !== MDC || puedeVerMdc(sesion))),
+    }]
+  }
+  if (accion === '3d.producto') {
+    const nombre = String(body.producto || '').trim()
+    const v = num(body.precio)
+    const fd = parseFecha(body.desde || ahoraAR().fecha)
+    if (!nombre) fallar('Poné el nombre del producto')
+    if (!(v > 0)) fallar('Precio inválido')
+    if (!fd) fallar('Fecha inválida')
+    const [id] = nuevoId('P3D', (await getProductos3D()).map(x => x.id))
+    await admin.sheetsAppend('PRODUCTOS 3D!A1', [[id, nombre.slice(0, 80), v, fechaAR(fd.clave), 'TRUE']])
+    return [200, { ok: true }]
+  }
+  if (accion === '3d.agregar') {
+    const { fecha, cliente, items = [], nota = '' } = body
+    if (!['Esquina', MDC].includes(cliente)) fallar('Elegí a quién le vendiste')
+    if (cliente === MDC && !puedeVerMdc(sesion)) fallar('No tenés acceso a las ventas a Mitad de cuadra')
+    const fd = parseFecha(fecha)
+    if (!fd) fallar('Fecha inválida')
+    const productos = await getProductos3D()
+    const precioDe = nombre => productos.filter(p => p.producto.toLowerCase() === String(nombre).toLowerCase() && p.desde <= fd.clave)
+      .sort((a, b) => b.desde.localeCompare(a.desde))[0]?.precio
+    const validos = items.map(it => ({ producto: String(it.producto || '').trim(), cantidad: Number(it.cantidad) || 0 })).filter(it => it.producto && it.cantidad > 0)
+    if (!validos.length) fallar('Cargá al menos una cantidad')
+    const sinPrecio = validos.filter(it => !(precioDe(it.producto) > 0)).map(it => it.producto)
+    if (sinPrecio.length) fallar(`No hay precio vigente para: ${sinPrecio.join(', ')}`)
+    const ids = nuevoId('V3D', (await getVentas3D()).map(x => x.id), validos.length)
+    await admin.sheetsAppend('VENTAS 3D!A1', validos.map((it, i) => {
+      const pr = precioDe(it.producto)
+      return [ids[i], fechaAR(fd.clave), cliente, it.producto, it.cantidad, pr, Math.round(pr * it.cantidad * 100) / 100, 'PENDIENTE', '', String(nota).slice(0, 200), 'FALSE', '']
+    }))
+    return [200, { ok: true, items: validos.length }]
+  }
+  if (accion === '3d.anular') {
+    const v = (await getVentas3D()).find(x => x.id === body.id && !x.anulado)
+    if (!v || (v.cliente === MDC && !puedeVerMdc(sesion))) fallar('No se encontró esa venta')
+    if (v.estado !== 'PENDIENTE') fallar('Esa venta ya se liquidó o se cobró')
+    await admin.sheetsUpdate(`VENTAS 3D!K${v.fila}`, [['TRUE']])
+    return [200, { ok: true }]
+  }
+  if (accion === '3d.liquidar') {
+    const ids = Array.isArray(body.ids) ? body.ids : []
+    const sel = (await getVentas3D()).filter(v => ids.includes(v.id) && !v.anulado && v.estado === 'PENDIENTE' && v.cliente === 'Esquina')
+    if (!sel.length) fallar('Elegí ventas a la Esquina pendientes')
+    const total = Math.round(sel.reduce((t, v) => t + v.total, 0) * 100) / 100
+    const { fecha } = ahoraAR()
+    const [idCC] = nuevoId('CC', (await getCuenta()).map(x => x.id))
+    const origen = `3D ${idCC}`
+    const fechas = sel.map(v => parseFecha(v.fecha)?.clave).filter(Boolean).sort()
+    const rango = fechas.length ? `${fechaAR(fechas[0])}${fechas[0] !== fechas[fechas.length - 1] ? ` al ${fechaAR(fechas[fechas.length - 1])}` : ''}` : ''
+    await admin.sheetsAppend('CUENTA CORRIENTE!A1', [[idCC, fecha, `${LOCAL} ↔ Adrián`, LOCAL, 'Adrián', 'IMPRESIONES 3D', 'LOCAL',
+      `Impresiones 3D (${sel.length} ${sel.length === 1 ? 'ítem' : 'ítems'}${rango ? `, ${rango}` : ''})`, total, 'ARS', '', total, 'PENDIENTE', '', origen, '', 'FALSE']])
+    for (const v of sel) await admin.sheetsUpdate(`VENTAS 3D!H${v.fila}:I${v.fila}`, [['LIQUIDADA', fecha]]), await admin.sheetsUpdate(`VENTAS 3D!L${v.fila}`, [[origen]])
+    return [200, { ok: true, total }]
+  }
+  if (accion === '3d.cobrar') {
+    if (!puedeVerMdc(sesion)) fallar('No tenés acceso a las ventas a Mitad de cuadra')
+    const ids = Array.isArray(body.ids) ? body.ids : []
+    const fp = parseFecha(body.fecha) || parseFecha(ahoraAR().fecha)
+    const sel = (await getVentas3D()).filter(v => ids.includes(v.id) && !v.anulado && v.estado === 'PENDIENTE' && v.cliente === MDC)
+    if (!sel.length) fallar('Elegí ventas a Mitad de cuadra pendientes')
+    for (const v of sel) await admin.sheetsUpdate(`VENTAS 3D!H${v.fila}:I${v.fila}`, [['COBRADA', fechaAR(fp.clave)]])
+    return [200, { ok: true }]
+  }
+
+  // ── Cuenta Esquina ↔ Mitad de cuadra ──
+  if (accion === 'mdc') {
+    const [filasPagos, cuenta, config] = await Promise.all([local.sheetsGet('PAGOS!A2:O'), getCuenta(), getConfig()])
+    const pagos = filasPagos.filter(r => r[0] && PROVEEDORES_MDC.includes(String(r[10] || '').trim().toLowerCase()) && String(r[14]).toUpperCase() !== 'TRUE').map(r => {
+      const cant = Number(r[6]) || 0, cu = parsePrecioLocal(r[7]), total = parsePrecioLocal(r[8]) || cant * cu
+      const pagado = String(r[12]).toUpperCase() === 'TRUE', montoPagado = parsePrecioLocal(r[11])
+      return { id: r[0], fecha: r[2] || '', articulo: r[5] || r[9] || '', cantidad: cant, costoUnitario: cu, total, pagado, pendiente: pagado ? 0 : Math.max(0, total - montoPagado), sinPrecio: !(total > 0) }
+    })
+    const movimientos = cuenta.filter(m => !m.anulado && m.cuenta === CUENTA_MDC)
+    const deudaMercaderia = pagos.reduce((t, p) => t + p.pendiente, 0)
+    const aFavorMdc = movimientos.reduce((t, m) => t + (m.aFavorDe === MDC ? m.montoPesos : -m.montoPesos), 0)
+    return [200, {
+      saldo: Math.round((deudaMercaderia + aFavorMdc) * 100) / 100, // > 0: el local le debe a Mitad de cuadra
+      deudaMercaderia, aFavorMdc, pagos: pagos.filter(p => p.pendiente > 0 || p.sinPrecio), movimientos, coberturaDia: config.coberturaDia,
+    }]
+  }
+  if (accion === 'mdc.agregar') {
+    const t = TIPOS_MDC[body.tipo]
+    if (!t) fallar('Tipo de movimiento inválido')
+    const fd = parseFecha(body.fecha)
+    if (!fd) fallar('Fecha inválida')
+    let monto, detalle = String(body.detalle || '').trim()
+    if (body.tipo === 'MERCADERIA' || body.tipo === 'COBERTURA') {
+      const cant = numHoras(body.cantidad), pr = num(body.precio)
+      if (!(cant > 0) || !(pr > 0)) fallar('Completá cantidad y precio')
+      monto = Math.round(cant * pr * 100) / 100
+      detalle = body.tipo === 'COBERTURA' ? `${detalle || 'Brenda'} en Mitad de cuadra: ${cant} ${cant === 1 ? 'día' : 'días'} × $${pr.toLocaleString('es-AR')}` : `${detalle}: ${cant} × $${pr.toLocaleString('es-AR')}`
+      if (body.tipo === 'MERCADERIA' && !String(body.detalle || '').trim()) fallar('Poné qué mercadería se llevó')
+    } else {
+      monto = num(body.monto)
+      if (!(monto > 0)) fallar('Monto inválido')
+      const medio = body.medio ? ` (${body.medio})` : ''
+      detalle = body.tipo === 'PAGO_ESQUINA' ? `El local le pagó a Mitad de cuadra${medio}${detalle ? ` · ${detalle}` : ''}`
+        : body.tipo === 'PAGO_MDC' ? `Mitad de cuadra le pagó al local${medio}${detalle ? ` · ${detalle}` : ''}`
+        : `Ajuste de saldo${detalle ? ` · ${detalle}` : ''}`
+    }
+    const [id] = nuevoId('CC', (await getCuenta()).map(x => x.id))
+    await admin.sheetsAppend('CUENTA CORRIENTE!A1', [[id, fechaAR(fd.clave), CUENTA_MDC, t.debe, t.aFavor, t.concepto, 'LOCAL', detalle.slice(0, 200), monto, 'ARS', '', monto, 'REGISTRADO', '', `MDC ${sesion.quien || ''}`.trim(), '', 'FALSE']])
+    return [200, { ok: true }]
+  }
+  if (accion === 'mdc.anular') {
+    const m = (await getCuenta()).find(x => x.id === body.id && x.cuenta === CUENTA_MDC && !x.anulado)
+    if (!m) fallar('No se encontró ese movimiento')
+    await admin.sheetsUpdate(`CUENTA CORRIENTE!Q${m.fila}`, [['TRUE']])
+    return [200, { ok: true }]
+  }
+
   if (accion === 'cuentas') {
     const [movimientos, cierres] = await Promise.all([getCuenta(), getCierres()])
-    return [200, { movimientos: movimientos.filter(m => !m.anulado), cierres }]
+    // la cuenta con Mitad de cuadra es un saldo corrido (se ve en su sección), no pagos pendientes
+    return [200, { movimientos: movimientos.filter(m => !m.anulado && m.estado !== 'REGISTRADO'), cierres }]
   }
   if (accion === 'cuentas.pagar') {
     const ids = Array.isArray(body.ids) ? body.ids : []
@@ -313,8 +461,9 @@ export default async function handler(req, res) {
   try {
     const body = leerBody(req)
     if (body.accion === 'login') {
-      if (!(await verificarPin(body.pin))) return responder(res, 401, { error: 'PIN incorrecto' })
-      return responder(res, 200, await crearSesion(body.quien))
+      const quien = await verificarPin(body.pin)
+      if (!quien) return responder(res, 401, { error: 'PIN incorrecto' })
+      return responder(res, 200, { ...(await crearSesion(quien)), quien })
     }
     const token = String(req.headers?.authorization || '').replace(/^Bearer\s+/i, '')
     const sesion = await leerSesion(token)

@@ -46,15 +46,15 @@ export const admin = crearSheets(() => {
 export const local = crearSheets(() => ({ sheetId: process.env.VITE_SHEET_ID, ...cuenta() }))
 
 // ── PIN y sesión ───────────────────────────────────────────────────────────
+// Cada administrador tiene su PIN: ADMIN_PIN es el de Adrián y ADMIN_PIN_JORGE el de Jorge.
+// Devuelve quién es (o null si no coincide con ninguno).
+const igual = (x, y) => { const a = enc.encode(String(x || '')), b = enc.encode(String(y || '')); let ok = a.length === b.length; for (let i = 0; i < b.length; i++) ok = ok && a[i] === b[i]; return ok }
 export async function verificarPin(pin) {
-  const esperado = process.env.ADMIN_PIN
-  if (!esperado) throw new Error('Falta la variable ADMIN_PIN')
-  const a = enc.encode(String(pin || ''))
-  const b = enc.encode(esperado)
-  let ok = a.length === b.length
-  for (let i = 0; i < b.length; i++) ok = ok && a[i] === b[i]
-  if (!ok) await esperar(1500) // frena los intentos de adivinar el PIN
-  return ok
+  const env = process.env
+  if (!env.ADMIN_PIN) throw new Error('Falta la variable ADMIN_PIN')
+  const quien = igual(pin, env.ADMIN_PIN) ? 'Adrián' : env.ADMIN_PIN_JORGE && igual(pin, env.ADMIN_PIN_JORGE) ? 'Jorge' : null
+  if (!quien) await esperar(1500) // frena los intentos de adivinar el PIN
+  return quien
 }
 
 async function hmacKey() {
@@ -103,6 +103,7 @@ export const TABLAS = [
       ['REGALIAS_PORCENTAJE', '4', 'Porcentaje para cada hermano sobre (ventas − alquiler − sueldos)'],
       ['HOME_OFFICE_HORAS', '12', 'Horas de home office por mes, a tarifa común'],
       ['HOME_OFFICE_PERSONA', 'Adrián', 'Quién cobra el home office'],
+      ['COBERTURA_VALOR_DIA', '21500', 'Valor por día de una empleada de la Esquina trabajando en Mitad de cuadra'],
     ] },
   { nombre: 'HORAS', desc: 'Horas trabajadas (por día o por quincena). TIPO: COMUN, PARTIDO, FERIADO o HOME OFFICE',
     enc: ['ID', 'PERSONA', 'DESDE', 'HASTA', 'HORAS', 'TIPO', 'LUGAR', 'NOTA', 'CARGADO', 'ANULADO'] },
@@ -112,10 +113,37 @@ export const TABLAS = [
       ['Adrián', 'COMUN', '11000', '1/1/2026', 'Partido y feriado se pagan al doble'],
       ['Jorge', 'COMUN', '11000', '1/1/2026', 'Partido y feriado se pagan al doble'],
     ] },
-  { nombre: 'PRODUCTOS 3D', desc: 'Catálogo de impresiones 3D con precio',
-    enc: ['ID', 'PRODUCTO', 'PRECIO', 'VIGENTE DESDE', 'ACTIVO'] },
-  { nombre: 'VENTAS 3D', desc: 'Impresiones 3D vendidas a cada local',
-    enc: ['ID', 'FECHA', 'CLIENTE', 'PRODUCTO', 'CANTIDAD', 'PRECIO UNITARIO', 'TOTAL', 'ESTADO', 'FECHA COBRO', 'NOTA', 'ANULADO'] },
+  { nombre: 'PRODUCTOS 3D', desc: 'Catálogo de impresiones 3D. Un aumento = una fila nueva con la fecha de vigencia',
+    enc: ['ID', 'PRODUCTO', 'PRECIO', 'VIGENTE DESDE', 'ACTIVO'],
+    inicial: [
+      ['P3D001', "Cancha impresa grande", '12000', '1/9/2026', 'TRUE'],
+      ['P3D002', "Iman \"CHE BOLUDO\"", '1500', '1/9/2026', 'TRUE'],
+      ['P3D003', "Llavero \"CHE BOLUDO\"", '700', '1/9/2026', 'TRUE'],
+      ['P3D004', "Copa del mundo tamaño real", '22000', '1/9/2026', 'TRUE'],
+      ['P3D005', "Messi Muñeco Funko Topo Gigio", '20000', '1/9/2026', 'TRUE'],
+      ['P3D006', "Iman 3D siempre mono CHICO", '2500', '1/9/2026', 'TRUE'],
+      ['P3D007', "Iman 3D siempre mono GRANDE", '2500', '1/9/2026', 'TRUE'],
+      ['P3D008', "Iman fantasma de la B chico", '1500', '1/9/2026', 'TRUE'],
+      ['P3D009', "Copa del mundo 18 cm", '8000', '1/9/2026', 'TRUE'],
+      ['P3D010', "Copa del mundo mini 10 cm", '3000', '1/9/2026', 'TRUE'],
+      ['P3D011', "Iman cancha 3D", '2500', '1/9/2026', 'TRUE'],
+      ['P3D012', "Llavero copa del mundo", '1500', '1/9/2026', 'TRUE'],
+      ['P3D013', "Iman \"QUE MIRA BOBO\"", '2500', '1/9/2026', 'TRUE'],
+      ['P3D014', "Iman Diego Busto", '2500', '1/9/2026', 'TRUE'],
+      ['P3D015', "Iman Diego corriendo", '2500', '1/9/2026', 'TRUE'],
+      ['P3D016', "Mate bicolor con escudo", '7500', '1/9/2026', 'TRUE'],
+      ['P3D017', "Mate 3d Bombonera", '15000', '1/9/2026', 'TRUE'],
+      ['P3D018', "Parrilla gallina GRANDE", '9000', '1/9/2026', 'TRUE'],
+      ['P3D019', "Parrilla gallina CHICA", '3000', '1/9/2026', 'TRUE'],
+      ['P3D020', "Iman destapador BOCA", '2500', '1/9/2026', 'TRUE'],
+      ['P3D021', "Iman MONO chico", '2500', '1/9/2026', 'TRUE'],
+      ['P3D022', "Busto Maradona", '20000', '1/9/2026', 'TRUE'],
+      ['P3D023', "Llavero cancha 3D", '1300', '1/9/2026', 'TRUE'],
+      ['P3D024', "Iman destapador BOCA/ARGENTINA", '2500', '1/9/2026', 'TRUE'],
+    ] },
+  // ESTADO: PENDIENTE → LIQUIDADA (Esquina: pasa a pago pendiente del local) o COBRADA (Mitad de cuadra)
+  { nombre: 'VENTAS 3D', desc: 'Impresiones 3D vendidas a la Esquina y a Mitad de cuadra',
+    enc: ['ID', 'FECHA', 'CLIENTE', 'PRODUCTO', 'CANTIDAD', 'PRECIO UNITARIO', 'TOTAL', 'ESTADO', 'FECHA COBRO', 'NOTA', 'ANULADO', 'LIQUIDADO EN'] },
   { nombre: 'PROPIEDADES', desc: 'Direcciones con servicios y a cargo de quién están',
     enc: ['ID', 'NOMBRE', 'A CARGO DE', 'SERVICIOS', 'ACTIVO', 'NOTA'] },
   { nombre: 'SERVICIOS', desc: 'Una fila por boleta de servicio',
@@ -198,6 +226,7 @@ export async function getConfig() {
     alquilerUsd: parsePrecio(c.ALQUILER_USD) || 1100,
     alquilerDiaMax: Number(c.ALQUILER_DIA_MAX) || 10,
     porcentaje: Number(String(c.REGALIAS_PORCENTAJE || '4').replace(',', '.')) || 4,
+    coberturaDia: parsePrecio(c.COBERTURA_VALOR_DIA) || 21500,
     homeOffice: { persona: c.HOME_OFFICE_PERSONA || 'Adrián', horas: Number(String(c.HOME_OFFICE_HORAS ?? '12').replace(',', '.')) || 0 },
   }
 }
@@ -227,6 +256,17 @@ export async function getTarjeta() {
     cuota: r[6] || '', pesos: parsePrecio(r[7]), dolares: parsePrecio(r[8]), aCargoDe: r[9] || '', nota: r[10] || '',
     tarjeta: r[11] || '', liquidadoEn: r[12] || '', anulado: esTrue(r[13]),
   })).filter(t => t.id)
+}
+export async function getProductos3D() {
+  return (await admin.sheetsGet('PRODUCTOS 3D!A2:E')).filter(r => r[0] && r[1]).map(r => ({
+    id: r[0], producto: String(r[1]).trim(), precio: parsePrecio(r[2]), desdeTxt: r[3] || '', desde: clave(r[3]) || '0000', activo: String(r[4]).toUpperCase() !== 'FALSE',
+  }))
+}
+export async function getVentas3D() {
+  return (await admin.sheetsGet('VENTAS 3D!A2:L')).map((r, i) => ({
+    fila: i + 2, id: r[0], fecha: r[1] || '', cliente: r[2] || '', producto: r[3] || '', cantidad: Number(String(r[4] || 0).replace(',', '.')) || 0,
+    precio: parsePrecio(r[5]), total: parsePrecio(r[6]), estado: r[7] || 'PENDIENTE', fechaCobro: r[8] || '', nota: r[9] || '', anulado: esTrue(r[10]), liquidadoEn: r[11] || '',
+  })).filter(v => v.id)
 }
 export async function getCuenta() {
   return (await admin.sheetsGet('CUENTA CORRIENTE!A2:Q')).map((r, i) => ({

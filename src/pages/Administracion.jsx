@@ -20,8 +20,7 @@ const capitalizar = s => s.charAt(0).toUpperCase() + s.slice(1)
 const NOMBRE_TIPO = { COMUN: 'Común', PARTIDO: 'Partido (×2)', FERIADO: 'Feriado (×2)', 'HOME OFFICE': 'Home office' }
 
 // ── Login ──────────────────────────────────────────────────────────────────
-function Login({ perfilNombre, onEntrar }) {
-  const [quien, setQuien] = useState(QUIENES.includes(perfilNombre) ? perfilNombre : 'Adrián')
+function Login({ onEntrar }) {
   const [pin, setPin] = useState('')
   const [entrando, setEntrando] = useState(false)
   const [error, setError] = useState(null)
@@ -29,7 +28,7 @@ function Login({ perfilNombre, onEntrar }) {
   async function entrar() {
     if (!pin || entrando) return
     setEntrando(true); setError(null); setFaltan(null)
-    try { onEntrar(await ingresar(pin, quien)) }
+    try { onEntrar(await ingresar(pin)) }
     catch (e) { setError(e.message); setFaltan(e.configuracion || null); setPin('') }
     finally { setEntrando(false) }
   }
@@ -37,12 +36,8 @@ function Login({ perfilNombre, onEntrar }) {
     <div style={S.loginCard}>
       <div style={S.candado}>🔒</div>
       <div style={S.loginTitulo}>Administración</div>
-      <div style={S.ayuda}>Cuentas del local, regalías, alquiler, servicios y ahorros. Solo para Adrián y Jorge.</div>
-      <div style={S.fieldLabel}>QUIÉN ENTRA</div>
-      <div style={S.grid2}>
-        {QUIENES.map(q => <button key={q} style={{ ...S.optBtn, ...(quien === q ? S.optBtnActivo : {}) }} onClick={() => setQuien(q)}>{q}</button>)}
-      </div>
-      <div style={S.fieldLabel}>PIN DE ADMINISTRACIÓN</div>
+      <div style={S.ayuda}>Cuentas del local, regalías, alquiler, servicios y ahorros. Solo para Adrián y Jorge, cada uno con su PIN.</div>
+      <div style={S.fieldLabel}>TU PIN DE ADMINISTRACIÓN</div>
       <input style={S.pin} type="password" inputMode="numeric" autoComplete="off" value={pin} onChange={e => setPin(e.target.value)} onKeyDown={e => e.key === 'Enter' && entrar()} aria-label="PIN de administración" />
       {error && <div style={S.error}>{error}</div>}
       {faltan && <div style={S.ayuda}>Cuando estén cargadas en Vercel, hacé un Redeploy para que la app las tome.</div>}
@@ -669,6 +664,238 @@ function Tarjeta({ toast, irA }) {
   )
 }
 
+// ── Impresiones 3D ─────────────────────────────────────────────────────────
+// Ventas de impresiones 3D de Adrián a la Esquina y a Mitad de cuadra (esta última solo la ve Adrián).
+// Esquina: se eligen las ventas y se "liquidan" → pago pendiente del local a Adrián.
+// Mitad de cuadra: se marcan como cobradas cuando Mamá paga.
+function Impresiones3D({ toast, irA }) {
+  const [datos, setDatos] = useState(null)
+  const [error, setError] = useState(null)
+  const [cliente, setCliente] = useState('Esquina')
+  const [fecha, setFecha] = useState(fechaHoy())
+  const [cant, setCant] = useState({})
+  const [filtro, setFiltro] = useState('')
+  const [guardando, setGuardando] = useState(false)
+  const [sel, setSel] = useState(new Set())
+  const [fechaCobro, setFechaCobro] = useState(fechaHoy())
+  const [verProductos, setVerProductos] = useState(false)
+  const [nuevo, setNuevo] = useState({ producto: '', precio: '', desde: fechaHoy() })
+  const [verHistorial, setVerHistorial] = useState(false)
+  async function cargar() { setError(null); try { setDatos(await pedirAdmin('3d')) } catch (e) { setError(e.message) } }
+  useEffect(() => { cargar() }, [])
+  useEffect(() => { setSel(new Set()) }, [cliente])
+
+  async function guardar() {
+    setGuardando(true)
+    try {
+      const items = Object.entries(cant).filter(([, c]) => Number(c) > 0).map(([producto, cantidad]) => ({ producto, cantidad: Number(cantidad) }))
+      await pedirAdmin('3d.agregar', { fecha, cliente, items })
+      toast(`Venta a ${cliente} guardada`); setCant({}); cargar()
+    } catch (e) { toast(e.message, 'error') }
+    finally { setGuardando(false) }
+  }
+  async function liquidar() {
+    try { const r = await pedirAdmin('3d.liquidar', { ids: [...sel] }); toast(`Liquidado: ${fmt$(r.total)} quedó en Pendientes`); setSel(new Set()); cargar() } catch (e) { toast(e.message, 'error') }
+  }
+  async function cobrar() {
+    try { await pedirAdmin('3d.cobrar', { ids: [...sel], fecha: fechaCobro }); toast('Marcadas como cobradas'); setSel(new Set()); cargar() } catch (e) { toast(e.message, 'error') }
+  }
+  async function anular(v) {
+    if (!window.confirm(`¿Borrar ${v.cantidad} × ${v.producto} del ${v.fecha}?`)) return
+    try { await pedirAdmin('3d.anular', { id: v.id }); toast('Venta borrada'); cargar() } catch (e) { toast(e.message, 'error') }
+  }
+  async function guardarProducto() {
+    try { await pedirAdmin('3d.producto', nuevo); toast('Producto guardado'); setNuevo({ producto: '', precio: '', desde: fechaHoy() }); cargar() } catch (e) { toast(e.message, 'error') }
+  }
+
+  if (error) return <div style={S.card}><div style={S.error}>{error}</div><button style={S.btnSec} onClick={cargar}>Reintentar</button></div>
+  if (!datos) return <div style={S.muted}>Cargando…</div>
+  const clientes = datos.verMdc ? ['Esquina', 'Mitad de cuadra'] : ['Esquina']
+  const productos = datos.productos.filter(p => !filtro || p.producto.toLowerCase().includes(filtro.toLowerCase()))
+  const totalCarga = datos.productos.reduce((t, p) => t + (Number(cant[p.producto]) || 0) * p.precio, 0)
+  const pendientes = datos.ventas.filter(v => v.cliente === cliente && v.estado === 'PENDIENTE').sort((a, b) => (parseFecha(b.fecha)?.clave || '').localeCompare(parseFecha(a.fecha)?.clave || ''))
+  const totalSel = pendientes.filter(v => sel.has(v.id)).reduce((t, v) => t + v.total, 0)
+  const historial = datos.ventas.filter(v => v.cliente === cliente && v.estado !== 'PENDIENTE').sort((a, b) => (parseFecha(b.fecha)?.clave || '').localeCompare(parseFecha(a.fecha)?.clave || ''))
+  const toggle = id => setSel(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+
+  return (
+    <>
+      {clientes.length > 1 && (
+        <div style={S.grid2}>{clientes.map(c => <button key={c} style={{ ...S.optBtn, ...(cliente === c ? S.optBtnActivo : {}) }} onClick={() => setCliente(c)}>{c}</button>)}</div>
+      )}
+      <div style={S.card}>
+        <div style={S.cardTitulo}>Cargar venta a {cliente}</div>
+        <div style={S.filaInput}>
+          <span style={S.fieldLabel}>FECHA</span><input style={{ ...S.input, width: 120 }} value={fecha} onChange={e => setFecha(e.target.value)} aria-label="Fecha de la venta" />
+          <input style={{ ...S.inputAncho, flex: 1, minWidth: 160 }} placeholder="Filtrar productos…" value={filtro} onChange={e => setFiltro(e.target.value)} />
+        </div>
+        <div style={S.prod3dGrid}>
+          {productos.map(p => (
+            <label key={p.producto} style={{ ...S.prod3d, ...(Number(cant[p.producto]) > 0 ? { borderColor: 'var(--accent)' } : {}) }}>
+              <span style={{ minWidth: 0, flex: 1 }}>{p.producto}<br /><span style={S.sub}>{fmt$(p.precio)}</span></span>
+              <input style={{ ...S.input, width: 64, fontSize: 16, padding: '6px' }} inputMode="numeric" placeholder="0" value={cant[p.producto] || ''} onChange={e => setCant(c => ({ ...c, [p.producto]: e.target.value.replace(/\D/g, '') }))} aria-label={`Cantidad de ${p.producto}`} />
+            </label>
+          ))}
+        </div>
+        <button style={{ ...S.btn, opacity: totalCarga > 0 && !guardando ? 1 : 0.45 }} disabled={!(totalCarga > 0) || guardando} onClick={guardar}>{guardando ? 'Guardando…' : `Guardar venta · ${fmt$(totalCarga)}`}</button>
+        <button style={S.link} onClick={() => setVerProductos(v => !v)}>{verProductos ? 'Ocultar' : 'Agregar producto o cambiar un precio'}</button>
+        {verProductos && (
+          <div style={S.confirmBox}>
+            <div style={S.ayuda}>Para un aumento, escribí el nombre igual al del producto y el precio nuevo con la fecha desde la que vale. Las ventas anteriores conservan su precio.</div>
+            <input style={S.inputAncho} list="adm-prod3d" placeholder="Producto" value={nuevo.producto} onChange={e => setNuevo(n => ({ ...n, producto: e.target.value }))} />
+            <datalist id="adm-prod3d">{datos.productos.map(p => <option key={p.producto} value={p.producto} />)}</datalist>
+            <div style={S.filaInput}>
+              <span style={S.fieldLabel}>PRECIO</span><input style={{ ...S.input, width: 110 }} inputMode="numeric" value={nuevo.precio} onChange={e => setNuevo(n => ({ ...n, precio: e.target.value }))} aria-label="Precio del producto" />
+              <span style={S.fieldLabel}>DESDE</span><input style={{ ...S.input, width: 120 }} value={nuevo.desde} onChange={e => setNuevo(n => ({ ...n, desde: e.target.value }))} aria-label="Vigente desde" />
+              <button style={S.btnOk} onClick={guardarProducto}>Guardar</button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div style={S.card}>
+        <div style={S.grupoTop}>
+          <div style={S.cardTitulo}>{cliente === 'Esquina' ? 'Sin liquidar' : 'Sin cobrar'}</div>
+          <div style={S.grupoMonto}>{fmt$(pendientes.reduce((t, v) => t + v.total, 0))}</div>
+        </div>
+        {pendientes.length === 0 && <div style={S.muted}>No hay ventas pendientes.</div>}
+        {pendientes.length > 0 && <label style={S.check}><input type="checkbox" checked={sel.size === pendientes.length} onChange={e => setSel(e.target.checked ? new Set(pendientes.map(v => v.id)) : new Set())} /> Elegir todas</label>}
+        {pendientes.map(v => (
+          <label key={v.id} style={S.servFila}>
+            <input type="checkbox" checked={sel.has(v.id)} onChange={() => toggle(v.id)} />
+            <span style={{ flex: 1, minWidth: 0 }}>{v.cantidad} × {v.producto} <span style={S.sub}>· {v.fecha} · {fmt$(v.precio)} c/u</span></span>
+            <strong>{fmt$(v.total)}</strong>
+            <button style={S.borrar} onClick={e => { e.preventDefault(); anular(v) }} aria-label="Borrar venta">✕</button>
+          </label>
+        ))}
+        {sel.size > 0 && (cliente === 'Esquina' ? (
+          <div style={S.confirmBox}>
+            <div style={S.ayuda}>Se crea un pago pendiente del local a Adrián por {fmt$(totalSel)} ({sel.size} {sel.size === 1 ? 'ítem' : 'ítems'}). Lo marcás como pagado en Pendientes cuando te paguen.</div>
+            <button style={S.btnOk} onClick={liquidar}>Liquidar {fmt$(totalSel)}</button>
+          </div>
+        ) : (
+          <div style={S.pagarFila}>
+            <span style={S.fieldLabel}>COBRADO EL</span><input style={{ ...S.input, width: 120 }} value={fechaCobro} onChange={e => setFechaCobro(e.target.value)} aria-label="Fecha de cobro" />
+            <button style={S.btnOk} onClick={cobrar}>Marcar cobradas · {fmt$(totalSel)}</button>
+          </div>
+        ))}
+      </div>
+
+      <div style={S.card}>
+        <label style={S.check}><input type="checkbox" checked={verHistorial} onChange={e => setVerHistorial(e.target.checked)} /> Ver ventas {cliente === 'Esquina' ? 'ya liquidadas' : 'ya cobradas'}</label>
+        {verHistorial && historial.map(v => (
+          <div key={v.id} style={S.registro}>
+            <span style={{ flex: 1, minWidth: 0 }}>{v.cantidad} × {v.producto} <span style={S.sub}>· {v.fecha} · {v.estado === 'LIQUIDADA' ? `liquidada el ${v.fechaCobro}` : `cobrada el ${v.fechaCobro}`}</span></span>
+            <strong>{fmt$(v.total)}</strong>
+          </div>
+        ))}
+        {verHistorial && cliente === 'Esquina' && historial.length > 0 && <button style={S.link} onClick={() => irA('pend')}>Ver los pagos en Pendientes</button>}
+      </div>
+    </>
+  )
+}
+
+// ── Cuenta Esquina ↔ Mitad de cuadra ───────────────────────────────────────
+// Saldo corrido: mercadería que la Esquina trajo de Mitad de cuadra (sale de Pagos, proveedor
+// "Mitad de cuadra" o "Mamá", lo no pagado) contra lo que Mitad de cuadra se llevó, la cobertura
+// de empleadas y los pagos en efectivo o transferencia que se hacen cada tanto.
+const TIPOS_MOV_MDC = [
+  { id: 'MERCADERIA', label: 'Se llevó mercadería', ayuda: 'Mercadería que Mitad de cuadra se llevó de la Esquina.' },
+  { id: 'COBERTURA', label: 'Cobertura', ayuda: 'Días que una empleada de la Esquina trabajó en Mitad de cuadra.' },
+  { id: 'PAGO_ESQUINA', label: 'Pagó el local', ayuda: 'El local le pagó a Mitad de cuadra (efectivo o transferencia).' },
+  { id: 'PAGO_MDC', label: 'Pagó Mitad de cuadra', ayuda: 'Mitad de cuadra le pagó al local.' },
+  { id: 'AJUSTE', label: 'Saldo inicial / ajuste', ayuda: 'Para arrancar con el saldo que traían de la planilla, o corregir una diferencia.' },
+]
+function MitadDeCuadra({ toast }) {
+  const [datos, setDatos] = useState(null)
+  const [error, setError] = useState(null)
+  const [tipo, setTipo] = useState('MERCADERIA')
+  const [f, setF] = useState({ fecha: fechaHoy(), detalle: '', cantidad: '', precio: '', monto: '', medio: 'Efectivo', aFavor: 'Mitad de cuadra' })
+  const [guardando, setGuardando] = useState(false)
+  async function cargar() { setError(null); try { const r = await pedirAdmin('mdc'); setDatos(r) } catch (e) { setError(e.message) } }
+  useEffect(() => { cargar() }, [])
+  // al cambiar de tipo se limpian los campos (la cobertura viene precargada con Brenda y el valor por día)
+  function elegirTipo(id) {
+    setTipo(id)
+    setF(x => ({ ...x, cantidad: '', monto: '', detalle: id === 'COBERTURA' ? 'Brenda' : '', precio: id === 'COBERTURA' ? String(datos?.coberturaDia || '') : '' }))
+  }
+
+  async function guardar() {
+    setGuardando(true)
+    try {
+      const t = tipo === 'AJUSTE' ? (f.aFavor === 'Mitad de cuadra' ? 'AJUSTE_MDC' : 'AJUSTE_ESQ') : tipo
+      await pedirAdmin('mdc.agregar', { ...f, tipo: t })
+      toast('Movimiento guardado'); setF(x => ({ ...x, cantidad: '', monto: '', ...(tipo === 'COBERTURA' ? {} : { detalle: '', precio: '' }) })); cargar()
+    } catch (e) { toast(e.message, 'error') }
+    finally { setGuardando(false) }
+  }
+  async function anular(m) {
+    if (!window.confirm(`¿Borrar "${m.detalle}"?`)) return
+    try { await pedirAdmin('mdc.anular', { id: m.id }); toast('Movimiento borrado'); cargar() } catch (e) { toast(e.message, 'error') }
+  }
+
+  if (error) return <div style={S.card}><div style={S.error}>{error}</div><button style={S.btnSec} onClick={cargar}>Reintentar</button></div>
+  if (!datos) return <div style={S.muted}>Cargando…</div>
+  const pend = datos.pagos.filter(p => !p.sinPrecio)
+  const sinPrecio = datos.pagos.filter(p => p.sinPrecio)
+  const movs = [...datos.movimientos].sort((a, b) => (parseFecha(b.fecha)?.clave || '').localeCompare(parseFecha(a.fecha)?.clave || ''))
+  const t = TIPOS_MOV_MDC.find(x => x.id === tipo)
+  const conCantidad = tipo === 'MERCADERIA' || tipo === 'COBERTURA'
+  const valido = conCantidad ? f.cantidad && f.precio && (tipo !== 'MERCADERIA' || f.detalle.trim()) : f.monto
+
+  return (
+    <>
+      <div style={S.card}>
+        <div style={S.cardTitulo}>Saldo</div>
+        <div style={S.saldoGrande}>{Math.abs(datos.saldo) < 1 ? 'Están a mano' : datos.saldo > 0 ? `El local le debe a Mitad de cuadra ${fmt$(datos.saldo)}` : `Mitad de cuadra le debe al local ${fmt$(-datos.saldo)}`}</div>
+        <Fila izq="Mercadería traída de Mitad de cuadra, sin pagar (de Pagos)" der={fmt$(datos.deudaMercaderia)} />
+        <Fila izq={datos.aFavorMdc >= 0 ? 'Movimientos de esta cuenta, a favor de Mitad de cuadra' : 'Movimientos de esta cuenta, a favor del local'} der={fmt$(Math.abs(datos.aFavorMdc))} />
+        {sinPrecio.length > 0 && (
+          <div style={S.alerta}>{sinPrecio.length} {sinPrecio.length === 1 ? 'artículo' : 'artículos'} de Mitad de cuadra en Pagos {sinPrecio.length === 1 ? 'no tiene' : 'no tienen'} precio y no {sinPrecio.length === 1 ? 'suma' : 'suman'} al saldo: {sinPrecio.slice(0, 6).map(p => `${p.cantidad} ${p.articulo}`).join(', ')}{sinPrecio.length > 6 ? '…' : ''}. Cuando tengas el precio, cargalo en Pagos.</div>
+        )}
+      </div>
+
+      <div style={S.card}>
+        <div style={S.cardTitulo}>Registrar movimiento</div>
+        <div style={S.tipos}>{TIPOS_MOV_MDC.map(x => <button key={x.id} style={{ ...S.tipoBtn, ...(tipo === x.id ? S.optBtnActivo : {}) }} onClick={() => elegirTipo(x.id)}>{x.label}</button>)}</div>
+        <div style={S.ayuda}>{t.ayuda}</div>
+        <div style={S.filaInput}><span style={S.fieldLabel}>FECHA</span><input style={{ ...S.input, width: 120 }} value={f.fecha} onChange={e => setF(x => ({ ...x, fecha: e.target.value }))} aria-label="Fecha del movimiento" /></div>
+        {tipo === 'AJUSTE' && <div style={S.grid2}>{['Mitad de cuadra', 'Esquina'].map(a => <button key={a} style={{ ...S.optBtn, ...(f.aFavor === a ? S.optBtnActivo : {}) }} onClick={() => setF(x => ({ ...x, aFavor: a }))}>{a === 'Mitad de cuadra' ? 'El local le debía' : 'Mitad de cuadra le debía'}</button>)}</div>}
+        {(tipo === 'PAGO_ESQUINA' || tipo === 'PAGO_MDC') && <div style={S.tipos}>{['Efectivo', 'Transferencia'].map(m => <button key={m} style={{ ...S.tipoBtn, ...(f.medio === m ? S.optBtnActivo : {}) }} onClick={() => setF(x => ({ ...x, medio: m }))}>{m}</button>)}</div>}
+        <input style={S.inputAncho} placeholder={tipo === 'MERCADERIA' ? 'Qué se llevó (ej. remeras algodón)' : tipo === 'COBERTURA' ? 'Quién (ej. Brenda)' : 'Detalle (opcional)'} value={f.detalle} maxLength={120} onChange={e => setF(x => ({ ...x, detalle: e.target.value }))} />
+        {conCantidad ? (
+          <div style={S.filaInput}>
+            <span style={S.fieldLabel}>{tipo === 'COBERTURA' ? 'DÍAS' : 'CANTIDAD'}</span><input style={{ ...S.input, width: 80 }} inputMode="decimal" value={f.cantidad} onChange={e => setF(x => ({ ...x, cantidad: e.target.value }))} aria-label="Cantidad" />
+            <span style={S.fieldLabel}>{tipo === 'COBERTURA' ? 'VALOR POR DÍA' : 'PRECIO'}</span><input style={{ ...S.input, width: 120 }} inputMode="decimal" value={f.precio} onChange={e => setF(x => ({ ...x, precio: e.target.value }))} aria-label="Precio" />
+          </div>
+        ) : (
+          <div style={S.filaInput}><span style={S.fieldLabel}>MONTO</span><input style={{ ...S.input, width: 140 }} inputMode="decimal" value={f.monto} onChange={e => setF(x => ({ ...x, monto: e.target.value }))} aria-label="Monto" /></div>
+        )}
+        <button style={{ ...S.btn, opacity: valido && !guardando ? 1 : 0.45 }} disabled={!valido || guardando} onClick={guardar}>{guardando ? 'Guardando…' : 'Guardar'}</button>
+      </div>
+
+      <div style={S.card}>
+        <div style={S.cardTitulo}>Movimientos</div>
+        {movs.length === 0 && <div style={S.muted}>Todavía no hay movimientos. Si venían con un saldo de la planilla, cargalo como "Saldo inicial / ajuste".</div>}
+        {movs.map(m => (
+          <div key={m.id} style={S.registro}>
+            <span style={{ flex: 1, minWidth: 0 }}>{m.detalle}<br /><span style={S.sub}>{m.fecha} · {m.aFavorDe === 'Mitad de cuadra' ? 'a favor de Mitad de cuadra' : 'a favor del local'}</span></span>
+            <strong style={{ flexShrink: 0 }}>{fmt$(m.montoPesos)}</strong>
+            <button style={S.borrar} onClick={() => anular(m)} aria-label="Borrar movimiento">✕</button>
+          </div>
+        ))}
+        {pend.length > 0 && <div style={S.fieldLabel}>MERCADERÍA DE PAGOS SIN PAGAR</div>}
+        {pend.map(p => (
+          <div key={p.id} style={S.registro}>
+            <span style={{ flex: 1, minWidth: 0 }}>{p.cantidad} × {p.articulo}<br /><span style={S.sub}>{p.fecha} · a favor de Mitad de cuadra</span></span>
+            <strong style={{ flexShrink: 0 }}>{fmt$(p.pendiente)}</strong>
+          </div>
+        ))}
+      </div>
+    </>
+  )
+}
+
 // ── Estado (conexiones y tablas) ───────────────────────────────────────────
 function Estado() {
   const [estado, setEstado] = useState(null)
@@ -706,6 +933,8 @@ const SECCIONES = [
   { id: 'horas', label: 'Horas' },
   { id: 'serv', label: 'Servicios' },
   { id: 'tarj', label: 'Tarjeta' },
+  { id: '3d', label: 'Impresiones 3D' },
+  { id: 'mdc', label: 'Mitad de cuadra' },
   { id: 'estado', label: 'Estado' },
 ]
 
@@ -740,7 +969,7 @@ export default function Administracion({ perfilNombre = '' }) {
         )}
       </div>
       <div style={S.body}>
-        {!sesion ? <Login perfilNombre={perfilNombre} onEntrar={setSesion} /> : (
+        {!sesion ? <Login onEntrar={setSesion} /> : (
           <>
             <div style={S.secciones}>
               {SECCIONES.map(s => <button key={s.id} style={{ ...S.secBtn, ...(seccion === s.id ? S.secBtnActivo : {}) }} onClick={() => setSeccion(s.id)}>{s.label}</button>)}
@@ -751,6 +980,8 @@ export default function Administracion({ perfilNombre = '' }) {
               {seccion === 'horas' && <Horas toast={toastSeguro} />}
               {seccion === 'serv' && <Servicios toast={toastSeguro} />}
               {seccion === 'tarj' && <Tarjeta toast={toastSeguro} irA={setSeccion} />}
+              {seccion === '3d' && <Impresiones3D toast={toastSeguro} irA={setSeccion} />}
+              {seccion === 'mdc' && <MitadDeCuadra toast={toastSeguro} />}
               {seccion === 'estado' && <Estado />}
             </div>
           </>
@@ -824,5 +1055,8 @@ const S = {
   grupoTitulo: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 19, color: 'var(--text)' },
   grupoMonto: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 22, color: 'var(--accent)', flexShrink: 0 },
   pagarFila: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' },
+  prod3dGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: 6 },
+  prod3d: { display: 'flex', alignItems: 'center', gap: 8, fontFamily: 'Barlow, sans-serif', fontSize: 14, color: 'var(--text)', background: 'var(--surface2)', border: '1.5px solid var(--border)', borderRadius: 10, padding: '6px 8px' },
+  saldoGrande: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 24, color: 'var(--accent)', lineHeight: 1.2 },
   check: { display: 'flex', alignItems: 'center', gap: 8, fontFamily: 'Barlow, sans-serif', fontSize: 13, color: 'var(--muted)', cursor: 'pointer' },
 }

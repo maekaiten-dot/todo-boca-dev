@@ -26,9 +26,10 @@ async function llamar(accion, datos = {}, token) {
   return data
 }
 
-export async function ingresar(pin, quien) {
-  const s = await llamar('login', { pin, quien })
-  const sesion = { token: s.token, exp: s.exp, quien }
+// El PIN identifica a la persona (cada administrador tiene el suyo)
+export async function ingresar(pin) {
+  const s = await llamar('login', { pin })
+  const sesion = { token: s.token, exp: s.exp, quien: s.quien }
   try { localStorage.setItem(CLAVE_SESION, JSON.stringify(sesion)) } catch {}
   return sesion
 }

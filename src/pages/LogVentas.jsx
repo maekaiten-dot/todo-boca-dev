@@ -1,6 +1,6 @@
 // src/pages/LogVentas.jsx
 import { useState, useMemo, useEffect } from 'react'
-import { getHistoricoVentas, getVentasDesde, registrarLog } from '../api/sheets.js'
+import { getHistoricoVentas, getVentasDesde, registrarLog, metodosDe } from '../api/sheets.js'
 import DetalleVentaModal from '../components/DetalleVentaModal.jsx'
 
 const METODO_ICONS = {
@@ -218,7 +218,7 @@ export default function LogVentas() {
                             <td style={{...S.td, color: item.anulado ? 'var(--muted)' : 'var(--accent)', fontWeight:700, textDecoration: item.anulado ? 'line-through' : 'none'}}>
                               ${Math.round(item.precioTotalFinal || item.precioTotal || 0).toLocaleString('es-AR')}
                             </td>
-                            <td style={S.td}>{METODO_ICONS[item.metodoPago] || '💰'} {item.metodoPago}</td>
+                            <td style={S.td}>{metodosDe(item.metodoPago).map(m => METODO_ICONS[m] || '💰').join('') || '💰'} {item.metodoPago}</td>
                             <td style={S.td}>{item.empleado}</td>
                           </tr>
                         ))}

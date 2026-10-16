@@ -1,6 +1,6 @@
 // src/components/DetalleVentaModal.jsx
 import { useState } from 'react'
-import { anularItemVenta, registrarLog } from '../api/sheets.js'
+import { anularItemVenta, registrarLog, metodosDe, repartoPago } from '../api/sheets.js'
 
 export default function DetalleVentaModal({ venta, onClose, onActualizar }) {
   const [confirmItem, setConfirmItem] = useState(null)
@@ -18,10 +18,13 @@ export default function DetalleVentaModal({ venta, onClose, onActualizar }) {
 
   const itemsActivos = venta.items.filter(i => !i.anulado)
   // Monto cobrado en moneda extranjera o por Pix (queda en NOTAS: "USD 20", "PIX BRL 150")
-  const montoDivisa = (() => {
-    const m = String(venta.items.find(i => i.notas)?.notas || '').match(/^(?:PIX\s+)?(USD|BRL|EUR)\s*([\d.,]+)/)
-    return m ? `${{ USD: 'US$', BRL: 'R$', EUR: '€' }[m[1]]} ${m[2]}` : ''
-  })()
+  // (con 2 medios puede haber dos: "USD 20 · PIX BRL 150")
+  const montoDivisa = [...String(venta.items.find(i => i.notas)?.notas || '').matchAll(/(?:PIX\s+)?(USD|BRL|EUR)\s*([\d.,]+)/g)]
+    .map(m => `${{ USD: 'US$', BRL: 'R$', EUR: '€' }[m[1]]} ${m[2]}`).join(' · ')
+  // Cobro con 2 medios: cuánto con cada uno (de lo que sigue vigente, si se anuló algún artículo)
+  const pagos = venta.items.some(i => i.pagos) ? Object.entries(
+    (itemsActivos.length ? itemsActivos : venta.items).flatMap(repartoPago).reduce((acc, p) => ({ ...acc, [p.metodo]: (acc[p.metodo] || 0) + p.monto }), {})
+  ) : null
   const totalActivo = itemsActivos.reduce((s, i) => s + (i.precioTotalFinal || i.precioTotal || 0), 0)
   const totalOriginal = venta.items.reduce((s, i) => s + (i.precioTotalFinal || i.precioTotal || 0), 0)
   const tieneParcial = !venta.anulado && venta.items.some(i => i.anulado)
@@ -61,7 +64,8 @@ export default function DetalleVentaModal({ venta, onClose, onActualizar }) {
           <div>
             <div style={S.ventaId}>{venta.idVenta}</div>
             <div style={S.ventaMeta}>
-              {METODO_ICONS[venta.metodoPago] || '💰'} {venta.metodoPago}
+              {metodosDe(venta.metodoPago).map(m => METODO_ICONS[m] || '💰').join('') || '💰'}{' '}
+              {pagos ? pagos.map(([m, monto]) => `${m} $${Math.round(monto).toLocaleString('es-AR')}`).join(' + ') : venta.metodoPago}
               {montoDivisa ? ` (${montoDivisa})` : ''}
               {venta.empleado ? ` · ${venta.empleado}` : ''}
               {' · '}{venta.hora}

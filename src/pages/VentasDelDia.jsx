@@ -1,6 +1,6 @@
 // src/pages/VentasDelDia.jsx
 import { useState, useEffect, Fragment } from 'react'
-import { getVentasHoy, anularVenta, registrarLog, getGastosCajaHoy, POSNET_METODOS } from '../api/sheets.js'
+import { getVentasHoy, anularVenta, registrarLog, getGastosCajaHoy, POSNET_METODOS, usaPosnet, metodosDe, repartoPago, montoConMetodo } from '../api/sheets.js'
 import CorregirPosnetModal from '../components/CorregirPosnetModal.jsx'
 import DetalleVentaModal from '../components/DetalleVentaModal.jsx'
 
@@ -16,6 +16,10 @@ const METODO_ICONS = {
 // Métodos que cuentan como pesos en efectivo dentro de la caja
 const METODOS_EFECTIVO_PESOS = new Set(['Efectivo Pesos', 'Efectivo ARS', 'Efectivo'])
 const DIVISAS = { USD: 'US$', BRL: 'R$', EUR: '€' }
+// Íconos de un método (o de los dos, si se cobró con 2 medios)
+const iconos = m => metodosDe(m).map(x => METODO_ICONS[x] || '💰').join('') || '💰'
+// "Efectivo Pesos $20.000 + Tarjeta de Débito $15.000" (montos de toda la venta)
+const textoPagos = pagos => pagos.map(p => `${p.metodo} $${Math.round(p.monto).toLocaleString('es-AR')}`).join(' + ')
 
 export default function VentasDelDia({ refreshKey, usuarios = [], perfilNombre = '', esAdmin = false }) {
   const [ventas, setVentas] = useState([])
@@ -99,11 +103,11 @@ export default function VentasDelDia({ refreshKey, usuarios = [], perfilNombre =
   const totalDia = ventasActivas.reduce((s, v) => s + v.total, 0)
   const cantVentas = ventasActivas.length
 
+  // Con 2 medios de pago, cada fila se reparte entre los dos en la proporción cobrada
   const porMetodo = ventas
     .filter(v => !v.anulado)
     .reduce((acc, v) => {
-      const m = v.metodoPago || 'Sin datos'
-      acc[m] = (acc[m] || 0) + (v.precioTotalFinal || v.precioTotal || 0)
+      repartoPago(v).forEach(p => { const m = p.metodo || 'Sin datos'; acc[m] = (acc[m] || 0) + p.monto })
       return acc
     }, {})
 
@@ -112,15 +116,15 @@ export default function VentasDelDia({ refreshKey, usuarios = [], perfilNombre =
     .filter(v => !v.anulado && v.posnet)
     .reduce((acc, v) => {
       if (!acc[v.posnet]) acc[v.posnet] = { total: 0, ventas: new Set() }
-      acc[v.posnet].total += v.precioTotalFinal || v.precioTotal || 0
+      acc[v.posnet].total += montoConMetodo(v, m => POSNET_METODOS.has(m))
       acc[v.posnet].ventas.add(v.idVenta || v.idDetalle)
       return acc
     }, {})
 
   // ── Caja en efectivo: ventas en pesos − salidas + entradas ──
   const ventasEfectivo = ventas
-    .filter(v => !v.anulado && METODOS_EFECTIVO_PESOS.has(v.metodoPago))
-    .reduce((s, v) => s + (v.precioTotalFinal || v.precioTotal || 0), 0)
+    .filter(v => !v.anulado)
+    .reduce((s, v) => s + montoConMetodo(v, m => METODOS_EFECTIVO_PESOS.has(m)), 0)
   const gastosActivos = gastosCaja.filter(g => !g.anulado)
   const salidas = gastosActivos.filter(g => g.tipo === 'SALIDA')
   const entradas = gastosActivos.filter(g => g.tipo === 'ENTRADA')
@@ -128,18 +132,18 @@ export default function VentasDelDia({ refreshKey, usuarios = [], perfilNombre =
   const totalEntradas = entradas.reduce((s, g) => s + g.monto, 0)
   const efectivoEsperado = ventasEfectivo - totalSalidas + totalEntradas
   // Divisas cobradas hoy: el monto en moneda extranjera queda en NOTAS (ej. "USD 20"), una vez por venta
+  // Pix: reales cobrados por Pix (no están en la caja), la nota queda "PIX BRL 150".
+  // Con 2 medios puede haber dos montos en la nota: "USD 20 · PIX BRL 150"
   const divisas = {}
+  let pixReales = 0
   ventasActivas.forEach(v => {
     const nota = v.items.find(i => !i.anulado && i.notas)?.notas || ''
-    const m = String(nota).match(/^(USD|BRL|EUR)\s*([\d.,]+)/)
-    if (m) divisas[m[1]] = (divisas[m[1]] || 0) + (Number(m[2].replace(',', '.')) || 0)
+    for (const m of String(nota).matchAll(/(PIX\s+)?(USD|BRL|EUR)\s*([\d.,]+)/g)) {
+      const n = Number(m[3].replace(',', '.')) || 0
+      if (m[1]) pixReales += n
+      else divisas[m[2]] = (divisas[m[2]] || 0) + n
+    }
   })
-  // Pix: reales cobrados por Pix (no están en la caja). La nota queda "PIX BRL 150"
-  const pixReales = ventasActivas.reduce((s, v) => {
-    const nota = v.items.find(i => !i.anulado && i.notas)?.notas || ''
-    const m = String(nota).match(/^PIX\s+BRL\s*([\d.,]+)/)
-    return s + (m ? Number(m[1].replace(',', '.')) || 0 : 0)
-  }, 0)
 
   if (loading) return (
     <div style={S.center}><div style={S.loadingText}>Cargando ventas...</div></div>
@@ -212,7 +216,7 @@ export default function VentasDelDia({ refreshKey, usuarios = [], perfilNombre =
             <div style={S.metodoSection}>
               {Object.entries(porMetodo).sort((a, b) => b[1] - a[1]).map(([m, total]) => (
                 <div key={m} style={S.metodoRow}>
-                  <span>{METODO_ICONS[m] || '💰'} {m}</span>
+                  <span>{iconos(m)} {m}</span>
                   <span style={S.metodoTotal}>${Math.round(total).toLocaleString('es-AR')}</span>
                 </div>
               ))}
@@ -274,7 +278,7 @@ export default function VentasDelDia({ refreshKey, usuarios = [], perfilNombre =
                         ) : (
                           `$${Math.round(v.total).toLocaleString('es-AR')}`
                         )}
-                        {esAdmin && !v.anulado && POSNET_METODOS.has(v.metodoPago) && (
+                        {esAdmin && !v.anulado && usaPosnet(v.metodoPago) && (
                           <button style={S.posnetBtnInline} title={v.correccionPosnet ? `Corregido: ${v.correccionPosnet}` : 'Corregir el posnet registrado'} onClick={e => { e.stopPropagation(); setCorrigiendo(v) }}>
                             Posnet{v.correccionPosnet ? ' ✎' : ''}
                           </button>
@@ -325,7 +329,8 @@ export default function VentasDelDia({ refreshKey, usuarios = [], perfilNombre =
                             )}
                           </td>
                           <td style={S.td}>
-                            {METODO_ICONS[item.metodoPago] || '💰'} {item.metodoPago}
+                            {iconos(item.metodoPago)} {item.metodoPago}
+                            {item.pagos && i === 0 && <span style={{ display:'block', fontSize:11, color:'var(--muted)' }}>{textoPagos(item.pagos)}</span>}
                             {item.posnet && <span style={{ display:'block', fontSize:11, color: item.posnet === 'AMARILLO' ? 'var(--accent)' : 'var(--muted)' }} title={item.correccionPosnet || undefined}>Posnet {item.posnet.toLowerCase()}{item.correccionPosnet ? ' · corregido' : ''}</span>}
                           </td>
                           <td style={S.td}>{item.empleado}</td>

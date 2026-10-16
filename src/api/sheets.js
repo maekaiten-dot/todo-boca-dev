@@ -250,19 +250,20 @@ function mapRow(r) {
     ingresoNeto: parsePrecio(r[21]),
     posnet: r[34] || '',
     correccionPosnet: r[35] || '',
+    pagos: parsePagos(r[36]),
   }
 }
 
 export async function getVentasHoy() {
-  const data = await sheetsGet('DETALLE DE VENTAS!A2:AJ')
+  const data = await sheetsGet('DETALLE DE VENTAS!A2:AK')
   const rows = data.values || []
   const { fecha } = getArgentinaDate()
   return rows.filter(r => r[2]===fecha).map(mapRow)
 }
 
 export async function getHistoricoVentas() {
-  // Hasta AJ para incluir el POSNET (amarillo/blanco) y su corrección manual
-  const data = await sheetsGet('DETALLE DE VENTAS!A2:AJ')
+  // Hasta AK para incluir el POSNET (amarillo/blanco) y su corrección manual
+  const data = await sheetsGet('DETALLE DE VENTAS!A2:AK')
   const rows = data.values || []
   return rows.filter(r => r[0]).map(mapRow)
 }
@@ -276,7 +277,7 @@ export async function getVentasDesde(desde) {
   // la primera fila con fecha dentro del período (aunque haya alguna fila fuera de orden)
   const idx = fechas.findIndex(r => clave(r[0]) >= desde)
   if (idx < 0) return []
-  const data = await sheetsGet(`DETALLE DE VENTAS!A${idx + 2}:AJ`)
+  const data = await sheetsGet(`DETALLE DE VENTAS!A${idx + 2}:AK`)
   return (data.values || []).filter(r => r[0] && clave(r[2]) >= desde).map(mapRow)
 }
 
@@ -344,12 +345,12 @@ export const MOTIVOS_CORRECCION_POSNET = ['Se cobró con el otro posnet', 'El po
 export async function corregirPosnetVenta({ idVenta, posnetNuevo, motivo, detalle = '', quien = '' }) {
   if (!POSNETS.includes(posnetNuevo)) throw new Error('POSNET_INVALIDO')
   if (!motivo || (motivo === 'Otro' && !detalle.trim())) throw new Error('FALTA_MOTIVO')
-  const data = await sheetsGet('DETALLE DE VENTAS!A2:AJ')
+  const data = await sheetsGet('DETALLE DE VENTAS!A2:AK')
   const rows = data.values || []
   const filas = []
   rows.forEach((r, i) => { if (r[1] === idVenta) filas.push({ fila: i + 2, metodo: r[15] || '', posnet: r[34] || '', nota: r[35] || '' }) })
   if (filas.length === 0) throw new Error('VENTA_NO_ENCONTRADA')
-  if (!filas.some(f => POSNET_METODOS.has(f.metodo))) throw new Error('VENTA_SIN_POSNET')
+  if (!filas.some(f => usaPosnet(f.metodo))) throw new Error('VENTA_SIN_POSNET')
   const anterior = filas[0].posnet || 'SIN DATO'
   if (anterior === posnetNuevo) throw new Error('MISMO_POSNET')
   await asegurarColumna(COL_POSNET, 'POSNET')
@@ -441,7 +442,46 @@ export function posnetSugerido(brutoMenosPromos) {
 // Pagando en efectivo con dólares, euros o reales, o con Pix, no hay descuento de socio ni de efectivo.
 export const METODOS_MONEDA_EXTRANJERA = new Set(['Efectivo Dólares', 'Efectivo Euros', 'Efectivo Reales', 'Pix'])
 export function socioPermitido(metodoPago) {
-  return !METODOS_MONEDA_EXTRANJERA.has(metodoPago)
+  return metodosDe(metodoPago).every(m => !METODOS_MONEDA_EXTRANJERA.has(m))
+}
+
+// ── Pago con 2 medios ────────────────────────────────────────────────────────
+// La venta sigue siendo UNA: en METODO PAGO (P) quedan los dos medios ("Efectivo Pesos + Tarjeta de Débito")
+// y en AK (PAGOS) cuánto se cobró con cada uno: "Efectivo Pesos: 20000 | Tarjeta de Débito: 15000".
+// Los totales por medio (caja, posnet, monotributo, estadísticas) reparten cada fila en esa proporción,
+// así si se anula un artículo de la venta, se descuenta de los dos medios en proporción.
+export const SEP_METODOS = ' + '
+const COL_PAGOS = 'AK'
+export function metodosDe(metodoPago) {
+  return String(metodoPago || '').split(SEP_METODOS).map(s => s.trim()).filter(Boolean)
+}
+export function usaPosnet(metodoPago) {
+  return metodosDe(metodoPago).some(m => POSNET_METODOS.has(m))
+}
+export function parsePagos(texto) {
+  const pagos = String(texto || '').split('|').map(s => {
+    const i = s.lastIndexOf(':')
+    if (i < 0) return null
+    const monto = Number(s.slice(i + 1).replace(/[^\d.-]/g, ''))
+    const metodo = s.slice(0, i).trim()
+    return metodo && monto > 0 ? { metodo, monto } : null
+  }).filter(Boolean)
+  return pagos.length >= 2 ? pagos : null
+}
+export function textoPagos(pagos) {
+  return pagos.map(p => `${p.metodo}: ${Math.round(p.monto)}`).join(' | ')
+}
+// Lo cobrado en una fila de DETALLE DE VENTAS, repartido por medio de pago: [{ metodo, monto }]
+export function repartoPago(v) {
+  const t = v.precioTotalFinal || v.precioTotal || 0
+  const total = typeof t === 'number' ? t : parsePrecio(t)
+  if (!v.pagos || v.pagos.length < 2) return [{ metodo: v.metodoPago || '', monto: total }]
+  const suma = v.pagos.reduce((s, p) => s + p.monto, 0) || 1
+  return v.pagos.map(p => ({ metodo: p.metodo, monto: total * p.monto / suma }))
+}
+// Parte de la fila cobrada con los medios que cumplen la condición
+export function montoConMetodo(v, condicion) {
+  return repartoPago(v).filter(p => condicion(p.metodo)).reduce((s, p) => s + p.monto, 0)
 }
 
 // montoActual: total con promos y descuento de socio. Usar la MISMA función en carrito y al guardar.
@@ -454,7 +494,13 @@ export function calcularRedondeoSocio({ montoActual, metodoPago, socio }) {
   return { aplica: true, redondeo: montoActual - total, antesRedondeo: montoActual, total }
 }
 
-export async function registrarVenta({ items, metodoPago, descCarrito = 0, empleado = '', notas = '', descuentoImanes = 0, descuentoPromo = 0, socio = false, descuentoXXXLEsperado = 0, totalEsperado = null, posnet = '' }) {
+export async function registrarVenta({ items, metodoPago, pagos = null, descCarrito = 0, empleado = '', notas = '', descuentoImanes = 0, descuentoPromo = 0, socio = false, descuentoXXXLEsperado = 0, totalEsperado = null, posnet = '' }) {
+  // Pago con 2 medios: [{ metodo, monto }, { metodo }]. El segundo se lleva el resto del total.
+  const dividido = Array.isArray(pagos) && pagos.length === 2
+  if (dividido) {
+    if (!pagos[0].metodo || !pagos[1].metodo || pagos[0].metodo === pagos[1].metodo) throw new Error('PAGOS_INVALIDOS')
+    metodoPago = pagos.map(p => p.metodo).join(SEP_METODOS)
+  }
   // Moneda extranjera: el descuento de socio no corresponde (control final antes de guardar)
   if (socio && !socioPermitido(metodoPago)) throw new Error('SOCIO_NO_APLICA')
   // Promo 2x1 XXXL: se vuelve a verificar contra la planilla justo antes de guardar
@@ -472,7 +518,7 @@ export async function registrarVenta({ items, metodoPago, descCarrito = 0, emple
   }
   const conXXXL = promoXXXL?.descuento > 0
   if (socio) await asegurarColumna(COL_DTO_SOCIO, 'DTO SOCIO')
-  const posnetVenta = POSNET_METODOS.has(metodoPago) && POSNETS.includes(posnet) ? posnet : ''
+  const posnetVenta = usaPosnet(metodoPago) && POSNETS.includes(posnet) ? posnet : ''
   if (posnetVenta) await asegurarColumna(COL_POSNET, 'POSNET')
   const dt = getArgentinaDate()
   const idVenta = await generarIdVenta()
@@ -539,8 +585,18 @@ export async function registrarVenta({ items, metodoPago, descCarrito = 0, emple
     throw new Error('TOTAL_NO_COINCIDE')
   }
 
-  // 3) Filas para la planilla. Columnas extra: AE socio · AF 2x1 XXXL · AG (vacía) · AH redondeo
-  const ultimaExtra = posnetVenta ? 4 : conRedondeo ? 3 : conXXXL ? 1 : socio ? 0 : -1
+  // Pago con 2 medios: lo del primero tiene que ser más que 0 y menos que el total
+  let textoPagosVenta = ''
+  if (dividido) {
+    const total = lineas.reduce((s, l) => s + Math.round(l.precioTotalFinal), 0)
+    const m1 = Math.round(Number(pagos[0].monto) || 0)
+    if (!(m1 > 0 && m1 < total)) throw new Error('PAGOS_MONTO')
+    textoPagosVenta = textoPagos([{ metodo: pagos[0].metodo, monto: m1 }, { metodo: pagos[1].metodo, monto: total - m1 }])
+    await asegurarColumna(COL_PAGOS, 'PAGOS')
+  }
+
+  // 3) Filas para la planilla. Columnas extra: AE socio · AF 2x1 XXXL · AG (vacía) · AH redondeo · AI posnet · AJ (corrección) · AK pagos
+  const ultimaExtra = dividido ? 6 : posnetVenta ? 4 : conRedondeo ? 3 : conXXXL ? 1 : socio ? 0 : -1
   const rows = lineas.map(l => {
     const { item, idx, precioTotal, descuentoItem, dto } = l
     const idDetalle = `${idVenta}-${String(idx+1).padStart(2,'0')}`
@@ -552,6 +608,8 @@ export async function registrarVenta({ items, metodoPago, descCarrito = 0, emple
       '',
       conRedondeo ? Math.round(l.redondeoItem) : '',
       posnetVenta,
+      '',
+      textoPagosVenta,
     ]
     return [
       idDetalle, idVenta, `'${dt.fecha}`, `'${dt.hora}`, dt.mes, dt.anio,
@@ -567,7 +625,7 @@ export async function registrarVenta({ items, metodoPago, descCarrito = 0, emple
       ...extras.slice(0, ultimaExtra + 1),
     ]
   })
-  const ultimaCol = ['AD', COL_DTO_SOCIO, COL_DTO_XXXL, COL_DTO_EFECTIVO, COL_REDONDEO, COL_POSNET][ultimaExtra + 1]
+  const ultimaCol = ['AD', COL_DTO_SOCIO, COL_DTO_XXXL, COL_DTO_EFECTIVO, COL_REDONDEO, COL_POSNET, COL_CORRECCION_POSNET, COL_PAGOS][ultimaExtra + 1]
 
   await Promise.all(rows.map((row, idx) =>
     sheetsUpdate(`DETALLE DE VENTAS!A${nextRow+idx}:${ultimaCol}${nextRow+idx}`, [row])
@@ -578,7 +636,7 @@ export async function registrarVenta({ items, metodoPago, descCarrito = 0, emple
   const totalDtoAlfajores = items.reduce((s, item) => s + calcularDescuentoAlfajorItem(item, items), 0)
   await registrarLog({
     accion:'VENTA_REGISTRADA',
-    detalle:`${items.length} producto(s) · ${metodoPago}${posnetVenta?` · POSNET ${posnetVenta}`:''}${socio?' · SOCIO':''}${conRedondeo?` · REDONDEO $${Math.round(redondeoCalc.redondeo)}`:''}${conXXXL?` · 2x1 XXXL $${Math.round(promoXXXL.descuento)} (${promoXXXL.unidadesEnPromo}u)`:''}${descCarrito>0?` · DTO ${descCarrito}%`:''}${totalDtoImanes>0?` · DTO imanes $${totalDtoImanes}`:''}${descuentoPromo>0?` · DTO promos $${Math.round(descuentoPromo)}`:''}${totalDtoAlfajores>0?` · DTO alfajores $${Math.round(totalDtoAlfajores)}`:''} · Total $${Math.round(totalVenta).toLocaleString('es-AR')}`,
+    detalle:`${items.length} producto(s) · ${textoPagosVenta || metodoPago}${posnetVenta?` · POSNET ${posnetVenta}`:''}${socio?' · SOCIO':''}${conRedondeo?` · REDONDEO $${Math.round(redondeoCalc.redondeo)}`:''}${conXXXL?` · 2x1 XXXL $${Math.round(promoXXXL.descuento)} (${promoXXXL.unidadesEnPromo}u)`:''}${descCarrito>0?` · DTO ${descCarrito}%`:''}${totalDtoImanes>0?` · DTO imanes $${totalDtoImanes}`:''}${descuentoPromo>0?` · DTO promos $${Math.round(descuentoPromo)}`:''}${totalDtoAlfajores>0?` · DTO alfajores $${Math.round(totalDtoAlfajores)}`:''} · Total $${Math.round(totalVenta).toLocaleString('es-AR')}`,
     idReferencia:idVenta, empleado, resultado:'OK',
   })
   return idVenta

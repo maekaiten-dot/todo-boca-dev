@@ -1,7 +1,7 @@
 // src/pages/Estadisticas.jsx
 import { useState, useEffect, useMemo, Fragment } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LabelList } from 'recharts'
-import { getHistoricoVentas, POSNET_METODOS } from '../api/sheets.js'
+import { getHistoricoVentas, montoConMetodo, repartoPago, usaPosnet } from '../api/sheets.js'
 import CorregirPosnetModal from '../components/CorregirPosnetModal.jsx'
 import MonotributoPosnet from '../components/MonotributoPosnet.jsx'
 
@@ -38,7 +38,8 @@ function parsePrecio(v) {
   return Number(String(v).replace(/[$\s.]/g, '').replace(',', '.')) || 0
 }
 
-function agruparPorMes(ventas, filtro) {
+// monto (opcional): cuánto de la fila se suma (por ej. solo la parte con tarjeta o QR)
+function agruparPorMes(ventas, filtro, monto) {
   const mesMap = {}
   ventas
     .filter(v => !v.anulado && (filtro ? filtro(v) : true))
@@ -49,7 +50,7 @@ function agruparPorMes(ventas, filtro) {
       const key = `${partes[2]}-${String(partes[1]).padStart(2,'0')}`
       const label = `${String(partes[1]).padStart(2,'0')}/${partes[2]}`
       if (!mesMap[key]) mesMap[key] = { key, label, total: 0 }
-      mesMap[key].total += parsePrecio(v.precioTotalFinal) || parsePrecio(v.precioTotal)
+      mesMap[key].total += monto ? monto(v) : parsePrecio(v.precioTotalFinal) || parsePrecio(v.precioTotal)
     })
   return Object.values(mesMap).sort((a, b) => a.key.localeCompare(b.key))
 }
@@ -66,11 +67,12 @@ const tienePosnet = v => ['AMARILLO', 'BLANCO'].includes(String(v.posnet || '').
 const COLORES_POSNET = { amarillo: '#f5c800', blanco: '#e8eefc', sinDato: '#4b5f8a' }
 function calcularTarjetaQRPorPosnet(ventas, mesTotales) {
   const porMes = {}
-  ventas.filter(v => !v.anulado && esTarjetaOQR(v.metodoPago) && v.fecha).forEach(v => {
+  // Con 2 medios de pago solo cuenta la parte cobrada con tarjeta o QR
+  ventas.filter(v => !v.anulado && v.fecha && montoConMetodo(v, esTarjetaOQR) > 0).forEach(v => {
     const p = String(v.fecha).split('/'); if (p.length < 3) return
     const key = `${p[2]}-${String(p[1]).padStart(2, '0')}`
     const m = porMes[key] || (porMes[key] = { amarillo: 0, blanco: 0, sinDato: 0 })
-    const monto = parsePrecio(v.precioTotalFinal) || parsePrecio(v.precioTotal)
+    const monto = montoConMetodo(v, esTarjetaOQR)
     const pos = String(v.posnet || '').trim().toUpperCase()
     if (pos === 'AMARILLO') m.amarillo += monto
     else if (pos === 'BLANCO') m.blanco += monto
@@ -464,10 +466,10 @@ function armarTicketsDelDia(ventas, fechaKey) {
   const map = {}
   ventas.filter(v => v.fecha === fechaKey).forEach(v => {
     const id = v.idVenta || v.idDetalle
-    if (!map[id]) map[id] = { id, hora: v.hora || '', empleado: v.empleado || '', metodoPago: v.metodoPago || '', posnet: v.posnet || '', correccionPosnet: v.correccionPosnet || '', notas: v.notas || '', anulado: v.anulado, items: [], total: 0 }
+    if (!map[id]) map[id] = { id, hora: v.hora || '', empleado: v.empleado || '', metodoPago: v.metodoPago || '', posnet: v.posnet || '', correccionPosnet: v.correccionPosnet || '', notas: v.notas || '', pagos: v.pagos || null, anulado: v.anulado, items: [], total: 0 }
     const t = map[id]
     const precio = parsePrecio(v.precioTotalFinal) || parsePrecio(v.precioTotal)
-    t.items.push({ nombre: v.nombre || v.articulo || '', cantidad: v.cantidad || 0, precio })
+    t.items.push({ nombre: v.nombre || v.articulo || '', cantidad: v.cantidad || 0, precio, reparto: repartoPago(v) })
     t.total += precio
     if (!v.anulado) t.anulado = false
   })
@@ -486,7 +488,8 @@ function DetalleDia({ dia, ventas, onCerrar, esAdmin = false, usuarios = [], per
   const validos = tickets.filter(t => !t.anulado)
   const total = validos.reduce((s, t) => s + t.total, 0)
   const porMetodo = {}
-  validos.forEach(t => { porMetodo[t.metodoPago || 'Sin método'] = (porMetodo[t.metodoPago || 'Sin método'] || 0) + t.total })
+  // Con 2 medios de pago, cada artículo se reparte entre los dos en la proporción cobrada
+  validos.forEach(t => t.items.forEach(i => i.reparto.forEach(p => { const k = p.metodo || 'Sin método'; porMetodo[k] = (porMetodo[k] || 0) + p.monto })))
   const [d, m, a] = dia.fechaKey.split('/').map(Number)
   const nombreDia = DIAS_SEMANA[new Date(a, m - 1, d).getDay()]
 
@@ -522,10 +525,10 @@ function DetalleDia({ dia, ventas, onCerrar, esAdmin = false, usuarios = [], per
                     {t.hora.slice(0, 5)} · {t.empleado}
                   </div>
                   <div style={D.ticketMetodo}>
-                    {t.metodoPago}
+                    {t.pagos ? t.pagos.map(p => `${p.metodo} ${fmt$(p.monto)}`).join(' + ') : t.metodoPago}
                     {t.posnet && <span style={{ ...D.posnetDot, background: t.posnet.toUpperCase() === 'AMARILLO' ? '#f5c800' : '#f0f4ff' }} title={`Posnet ${t.posnet.toLowerCase()}`} />}
                     {t.correccionPosnet && <span style={{ color: 'var(--muted)' }} title={t.correccionPosnet}>corregido</span>}
-                    {esAdmin && !t.anulado && POSNET_METODOS.has(t.metodoPago) && (
+                    {esAdmin && !t.anulado && usaPosnet(t.metodoPago) && (
                       <button style={D.posnetBtn} onClick={() => setCorrigiendo({ idVenta: t.id, hora: t.hora.slice(0, 5), total: t.total, posnet: t.posnet })}>
                         Corregir posnet
                       </button>
@@ -667,7 +670,7 @@ export default function Estadisticas({ esAdmin = false, usuarios = [], perfilNom
       const mejor = dias.reduce((a, b) => b.total > a.total ? b : a, dias[0])
 
       const mesTotales = agruparPorMes(ventas)
-      const mesTarjeta = agruparPorMes(ventas, v => esTarjetaOQR(v.metodoPago))
+      const mesTarjeta = agruparPorMes(ventas, v => montoConMetodo(v, esTarjetaOQR) > 0, v => montoConMetodo(v, esTarjetaOQR))
 
       setVentasTodas(ventas)
       setDatosGrafico(dias)

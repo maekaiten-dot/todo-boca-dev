@@ -4,7 +4,7 @@
 // También proyecta cómo va a llegar a la próxima recategorización (febrero y agosto).
 import { useState, useEffect, useMemo } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
-import { getMonotributoManual } from '../api/sheets.js'
+import { getMonotributoManual, montoConMetodo } from '../api/sheets.js'
 
 // Topes anuales de ingresos brutos (actualizar cuando ARCA los cambie)
 export const TOPES_MONOTRIBUTO = [
@@ -39,11 +39,12 @@ export function categoriaDe(monto) {
 function calcularMensual(ventas, manual) {
   const meses = {}
   const tickets = {}
-  ventas.filter(v => !v.anulado && esTarjetaOQR(v.metodoPago) && v.fecha).forEach(v => {
+  // Con 2 medios de pago solo cuenta la parte cobrada con tarjeta o QR
+  ventas.filter(v => !v.anulado && v.fecha && montoConMetodo(v, esTarjetaOQR) > 0).forEach(v => {
     const [d, m, a] = String(v.fecha).split('/').map(Number); if (!d || !m || !a) return
     const k = mesKey(a, m)
     const mm = meses[k] || (meses[k] = { amarillo: 0, blanco: 0, estAmarillo: 0, estBlanco: 0 })
-    const monto = parsePrecio(v.precioTotalFinal) || parsePrecio(v.precioTotal)
+    const monto = montoConMetodo(v, esTarjetaOQR)
     const pos = String(v.posnet || '').trim().toUpperCase()
     if (pos === 'AMARILLO') mm.amarillo += monto
     else if (pos === 'BLANCO') mm.blanco += monto

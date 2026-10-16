@@ -1,6 +1,6 @@
 // src/pages/NuevaVenta.jsx
 import { useState, useEffect } from 'react'
-import { registrarVenta, registrarLog, REMERAS_XXXL, calcularPromoXXXL, getPromoXXXLEstado, POSNET_METODOS, posnetSugerido, socioPermitido, calcularRedondeoSocio } from '../api/sheets.js'
+import { registrarVenta, registrarLog, REMERAS_XXXL, calcularPromoXXXL, getPromoXXXLEstado, POSNET_METODOS, posnetSugerido, socioPermitido, calcularRedondeoSocio, usaPosnet as metodoUsaPosnet, SEP_METODOS } from '../api/sheets.js'
 import BarcodeScanner from '../components/BarcodeScanner.jsx'
 
 const METODOS_PAGO = [
@@ -211,10 +211,16 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
   const [carrito, setCarrito] = useState([])
   const [busqueda, setBusqueda] = useState('')
   const [metodoPago, setMetodoPago] = useState('Efectivo Pesos')
+  // Cobro con 2 medios: el primero es metodoPago (con el monto que se cobró con él) y el segundo se lleva el resto
+  const [dividido, setDividido] = useState(false)
+  const [metodo2, setMetodo2] = useState('')
+  const [monto1, setMonto1] = useState('')
+  const [montoDivisa2, setMontoDivisa2] = useState('')
+  const metodoCompleto = dividido && metodo2 ? `${metodoPago}${SEP_METODOS}${metodo2}` : metodoPago
   const [empleado, setEmpleado] = useState('')
   const [socio, setSocio] = useState(false)
   // El descuento manual por porcentaje se sacó: el único descuento de carrito es el de socio
-  const descAplicado = socio && socioPermitido(metodoPago) ? DTO_SOCIO : 0
+  const descAplicado = socio && socioPermitido(metodoCompleto) ? DTO_SOCIO : 0
   const [usuarios, setUsuarios] = useState([])
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState(null)
@@ -239,6 +245,16 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
     'Pix':              { code: 'BRL', simbolo: 'R$',  label: 'MONTO EN REALES (PIX)', prefijo: 'PIX ' },
   }
   const divisaActual = DIVISA_INFO[metodoPago] || null
+  const divisa2 = dividido ? DIVISA_INFO[metodo2] || null : null
+  const labelMetodo = v => METODOS_PAGO.find(m => m.valor === v)?.label || v
+  function elegirMetodo1(v) {
+    setMetodoPago(v)
+    if (v === metodo2) { setMetodo2(''); setMontoDivisa2('') }
+  }
+  function cambiarDividido(on) {
+    setDividido(on); setMetodo2(''); setMonto1(''); setMontoDivisa2('')
+    registrarLog({ accion: on ? 'PAGO_DIVIDIDO_ACTIVADO' : 'PAGO_DIVIDIDO_DESACTIVADO', detalle: '', empleado, resultado: 'OK' })
+  }
 
   useEffect(() => {
     if (usuariosProp && usuariosProp.length > 0) {
@@ -313,8 +329,14 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
 
   const totales = calcularTotalesConDescuento(carrito, descAplicado, promoXXXLEstado?.disponibles || 0)
   // Socio pagando en Efectivo Pesos: el total se redondea hacia abajo a $500
-  const redondeoCalc = calcularRedondeoSocio({ montoActual: totales.totalNeto, metodoPago, socio: descAplicado > 0 })
+  const redondeoCalc = calcularRedondeoSocio({ montoActual: totales.totalNeto, metodoPago: metodoCompleto, socio: descAplicado > 0 })
   const totalFinal = redondeoCalc.total
+  // Pago con 2 medios: monto del primero (en pesos, sin decimales) y el resto para el segundo
+  const monto1Num = Number(String(monto1).replace(/[^\d]/g, '')) || 0
+  const resto2 = Math.round(totalFinal) - monto1Num
+  const errorDividido = !dividido ? '' : !metodo2 ? 'Elegí el segundo medio de pago'
+    : !monto1Num ? `Poné cuánto se cobró con ${labelMetodo(metodoPago)}`
+    : resto2 <= 0 ? 'El monto tiene que ser menor que el total' : ''
   // Aclaración en el renglón de socio cuando hay remeras del 2x1 (que quedan afuera)
   const notaBaseDescuentos = totales.descuentoXXXL > 0 ? (
     <span style={{display:'block',fontSize:12,color:'var(--muted)'}}>
@@ -324,12 +346,12 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
 
   // Posnet: se define solo según el bruto MENOS las promos (imanes, alfajores, 2x1 XXXL),
   // antes del descuento de socio: menos de $50.000 → amarillo, $50.000 o más → blanco
-  const usaPosnet = POSNET_METODOS.has(metodoPago)
+  const usaPosnet = metodoUsaPosnet(metodoCompleto)
   const posnetAuto = posnetSugerido(totales.subtotalConDesc)
   const posnet = usaPosnet ? posnetAuto : ''
 
   // Socio: no corresponde pagando con dólares, euros, reales o Pix (se apaga solo si cambian el método)
-  const socioHabilitado = socioPermitido(metodoPago)
+  const socioHabilitado = socioPermitido(metodoCompleto)
   useEffect(() => {
     if (socio && !socioHabilitado) setSocio(false)
   }, [socio, socioHabilitado])
@@ -343,12 +365,15 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
 
   async function cerrarVenta() {
     if (carrito.length === 0) return
+    if (errorDividido) { showToast(errorDividido, 'error'); return }
     setSaving(true)
     try {
-      const notas = divisaActual && montoDivisa ? `${divisaActual.prefijo || ''}${divisaActual.code} ${montoDivisa}` : ''
+      const notaDivisa = (d, monto) => d && monto ? `${d.prefijo || ''}${d.code} ${monto}` : ''
+      const notas = [notaDivisa(divisaActual, montoDivisa), notaDivisa(divisa2, montoDivisa2)].filter(Boolean).join(' · ')
       const idVenta = await registrarVenta({
         items: carrito,
         metodoPago,
+        pagos: dividido ? [{ metodo: metodoPago, monto: monto1Num }, { metodo: metodo2 }] : null,
         descCarrito: descAplicado,
         socio,
         descuentoXXXLEsperado: totales.descuentoXXXL,
@@ -363,6 +388,7 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
       setCarrito([])
       setSocio(false)
       setMontoDivisa('')
+      setDividido(false); setMetodo2(''); setMonto1(''); setMontoDivisa2('')
       if (totales.promoXXXL.totalMarcadas > 0) actualizarPromoXXXL()
       onVentaRegistrada?.()
     } catch (e) {
@@ -375,6 +401,11 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
       }
       if (e?.message === 'TOTAL_NO_COINCIDE') {
         showToast('El total cambió. Revisalo y cerrá de nuevo.', 'error')
+        setSaving(false)
+        return
+      }
+      if (e?.message === 'PAGOS_MONTO' || e?.message === 'PAGOS_INVALIDOS') {
+        showToast('Revisá los montos de los 2 medios de pago y cerrá de nuevo.', 'error')
         setSaving(false)
         return
       }
@@ -592,7 +623,7 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
           <div style={S.fieldLabel}>MÉTODO DE PAGO</div>
           <div style={S.metodosGrid}>
             {METODOS_PAGO.map(m => (
-              <button key={m.valor} style={{...S.metodoBtn,...(metodoPago===m.valor?S.metodoBtnActive:{})}} onClick={()=>setMetodoPago(m.valor)}>
+              <button key={m.valor} style={{...S.metodoBtn,...(metodoPago===m.valor?S.metodoBtnActive:{})}} onClick={()=>elegirMetodo1(m.valor)}>
                 <span style={S.metodoBtnIcon}>{m.icon}</span>
                 <span style={S.metodoBtnLabel}>{m.label}</span>
               </button>
@@ -605,6 +636,47 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
               <div style={S.divisaInputWrap}>
                 <span style={S.divisaSimbolo}>{divisaActual.simbolo}</span>
                 <input type="text" inputMode="decimal" placeholder="0.00" value={montoDivisa} onChange={e=>setMontoDivisa(e.target.value)} style={S.divisaInput} />
+              </div>
+            </>
+          )}
+
+          <button style={{...S.dividirBtn, ...(dividido ? S.dividirBtnActivo : {})}} onClick={() => cambiarDividido(!dividido)} aria-pressed={dividido}>
+            {dividido ? '✕ Cobrar con un solo medio' : '➗ Cobrar con 2 medios de pago'}
+          </button>
+
+          {dividido && (
+            <>
+              <div style={S.fieldLabel}>COBRADO CON {labelMetodo(metodoPago).toUpperCase()} (EN PESOS)</div>
+              <div style={S.divisaInputWrap}>
+                <span style={S.divisaSimbolo}>$</span>
+                <input type="text" inputMode="numeric" placeholder="0" aria-label="Monto del primer medio de pago"
+                  value={monto1} onChange={e => { const d = e.target.value.replace(/[^\d]/g, ''); setMonto1(d ? Number(d).toLocaleString('es-AR') : '') }} style={S.divisaInput} />
+              </div>
+              <div style={S.fieldLabel}>SEGUNDO MEDIO DE PAGO</div>
+              <div style={S.metodosGrid}>
+                {METODOS_PAGO.filter(m => m.valor !== metodoPago).map(m => (
+                  <button key={m.valor} style={{...S.metodoBtn,...(metodo2===m.valor?S.metodoBtnActive:{})}} onClick={()=>{ setMetodo2(m.valor); if (!DIVISA_INFO[m.valor]) setMontoDivisa2('') }} aria-label={`Segundo medio: ${m.label}`}>
+                    <span style={S.metodoBtnIcon}>{m.icon}</span>
+                    <span style={S.metodoBtnLabel}>{m.label}</span>
+                  </button>
+                ))}
+              </div>
+              {divisa2 && (
+                <>
+                  <div style={S.fieldLabel}>{divisa2.label}</div>
+                  <div style={S.divisaInputWrap}>
+                    <span style={S.divisaSimbolo}>{divisa2.simbolo}</span>
+                    <input type="text" inputMode="decimal" placeholder="0.00" value={montoDivisa2} onChange={e=>setMontoDivisa2(e.target.value)} style={S.divisaInput} aria-label="Monto en divisa del segundo medio" />
+                  </div>
+                </>
+              )}
+              <div style={S.resumenDividido}>
+                {errorDividido && monto1Num > 0 && resto2 <= 0 ? <span style={{color:'#ef4444'}}>{errorDividido}</span> : (
+                  <>
+                    <span>{labelMetodo(metodoPago)}: <b>${monto1Num.toLocaleString('es-AR')}</b></span>
+                    <span>{metodo2 ? labelMetodo(metodo2) : 'Segundo medio'}: <b>${Math.max(0, resto2).toLocaleString('es-AR')}</b></span>
+                  </>
+                )}
               </div>
             </>
           )}
@@ -642,7 +714,7 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
 
           <div style={S.divider}/>
 
-          <button style={{...S.cerrarBtn,opacity:(saving||carrito.length===0)?0.5:1}} onClick={cerrarVenta} disabled={saving||carrito.length===0}>
+          <button style={{...S.cerrarBtn,opacity:(saving||carrito.length===0||errorDividido)?0.5:1}} onClick={cerrarVenta} disabled={saving||carrito.length===0}>
             {saving?'Guardando...':`CERRAR VENTA · $${Math.round(totalFinal).toLocaleString('es-AR')}`}
           </button>
           <button style={{...S.reiniciarBtn,opacity:carrito.length===0?0.4:1}} onClick={()=>setConfirmarReinicio(true)} disabled={carrito.length===0}>
@@ -719,6 +791,9 @@ const S = {
   metodoBtnIcon: { fontSize:20 },
   metodoBtnLabel: { fontFamily:'Barlow Condensed,sans-serif', fontWeight:700, fontSize:15, letterSpacing:0.5, textAlign:'center', lineHeight:1.2 },
   empleadoBtn: { padding:'8px 6px', background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, cursor:'pointer', color:'var(--muted)', fontFamily:'Barlow Condensed,sans-serif', fontWeight:700, fontSize:15, letterSpacing:0.5, textAlign:'center' },
+  dividirBtn: { width:'100%', marginTop:6, padding:'9px 8px', background:'none', border:'1.5px dashed var(--border)', borderRadius:8, cursor:'pointer', color:'var(--muted)', fontFamily:'Barlow Condensed,sans-serif', fontWeight:700, fontSize:15, letterSpacing:0.5 },
+  dividirBtnActivo: { borderStyle:'solid', color:'var(--text)' },
+  resumenDividido: { display:'flex', justifyContent:'space-between', gap:8, flexWrap:'wrap', marginTop:6, padding:'8px 10px', background:'var(--surface2)', borderRadius:8, fontFamily:'Barlow,sans-serif', fontSize:14, color:'var(--muted)' },
   divisaInputWrap: { display:'flex', alignItems:'center', background:'var(--surface2)', border:'1.5px solid var(--accent)', borderRadius:8, marginBottom:2 },
   divisaSimbolo: { padding:'0 10px', fontFamily:'Barlow Condensed,sans-serif', fontWeight:700, fontSize:18, color:'var(--accent)', borderRight:'1.5px solid var(--border)' },
   divisaInput: { flex:1, background:'none', border:'none', outline:'none', color:'var(--text)', fontFamily:'Barlow Condensed,sans-serif', fontWeight:700, fontSize:20, padding:'10px 12px' },

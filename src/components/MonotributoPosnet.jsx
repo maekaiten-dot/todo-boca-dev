@@ -2,6 +2,9 @@
 // Contador de monotributo por posnet (cada posnet es un titular distinto).
 // Para cada mes suma los ingresos de los últimos 12 meses de cada posnet y los compara con los topes de ARCA.
 // También proyecta cómo va a llegar a la próxima recategorización (febrero y agosto).
+// Exclusión (Ley 24.977 art. 20 a): se queda afuera del régimen apenas los ingresos de los últimos 12 meses
+// corridos —incluida cada venta nueva— superan el tope de la K. Eso se controla todo el tiempo, no solo
+// en la recategorización: por eso el límite de cada mes es el tope K menos los 11 meses anteriores.
 import { useState, useEffect, useMemo } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
 import { getMonotributoManual, montoConMetodo } from '../api/sheets.js'
@@ -101,11 +104,21 @@ export default function MonotributoPosnet({ ventas = [] }) {
         else if (k === actual) proy += val(k, id) + estimarMes(k) * (1 - fraccionMes) // lo vendido + lo que falta del mes
         else proy += estimarMes(k)
       }
-      // Cuánto se puede facturar por mes hasta el corte sin pasar K
-      let fijo = 0, futuros = 0
-      for (let i = 0; i < 12; i++) { const k = sumarMes(recat.corte, -i); if (k < actual) fijo += val(k, id); else futuros++ }
-      const margenMensual = futuros > 0 ? (TOPE_K - fijo - val(actual, id)) / futuros : null
-      res[id] = { ult12, ritmo, proy, catActual: categoriaDe(ult12), catProy: categoriaDe(proy), margenMensual }
+      // Límite del mes en curso: tope K menos lo facturado en los 11 meses anteriores (12 meses corridos)
+      let ant11 = 0; for (let i = 1; i <= 11; i++) ant11 += val(sumarMes(actual, -i), id)
+      const maxEsteMes = TOPE_K - ant11
+      const vendidoEsteMes = val(actual, id)
+      const quedaEsteMes = maxEsteMes - vendidoEsteMes
+      // 12 meses corridos de acá a un año, al ritmo estimado: el pico y el primer mes que pasaría la K
+      const estimado = k => k < actual ? val(k, id) : k === actual ? val(k, id) + estimarMes(k) * (1 - fraccionMes) : estimarMes(k)
+      let pico = { monto: 0, k: actual }, primerExceso = null
+      for (let j = 0; j < 12; j++) {
+        const fin = sumarMes(actual, j)
+        let s = 0; for (let i = 0; i < 12; i++) s += estimado(sumarMes(fin, -i))
+        if (s > pico.monto) pico = { monto: s, k: fin }
+        if (!primerExceso && s > TOPE_K) primerExceso = fin
+      }
+      res[id] = { ult12, ritmo, proy, catActual: categoriaDe(ult12), catProy: categoriaDe(proy), maxEsteMes, vendidoEsteMes, quedaEsteMes, pico, primerExceso }
     })
     // Serie: suma de 12 meses para cada mes de los últimos 18
     const serie = []
@@ -123,14 +136,16 @@ export default function MonotributoPosnet({ ventas = [] }) {
     <div style={S.card}>
       <div style={S.titulo}>Monotributo por posnet</div>
       <div style={S.hint}>
-        Ingresos de los últimos 12 meses de cada titular, comparados con los topes de ARCA. Próxima recategorización: <strong style={{ color: 'var(--text)' }}>{datos.recat.nombre}</strong> (se miran los 12 meses cerrados hasta fin de {MESES_LARGOS[Number(datos.recat.corte.split('-')[1]) - 1]} {datos.recat.corte.split('-')[0]}).
+        Ingresos de los últimos 12 meses corridos de cada titular, comparados con los topes de ARCA. La exclusión se controla en cada venta con los 12 meses corridos; la recategorización mira los 12 meses cerrados. Próxima recategorización: <strong style={{ color: 'var(--text)' }}>{datos.recat.nombre}</strong> (se miran los 12 meses cerrados hasta fin de {MESES_LARGOS[Number(datos.recat.corte.split('-')[1]) - 1]} {datos.recat.corte.split('-')[0]}).
       </div>
 
       <div style={S.grid}>
         {POSNETS.map(p => {
           const r = datos.res[p.id]
-          const pasaK = r.ult12 > TOPE_K, pasaKProy = r.proy > TOPE_K
+          const pasaK = r.ult12 > TOPE_K, pasaKProy = !!r.primerExceso
           const alerta = pasaK || pasaKProy
+          const cerca = !alerta && r.pico.monto > TOPE_K * 0.9
+          const mesActualNombre = MESES_LARGOS[Number(datos.actual.split('-')[1]) - 1]
           return (
             <div key={p.id} style={{ ...S.posCard, ...(alerta ? S.posCardAlerta : {}) }}>
               <div style={S.posHead}><span style={{ ...S.rect, background: p.color }} />{p.nombre}</div>
@@ -144,16 +159,18 @@ export default function MonotributoPosnet({ ventas = [] }) {
               <div style={S.sep} />
               <div style={S.fila}><span>Ritmo (prom. 3 meses)</span><strong>{fmtM(r.ritmo)}/mes</strong></div>
               <div style={S.fila}><span title="Meses que faltan estimados con el mismo mes del año pasado, ajustado por la tendencia de los últimos 3 meses">Proyección a {datos.recat.nombre}</span><strong style={{ color: pasaKProy ? '#ef4444' : 'var(--text)' }}>{fmtM(r.proy)} · {r.catProy}</strong></div>
-              {r.margenMensual != null && (
-                <div style={S.fila}><span>Máximo por mes para no pasar K</span><strong style={{ color: r.margenMensual < r.ritmo ? '#ef4444' : '#22c55e' }}>{r.margenMensual <= 0 ? 'ya se pasó' : fmtM(r.margenMensual)}</strong></div>
-              )}
+              <div style={S.sep} />
+              <div style={S.fila}><span title="Tope de la K menos lo facturado en los 11 meses anteriores: la exclusión se controla con los 12 meses corridos, en cada venta">Máximo en {mesActualNombre} (12 meses corridos)</span><strong>{r.maxEsteMes <= 0 ? 'ya se pasó' : fmtM(r.maxEsteMes)}</strong></div>
+              <div style={S.fila}><span>Vendido en {mesActualNombre} · queda</span><strong style={{ color: r.quedaEsteMes <= 0 ? '#ef4444' : r.quedaEsteMes < r.ritmo ? '#f59e0b' : '#22c55e' }}>{fmtM(r.vendidoEsteMes)} · {r.quedaEsteMes <= 0 ? 'nada' : fmtM(r.quedaEsteMes)}</strong></div>
+              <div style={S.fila}><span title="Tope de la K dividido 12: vendiendo esto por mes nunca se pasa">Promedio sostenible</span><strong>{fmtM(TOPE_K / 12)}/mes</strong></div>
+              <div style={S.fila}><span title="La suma de 12 meses corridos más alta de acá a un año, si se sigue vendiendo como se estima">Pico de 12 meses (próximo año)</span><strong style={{ color: r.pico.monto > TOPE_K ? '#ef4444' : cerca ? '#f59e0b' : 'var(--text)' }}>{fmtM(r.pico.monto)} · {mesLabel(r.pico.k)}</strong></div>
               {alerta && (
                 <div style={S.alerta}>
-                  {pasaK ? `Ya supera el tope de la categoría K.` : `A este ritmo supera la categoría K en ${datos.recat.nombre}.`} Conviene derivar ventas al otro posnet o a efectivo.
+                  {pasaK ? `Ya supera el tope de la categoría K en los últimos 12 meses.` : `A este ritmo, los 12 meses corridos pasarían la K en ${MESES_LARGOS[Number(r.primerExceso.split('-')[1]) - 1]} ${r.primerExceso.split('-')[0]}.`} Conviene derivar ventas al otro posnet o a efectivo.
                 </div>
               )}
-              {!alerta && r.margenMensual != null && r.margenMensual < r.ritmo * 1.1 && (
-                <div style={{ ...S.alerta, ...S.aviso }}>Está cerca del límite: el ritmo actual deja poco margen hasta {datos.recat.nombre}.</div>
+              {cerca && (
+                <div style={{ ...S.alerta, ...S.aviso }}>Está cerca del límite: a este ritmo los 12 meses corridos llegan al {Math.round(r.pico.monto / TOPE_K * 100)}% del tope K en {mesLabel(r.pico.k)}.</div>
               )}
             </div>
           )

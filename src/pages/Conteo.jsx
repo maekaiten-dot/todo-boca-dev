@@ -11,6 +11,8 @@ import {
 } from '../api/sheets.js'
 
 const fmt$ = n => (n < 0 ? '−$' : '$') + Math.abs(Math.round(n)).toLocaleString('es-AR')
+// Precio de venta actual, al lado del nombre: ayuda a distinguir artículos parecidos
+const Precio = ({ valor }) => valor > 0 ? <span style={S.precio}>{fmt$(valor)}</span> : null
 const normalizar = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
 const POR_PAGINA = 40
 
@@ -60,7 +62,7 @@ function ItemConteo({ art, info, clase, onGuardar, guardando, recuento, resultad
     <div style={{ ...S.item, ...(recuento != null ? S.itemRecuento : {}), ...(hecho ? S.itemHecho : {}) }}>
       <div style={S.itemFoto}>{art.foto ? <img src={art.foto} alt="" style={S.img} loading="lazy" /> : <span style={{ fontSize: 22 }}>📦</span>}</div>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={S.itemNombre}>{art.nombre}</div>
+        <div style={S.itemNombre}>{art.nombre} <Precio valor={art.precioUnitario} /></div>
         <div style={S.itemMeta}>
           {art.id}{clase ? ` · clase ${clase}` : ''} · último conteo: {haceDias(info?.ultimoConteoMs)}
         </div>
@@ -176,6 +178,7 @@ export default function Conteo({ articulos = [], usuarios = [], perfilNombre = '
 
   const estado = datos?.estado || {}
   const clases = datos?.clases || {}
+  const precioDe = useMemo(() => Object.fromEntries(articulos.map(a => [a.id, a.precioUnitario])), [articulos])
   const listaHoy = useMemo(() => datos ? armarListaConteoDelDia(articulos, estado, clases, Date.now(), ARTICULOS_POR_DIA, tandasExtra) : [], [datos, articulos, tandasExtra])
   const quedanParaOtraTanda = listaHoy.length < articulos.length
   const sinContar = useMemo(() => articulos.filter(a => !estado[a.id]?.contado && !resultados[a.id]?.guardado).sort((x, y) => (!x.nombre - !y.nombre) || x.nombre.localeCompare(y.nombre)), [datos, articulos, resultados])
@@ -370,7 +373,7 @@ export default function Conteo({ articulos = [], usuarios = [], perfilNombre = '
                 {bajaArt ? (
                   <div style={S.bajaSel}>
                     {fotoArt(bajaArt, 64)}
-                    <span style={{ minWidth: 0, flex: 1 }}>{bajaArt.nombre} <span style={{ color: 'var(--muted)' }}>· {bajaArt.id}</span></span>
+                    <span style={{ minWidth: 0, flex: 1 }}>{bajaArt.nombre} <Precio valor={bajaArt.precioUnitario} /> <span style={{ color: 'var(--muted)' }}>· {bajaArt.id}</span></span>
                     <button style={S.linkBtn} onClick={() => setBajaArt(null)}>Cambiar</button>
                   </div>
                 ) : (
@@ -392,7 +395,7 @@ export default function Conteo({ articulos = [], usuarios = [], perfilNombre = '
                           <button key={a.id} style={S.resBtn} onClick={() => setBajaArt(a)}>
                             {fotoArt(a, 56)}
                             <span style={{ minWidth: 0 }}>
-                              <span style={S.resNombre}>{a.nombre}</span>
+                              <span style={S.resNombre}>{a.nombre} <Precio valor={a.precioUnitario} /></span>
                               <span style={S.resCodigo}>{a.id}</span>
                             </span>
                           </button>
@@ -434,7 +437,7 @@ export default function Conteo({ articulos = [], usuarios = [], perfilNombre = '
                       {lista.map(av => (
                         <div key={av.id} style={{ ...S.difRow, alignItems: 'flex-start', ...(av.estado === 'RESUELTO' ? { opacity: 0.55 } : {}) }}>
                           <div style={{ minWidth: 0, flex: 1 }}>
-                            <div style={S.itemNombre}>{av.estado === 'RESUELTO' && <span style={S.badgeResuelto}>RESUELTO</span>}{av.nombre} <span style={{ ...S.itemMeta, display: 'inline' }}>· {av.articuloId}</span></div>
+                            <div style={S.itemNombre}>{av.estado === 'RESUELTO' && <span style={S.badgeResuelto}>RESUELTO</span>}{av.nombre} <Precio valor={precioDe[av.articuloId]} /> <span style={{ ...S.itemMeta, display: 'inline' }}>· {av.articuloId}</span></div>
                             <div style={{ ...S.itemMeta, color: 'var(--accent)', fontWeight: 600 }}>{av.tipo}</div>
                             {av.detalle && <div style={{ fontFamily: 'Barlow, sans-serif', fontSize: 14, color: 'var(--text)', marginTop: 2 }}>{av.detalle}</div>}
                             <div style={S.itemMeta}>{av.fecha} {String(av.hora).slice(0, 5)} · {av.empleado}</div>
@@ -473,7 +476,7 @@ export default function Conteo({ articulos = [], usuarios = [], perfilNombre = '
                     {difs.map(m => (
                       <div key={m.id} style={{ ...S.difRow, ...(m.anulado ? { opacity: 0.45 } : {}) }}>
                         <div style={{ minWidth: 0, flex: 1 }}>
-                          <div style={S.itemNombre}>{m.anulado && <span style={S.badgeAnulado}>ANULADO</span>}{m.nombre}</div>
+                          <div style={S.itemNombre}>{m.anulado && <span style={S.badgeAnulado}>ANULADO</span>}{m.nombre} <Precio valor={precioDe[m.articuloId]} /></div>
                           <div style={S.itemMeta}>
                             {m.fecha} {String(m.hora).slice(0, 5)} · {m.empleado} · {m.tipo === 'BAJA' ? `Baja: ${m.motivo}${m.notas ? ` (${m.notas})` : ''}` : `Esperado ${m.esperado} → contado ${m.cantidad}${m.notas ? ` · ${m.notas}` : ''}`}
                           </div>
@@ -522,6 +525,7 @@ const S = {
   itemFoto: { width: 52, height: 52, borderRadius: 8, background: 'var(--surface2)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 },
   img: { width: '100%', height: '100%', objectFit: 'cover' },
   itemNombre: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 17, color: 'var(--text)', lineHeight: 1.2 },
+  precio: { display: 'inline-block', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 15, color: 'var(--accent)', background: 'rgba(245,200,0,0.1)', borderRadius: 6, padding: '0 6px', marginLeft: 4, whiteSpace: 'nowrap', verticalAlign: 'baseline' },
   itemMeta: { fontFamily: 'Barlow, sans-serif', fontSize: 12, color: 'var(--muted)', marginTop: 2 },
   recontarBtn: { marginLeft: 10, background: 'none', border: 'none', color: 'var(--muted)', textDecoration: 'underline', fontFamily: 'Barlow, sans-serif', fontSize: 12, cursor: 'pointer', padding: 0 },
   otraTanda: { display: 'flex', flexDirection: 'column', gap: 8, background: 'rgba(245,200,0,0.07)', border: '1.5px dashed var(--accent)', borderRadius: 12, padding: 14 },

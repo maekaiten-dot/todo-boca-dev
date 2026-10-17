@@ -1,5 +1,5 @@
 // src/App.jsx
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import NuevaVenta from './pages/NuevaVenta.jsx'
 import VentasDelDia from './pages/VentasDelDia.jsx'
 import LogVentas from './pages/LogVentas.jsx'
@@ -16,7 +16,16 @@ import Fichadas from './pages/Fichadas.jsx'
 import Asistencia from './pages/Asistencia.jsx'
 import Administracion from './pages/Administracion.jsx'
 import FicharTablet from './components/FicharTablet.jsx'
-import { getArticulos, getUsuarios, registrarLog, calcularStockTodos } from './api/sheets.js'
+import AvisoPrecios from './components/AvisoPrecios.jsx'
+import { getArticulos, getUsuarios, registrarLog, calcularStockTodos, leerPreciosVistos, guardarPreciosVistos } from './api/sheets.js'
+
+// Aviso de cambios de precio: cada dispositivo guarda los precios que ya vio y la app vuelve a leer
+// ARTICULOS cada INTERVALO_PRECIOS (y al volver a la pestaña). Si algún precio cambió, se actualiza
+// sin recargar la página y se avisa: en la tablet (perfiles Caja) con el recuadro por encima de todo,
+// hasta tocar "Entendido"; a los Admin, con un aviso chico arriba que abre el detalle si lo tocan.
+// Los cambios guardados desde este mismo dispositivo se marcan como vistos (no avisan a quien los hizo).
+const INTERVALO_PRECIOS = 90 * 1000
+const firmaArticulos = arts => arts.map(a => `${a.id}|${a.precioUnitario}|${a.costoUnitario}|${a.nombre}|${a.foto}`).join('\n')
 
 // Barra inferior: solapas de uso diario. El resto de las solapas de Admin va en el menú "Más".
 const TABS_POR_TIPO = {
@@ -157,7 +166,55 @@ export default function App() {
     catch { return null }
   })
 
+  const [cambiosPrecio, setCambiosPrecio] = useState(null)
+  const [verAvisoPrecios, setVerAvisoPrecios] = useState(false) // Admin: abrió el detalle desde el aviso chico
+  const perfilRef = useRef(perfilGuardado)
+  perfilRef.current = perfilGuardado
+  const articulosRef = useRef([])
+
   useEffect(() => { cargarArticulos(); cargarUsuarios() }, [])
+
+  // Compara los precios con los que ya vio este dispositivo
+  function detectarCambiosPrecio(arts) {
+    const actuales = Object.fromEntries(arts.map(a => [a.id, a.precioUnitario]))
+    const vistos = leerPreciosVistos()
+    if (!vistos) { guardarPreciosVistos(actuales); return }
+    const nuevos = arts.filter(a => vistos[a.id] != null && a.precioUnitario > 0 && vistos[a.id] !== a.precioUnitario)
+      .map(a => ({ id: a.id, nombre: a.nombre, foto: a.foto, antes: vistos[a.id], ahora: a.precioUnitario }))
+    if (nuevos.length === 0) {
+      // Sin cambios: solo se suman los artículos nuevos a la referencia
+      if (arts.some(a => vistos[a.id] == null)) guardarPreciosVistos({ ...vistos, ...actuales })
+      setCambiosPrecio(null)
+      return
+    }
+    setCambiosPrecio(nuevos)
+  }
+
+  function entendidoPrecios() {
+    const cambios = cambiosPrecio || []
+    guardarPreciosVistos({ ...(leerPreciosVistos() || {}), ...Object.fromEntries(articulosRef.current.map(a => [a.id, a.precioUnitario])) })
+    setCambiosPrecio(null)
+    setVerAvisoPrecios(false)
+    registrarLog({ accion: 'PRECIOS_VISTOS', detalle: cambios.map(c => `${c.id} $${c.antes} → $${c.ahora}`).join(' · ').slice(0, 400), empleado: perfilRef.current?.nombre || '', resultado: 'OK' })
+  }
+
+  // Relectura silenciosa de artículos (sin "Cargando..." ni registro en el LOG)
+  async function refrescarArticulos() {
+    try {
+      const arts = await getArticulos()
+      if (!arts.length) return
+      if (firmaArticulos(arts) !== firmaArticulos(articulosRef.current)) { articulosRef.current = arts; setArticulos(arts) }
+      detectarCambiosPrecio(arts)
+    } catch (e) { console.warn('No se pudieron releer los artículos', e) }
+  }
+  useEffect(() => {
+    const id = setInterval(() => { if (document.visibilityState === 'visible') refrescarArticulos() }, INTERVALO_PRECIOS)
+    const alVolver = () => { if (document.visibilityState === 'visible') refrescarArticulos() }
+    document.addEventListener('visibilitychange', alVolver)
+    return () => { clearInterval(id); document.removeEventListener('visibilitychange', alVolver) }
+  }, [])
+  // Al elegir perfil (o cambiarlo) se revisa enseguida
+  useEffect(() => { if (perfilGuardado && articulosRef.current.length) detectarCambiosPrecio(articulosRef.current) }, [perfilGuardado])
   useEffect(() => {
     if (perfilGuardado) registrarLog({ accion:'SESION_INICIADA', detalle:`App abierta · ${perfilGuardado.nombre} (${perfilGuardado.tipo})`, empleado:perfilGuardado.nombre, resultado:'OK' })
   }, [])
@@ -166,7 +223,9 @@ export default function App() {
     setLoadingArticulos(true)
     try {
       const arts = await getArticulos()
+      articulosRef.current = arts
       setArticulos(arts)
+      detectarCambiosPrecio(arts)
       recalcularStock(arts)
       await registrarLog({ accion:'ARTICULOS_CARGADOS', detalle:`${arts.length} artículos cargados`, empleado:perfilGuardado?.nombre||'', resultado:'OK' })
     } catch (e) { console.error(e) }
@@ -273,12 +332,18 @@ export default function App() {
   return (
     <>
       <style>{CSS_GLOBAL}</style>
+      <AvisoPrecios cambios={!esAdmin || verAvisoPrecios ? cambiosPrecio : null} onEntendido={entendidoPrecios} />
       <div style={S.app}>
         <div style={S.header}>
           <div style={S.logo} onClick={handleLogoTap} role="button">
             <span style={S.logoTodo}>TODO</span><span style={S.logoBoca}>BOCA</span>
           </div>
           <div style={S.headerRight}>
+            {esAdmin && cambiosPrecio?.length > 0 && (
+              <button style={S.avisoPreciosPill} onClick={() => setVerAvisoPrecios(true)} title="Ver qué precios cambiaron">
+                💲 {cambiosPrecio.length} {cambiosPrecio.length === 1 ? 'precio cambió' : 'precios cambiaron'}
+              </button>
+            )}
             <FicharTablet />
             <div style={S.perfilPill}><span style={S.perfilLabel}>{empleadoActual}</span></div>
             {loadingArticulos && <span style={S.loadingPill}>Cargando...</span>}
@@ -374,6 +439,7 @@ const S = {
   logoTodo: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:24, color:'var(--text)', letterSpacing:3 },
   logoBoca: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:24, color:'var(--accent)', letterSpacing:3 },
   headerRight: { display:'flex', alignItems:'center', gap:8 },
+  avisoPreciosPill: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:13, color:'#000', background:'var(--accent)', border:'none', borderRadius:20, padding:'4px 12px', cursor:'pointer', whiteSpace:'nowrap' },
   perfilPill: { background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:20, padding:'3px 12px' },
   perfilLabel: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:13, color:'var(--muted)', letterSpacing:1, textTransform:'uppercase' },
   loadingPill: { fontFamily:'Barlow, sans-serif', fontSize:11, color:'var(--muted)', background:'var(--bg)', padding:'3px 10px', borderRadius:20, border:'1px solid var(--border)' },

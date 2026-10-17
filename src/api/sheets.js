@@ -766,6 +766,17 @@ export async function generarIdArticulo() {
   return `TB${String(maxId+1).padStart(5,'0')}`
 }
 
+// ── Precios ya vistos por este dispositivo (para el aviso de cambios de precio) ──
+// Cuando el precio se cambia desde la app en este mismo dispositivo, se marca como visto:
+// así a quien hizo el cambio no le aparece el aviso de su propio cambio.
+export const CLAVE_PRECIOS_VISTOS = 'tb_precios_vistos'
+export function leerPreciosVistos() { try { return JSON.parse(localStorage.getItem(CLAVE_PRECIOS_VISTOS)) || null } catch { return null } }
+export function guardarPreciosVistos(m) { try { localStorage.setItem(CLAVE_PRECIOS_VISTOS, JSON.stringify(m)) } catch {} }
+function marcarPrecioVisto(id, precio) {
+  const vistos = leerPreciosVistos()
+  if (vistos && id) guardarPreciosVistos({ ...vistos, [id]: Number(String(precio || '0').replace(/[$\s]/g, '').replace(/\./g, '').replace(',', '.')) || 0 })
+}
+
 export async function agregarArticulo(art, empleado = '') {
   const data = await sheetsGet('ARTICULOS!A:A')
   const rows = data.values || []
@@ -775,6 +786,7 @@ export async function agregarArticulo(art, empleado = '') {
   const row = [art.id,art.nombre,art.stockInicial||'0',art.info||'',art.disponibilidad||'ACTIVO',art.foto||'',art.precioUnitario||'0',art.costoUnitario||'0',art.cantidadReponer||'0',art.stockCierre||'0',art.stockActual||'0']
   try { await sheetsUpdate(`ARTICULOS!A${nextRow}:K${nextRow}`, [row]) }
   catch (e) { await sheetsAppend('ARTICULOS!A1', [row]) }
+  marcarPrecioVisto(art.id, art.precioUnitario)
   await registrarLog({ accion:'ARTICULO_CREADO', detalle:`${art.id} · ${art.nombre} · $${art.precioUnitario}`, idReferencia:art.id, empleado, resultado:'OK' })
   await historicoSeguro(() => registrarAltaEnHistorico(art, empleado), art.id, empleado)
 }
@@ -789,6 +801,7 @@ export async function editarArticulo(rowNum, art, empleado = '') {
   } catch (e) { console.error(e) }
   const row = [art.id,art.nombre,art.stockInicial||'0',art.info||'',art.disponibilidad||'ACTIVO',art.foto||'',art.precioUnitario||'0',art.costoUnitario||'0',art.cantidadReponer||'0',art.stockCierre||'0',art.stockActual||'0']
   await sheetsUpdate(`ARTICULOS!A${rowNum}:K${rowNum}`, [row])
+  marcarPrecioVisto(art.id, art.precioUnitario)
   await registrarLog({ accion:'ARTICULO_EDITADO', detalle:`${art.id} · ${art.nombre} · $${art.precioUnitario}`, idReferencia:art.id, empleado, resultado:'OK' })
   if (anterior) {
     await historicoSeguro(() => registrarCambioPrecioCosto({

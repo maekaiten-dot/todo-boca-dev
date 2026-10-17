@@ -231,6 +231,22 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
   // Estado de la promo 2x1 XXXL (unidades que le quedan). null = todavía no se consultó
   const [promoXXXLEstado, setPromoXXXLEstado] = useState(null)
 
+  // Si cambió el precio de un artículo que ya está en el carrito, se actualiza (se cobra el precio nuevo)
+  useEffect(() => {
+    if (!articulos.length) return
+    const porId = Object.fromEntries(articulos.map(a => [a.id, a]))
+    setCarrito(prev => {
+      let cambio = false
+      const nuevo = prev.map(i => {
+        const a = porId[i.id]
+        if (!a || (a.precioUnitario === i.precioUnitario && a.costoUnitario === i.costoUnitario)) return i
+        cambio = true
+        return { ...i, precioUnitario: a.precioUnitario, costoUnitario: a.costoUnitario }
+      })
+      return cambio ? nuevo : prev
+    })
+  }, [articulos])
+
   useEffect(() => {
     const handler = () => setIsMobile(window.innerWidth < 600)
     window.addEventListener('resize', handler)

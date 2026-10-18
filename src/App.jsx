@@ -16,11 +16,12 @@ import Fichadas from './pages/Fichadas.jsx'
 import Asistencia from './pages/Asistencia.jsx'
 import Administracion from './pages/Administracion.jsx'
 import FicharTablet from './components/FicharTablet.jsx'
-import AvisoPrecios from './components/AvisoPrecios.jsx'
-import { getArticulos, getUsuarios, registrarLog, calcularStockTodos, leerPreciosVistos, guardarPreciosVistos } from './api/sheets.js'
+import AvisoPrecios, { totalCambios, resumenCambios } from './components/AvisoPrecios.jsx'
+import { getArticulos, getUsuarios, registrarLog, calcularStockTodos, leerArticulosVistos, guardarArticulosVistos } from './api/sheets.js'
 
-// Aviso de cambios de precio: cada dispositivo guarda los precios que ya vio y la app vuelve a leer
-// ARTICULOS cada INTERVALO_PRECIOS (y al volver a la pestaña). Si algún precio cambió, se actualiza
+// Aviso de cambios en artículos (precios, productos nuevos, activados / desactivados): cada dispositivo
+// guarda los artículos que ya vio y la app vuelve a leer ARTICULOS cada INTERVALO_PRECIOS (y al volver
+// a la pestaña). Si algo cambió, se actualiza
 // sin recargar la página y se avisa: en la tablet (perfiles Caja) con el recuadro por encima de todo,
 // hasta tocar "Entendido"; a los Admin, con un aviso chico arriba que abre el detalle si lo tocan.
 // Los cambios guardados desde este mismo dispositivo se marcan como vistos (no avisan a quien los hizo).
@@ -174,28 +175,51 @@ export default function App() {
 
   useEffect(() => { cargarArticulos(); cargarUsuarios() }, [])
 
-  // Compara los precios con los que ya vio este dispositivo
+  // Compara los artículos activos con los que ya vio este dispositivo
+  const datoVisto = a => ({ p: a.precioUnitario, n: a.nombre })
   function detectarCambiosPrecio(arts) {
-    const actuales = Object.fromEntries(arts.map(a => [a.id, a.precioUnitario]))
-    const vistos = leerPreciosVistos()
-    if (!vistos) { guardarPreciosVistos(actuales); return }
-    const nuevos = arts.filter(a => vistos[a.id] != null && a.precioUnitario > 0 && vistos[a.id] !== a.precioUnitario)
-      .map(a => ({ id: a.id, nombre: a.nombre, foto: a.foto, antes: vistos[a.id], ahora: a.precioUnitario }))
-    if (nuevos.length === 0) {
-      // Sin cambios: solo se suman los artículos nuevos a la referencia
-      if (arts.some(a => vistos[a.id] == null)) guardarPreciosVistos({ ...vistos, ...actuales })
+    const actuales = Object.fromEntries(arts.map(a => [a.id, datoVisto(a)]))
+    const v = leerArticulosVistos()
+    if (!v) { guardarArticulosVistos({ activos: actuales, inactivos: {} }); return }
+    const idsActivos = new Set(arts.map(a => a.id))
+    // Un código que este dispositivo nunca vio: si es más nuevo que el último que conoce (los TB son
+    // correlativos) es un producto nuevo; si es más viejo, es uno que estaba inactivo y volvió a activarse
+    const numId = id => Number(String(id).replace(/\D/g, '')) || 0
+    const maxVisto = Math.max(0, ...Object.keys(v.activos).map(numId), ...Object.keys(v.inactivos).map(numId))
+    const esNuevo = a => !v.inactivos[a.id] && numId(a.id) > maxVisto
+    const cambios = {
+      precios: arts.filter(a => v.activos[a.id] && a.precioUnitario > 0 && v.activos[a.id].p !== a.precioUnitario)
+        .map(a => ({ id: a.id, nombre: a.nombre, foto: a.foto, antes: v.activos[a.id].p, ahora: a.precioUnitario })),
+      nuevos: arts.filter(a => !v.activos[a.id] && esNuevo(a)).map(a => ({ id: a.id, nombre: a.nombre, foto: a.foto, precio: a.precioUnitario })),
+      reactivados: arts.filter(a => !v.activos[a.id] && !esNuevo(a)).map(a => ({ id: a.id, nombre: a.nombre, foto: a.foto, precio: a.precioUnitario })),
+      bajas: Object.entries(v.activos).filter(([id]) => !idsActivos.has(id)).map(([id, d]) => ({ id, nombre: d.n, precio: d.p })),
+    }
+    if (!totalCambios(cambios)) {
+      // Sin cambios: solo se actualizan los nombres guardados si alguno cambió
+      if (arts.some(a => v.activos[a.id]?.n !== a.nombre)) guardarArticulosVistos({ ...v, activos: actuales })
       setCambiosPrecio(null)
       return
     }
-    setCambiosPrecio(nuevos)
+    setCambiosPrecio(cambios)
   }
 
   function entendidoPrecios() {
-    const cambios = cambiosPrecio || []
-    guardarPreciosVistos({ ...(leerPreciosVistos() || {}), ...Object.fromEntries(articulosRef.current.map(a => [a.id, a.precioUnitario])) })
+    const c = cambiosPrecio || {}
+    const v = leerArticulosVistos() || { activos: {}, inactivos: {} }
+    const activos = Object.fromEntries(articulosRef.current.map(a => [a.id, datoVisto(a)]))
+    const inactivos = { ...v.inactivos }
+    ;(c.bajas || []).forEach(b => { inactivos[b.id] = { p: b.precio, n: b.nombre } })
+    Object.keys(activos).forEach(id => { delete inactivos[id] })
+    guardarArticulosVistos({ activos, inactivos })
     setCambiosPrecio(null)
     setVerAvisoPrecios(false)
-    registrarLog({ accion: 'PRECIOS_VISTOS', detalle: cambios.map(c => `${c.id} $${c.antes} → $${c.ahora}`).join(' · ').slice(0, 400), empleado: perfilRef.current?.nombre || '', resultado: 'OK' })
+    const detalle = [
+      ...(c.precios || []).map(x => `${x.id} $${x.antes} → $${x.ahora}`),
+      ...(c.nuevos || []).map(x => `${x.id} NUEVO`),
+      ...(c.reactivados || []).map(x => `${x.id} ACTIVO`),
+      ...(c.bajas || []).map(x => `${x.id} INACTIVO`),
+    ].join(' · ').slice(0, 400)
+    registrarLog({ accion: 'CAMBIOS_ARTICULOS_VISTOS', detalle, empleado: perfilRef.current?.nombre || '', resultado: 'OK' })
   }
 
   // Relectura silenciosa de artículos (sin "Cargando..." ni registro en el LOG)
@@ -339,9 +363,9 @@ export default function App() {
             <span style={S.logoTodo}>TODO</span><span style={S.logoBoca}>BOCA</span>
           </div>
           <div style={S.headerRight}>
-            {esAdmin && cambiosPrecio?.length > 0 && (
-              <button style={S.avisoPreciosPill} onClick={() => setVerAvisoPrecios(true)} title="Ver qué precios cambiaron">
-                💲 {cambiosPrecio.length} {cambiosPrecio.length === 1 ? 'precio cambió' : 'precios cambiaron'}
+            {esAdmin && totalCambios(cambiosPrecio) > 0 && (
+              <button style={S.avisoPreciosPill} onClick={() => setVerAvisoPrecios(true)} title="Ver qué cambió en los artículos">
+                📢 {resumenCambios(cambiosPrecio)}
               </button>
             )}
             <FicharTablet />

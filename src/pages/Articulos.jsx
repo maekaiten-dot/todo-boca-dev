@@ -128,7 +128,7 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
   async function handleToggle(art) {
     const nueva = art.disponibilidad?.toUpperCase() === 'ACTIVO' ? 'INACTIVO' : 'ACTIVO'
     try {
-      await toggleDisponibilidad(art.rowNum, art.id, nueva, empleado)
+      await toggleDisponibilidad(art.rowNum, art.id, nueva, empleado, art)
       setArticulos(prev => prev.map(a => a.rowNum === art.rowNum ? { ...a, disponibilidad: nueva } : a))
     } catch (e) {
       showToast('Error al cambiar disponibilidad', 'error')

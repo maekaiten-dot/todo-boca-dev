@@ -71,6 +71,55 @@ function calcularRotacion(ventas, articulos) {
   return { lista, totales, hoy }
 }
 
+// Recupero de la última compra: para cada artículo toma su última compra (los ingresos del mismo día
+// se suman como una sola compra) y acumula lo facturado de ese artículo desde ese día. Cuando lo
+// facturado alcanza el costo total de la compra, esa es la cantidad de días que tardó en recuperarse.
+// Si todavía no llegó, estima cuánto falta al ritmo que viene vendiendo desde la compra.
+const parseArs = v => typeof v === 'number' ? v : Number(String(v ?? '0').replace(/[$\s]/g, '').replace(/\./g, '').replace(',', '.')) || 0
+function calcularRecupero(ventas, ingresos, articulos, hoy) {
+  const arts = Object.fromEntries(articulos.map(a => [a.id, a]))
+  const compras = {}
+  for (const i of ingresos) {
+    if (i.anulado || !i.articuloId || !(i.cantidad > 0)) continue
+    const dia = diaDesdeFecha(i.fecha)
+    if (dia == null || dia > hoy) continue
+    const c = compras[i.articuloId]
+    if (c && dia < c.dia) continue
+    const costo = i.costoTotal || i.cantidad * (i.costoUnitario || parseArs(arts[i.articuloId]?.costoUnitario))
+    if (!c || dia > c.dia) compras[i.articuloId] = { dia, cantidad: i.cantidad, costo, proveedor: i.proveedor || '' }
+    else { c.cantidad += i.cantidad; c.costo += costo; if (i.proveedor && !c.proveedor.includes(i.proveedor)) c.proveedor = c.proveedor ? `${c.proveedor}, ${i.proveedor}` : i.proveedor }
+  }
+  const porDia = {}
+  for (const v of ventas) {
+    const c = compras[v.articulo]
+    if (!c || v.anulado) continue
+    const dia = diaDesdeFecha(v.fecha)
+    if (dia == null || dia < c.dia) continue
+    const m = (porDia[v.articulo] ||= {})
+    const d = (m[dia] ||= { r: 0, u: 0 })
+    d.r += v.precioTotalFinal || v.precioTotal || 0
+    d.u += v.cantidad || 0
+  }
+  return Object.entries(compras).filter(([, c]) => c.costo > 0).map(([id, c]) => {
+    let facturado = 0, unidades = 0, diaRecupero = null
+    for (const [dia, d] of Object.entries(porDia[id] || {}).sort((a, b) => a[0] - b[0])) {
+      facturado += d.r; unidades += d.u
+      if (diaRecupero == null && facturado >= c.costo) diaRecupero = Number(dia)
+    }
+    const transcurridos = hoy - c.dia
+    const recuperado = diaRecupero != null
+    const ritmo = facturado / Math.max(1, transcurridos + 1) // $ por día desde la compra
+    const faltan = recuperado ? 0 : (ritmo > 0 ? Math.ceil((c.costo - facturado) / ritmo) : null)
+    return {
+      id, nombre: arts[id]?.nombre || id, compraDia: c.dia, compraCant: c.cantidad, compraCosto: c.costo, proveedor: c.proveedor,
+      facturado, unidades, pct: facturado / c.costo, recuperado,
+      dias: recuperado ? diaRecupero - c.dia : transcurridos, faltan,
+      diasTotal: recuperado ? diaRecupero - c.dia : (faltan != null ? transcurridos + faltan : null),
+      porRecuperar: recuperado ? 0 : c.costo - facturado,
+    }
+  })
+}
+
 function fechaDeDia(dia) {
   const d = new Date(dia * 86400000)
   return `${d.getUTCDate()}/${d.getUTCMonth() + 1}`
@@ -86,6 +135,10 @@ export default function Rotacion({ articulos = [], stockMap = {} }) {
   const [busqueda, setBusqueda] = useState('')
   const [orden, setOrden] = useState({ k: 'w30', dir: -1 })
   const [mostrar, setMostrar] = useState(50)
+  const [recFiltro, setRecFiltro] = useState('curso')
+  const [recOrden, setRecOrden] = useState({ k: 'diasTotal', dir: -1 })
+  const [recBusqueda, setRecBusqueda] = useState('')
+  const [recMostrar, setRecMostrar] = useState(30)
 
   useEffect(() => { cargar() }, [])
 
@@ -163,6 +216,20 @@ export default function Rotacion({ articulos = [], stockMap = {} }) {
       return (typeof A === 'string' ? A.localeCompare(B) : A - B) * orden.dir
     })
   }, [filas, busqueda, orden])
+
+  const recupero = useMemo(() => calcularRecupero(ventas, ingresos, articulos, hoy), [ventas, ingresos, articulos, hoy])
+  const recResumen = useMemo(() => {
+    const rec = recupero.filter(r => r.recuperado).map(r => r.dias).sort((a, b) => a - b)
+    const curso = recupero.filter(r => !r.recuperado)
+    return { nRec: rec.length, mediana: rec.length ? rec[Math.floor((rec.length - 1) / 2)] : null, nCurso: curso.length, porRecuperar: curso.reduce((s, r) => s + r.porRecuperar, 0), sinVentas: curso.filter(r => r.facturado <= 0).length }
+  }, [recupero])
+  const recVisibles = useMemo(() => {
+    const q = normalizar(recBusqueda.trim())
+    const f = recupero.filter(r => (recFiltro === 'todos' || (recFiltro === 'rec' ? r.recuperado : !r.recuperado)) && (!q || normalizar(r.nombre).includes(q) || normalizar(r.id).includes(q)))
+    const val = r => { const v = r[recOrden.k]; return v == null ? Infinity : v } // sin ventas = lo peor
+    return f.sort((a, b) => { const A = val(a), B = val(b); return (typeof A === 'string' ? A.localeCompare(B) : (A - B || 0)) * recOrden.dir })
+  }, [recupero, recFiltro, recOrden, recBusqueda])
+  const recOrdenarPor = k => setRecOrden(o => o.k === k ? { k, dir: -o.dir } : { k, dir: k === 'nombre' ? 1 : -1 })
 
   function ordenarPor(k) {
     setOrden(o => o.k === k ? { k, dir: -o.dir } : { k, dir: k === 'nombre' || k === 'cobertura' ? 1 : -1 })
@@ -284,6 +351,56 @@ export default function Rotacion({ articulos = [], stockMap = {} }) {
             </div>
           )
         })}
+      </div>
+
+      <div style={S.seccion}>RECUPERO DE LA ÚLTIMA COMPRA</div>
+      <div style={S.statsRow}>
+        <div style={S.statCard}><div style={S.statValue}>{recResumen.mediana == null ? '–' : `${fmtN(recResumen.mediana)} días`}</div><div style={S.statLabel}>Tarda en recuperarse una compra (mediana de {fmtN(recResumen.nRec)} ya recuperadas)</div></div>
+        <div style={S.statCard}><div style={S.statValue}>{fmtM(recResumen.porRecuperar)}</div><div style={S.statLabel}>Falta recuperar de {fmtN(recResumen.nCurso)} compras en curso</div></div>
+        <div style={S.statCard}><div style={{ ...S.statValue, color: recResumen.sinVentas ? '#ef4444' : 'var(--accent)' }}>{fmtN(recResumen.sinVentas)}</div><div style={S.statLabel}>Compras sin ninguna venta desde que entraron</div></div>
+      </div>
+      <div style={S.chartCard}>
+        <div style={S.nota}>
+          Para cada artículo se toma su última compra (lo que entró por Ingresos ese día) y se suma lo que se vendió de ese artículo desde ese día.
+          "Recuperado en" son los días que tardaron las ventas en llegar al costo total de la compra. Si todavía no llegó, se estima cuánto falta al ritmo que viene vendiendo desde la compra.
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginBottom: 8 }}>
+          <Segmento opciones={[{ v: 'curso', label: `En curso (${recResumen.nCurso})` }, { v: 'rec', label: `Recuperadas (${recResumen.nRec})` }, { v: 'todos', label: 'Todas' }]} valor={recFiltro} onChange={v => { setRecFiltro(v); setRecMostrar(30) }} />
+          <input style={{ ...S.search, marginBottom: 0 }} type="search" placeholder="Buscar artículo o código…" value={recBusqueda} onChange={e => { setRecBusqueda(e.target.value); setRecMostrar(30) }} />
+        </div>
+        <div style={S.tableWrap}>
+          <table style={S.table}>
+            <thead>
+              <tr>
+                {[['nombre', 'Artículo', true], ['compraDia', 'Última compra'], ['compraCosto', 'Costo compra'], ['facturado', 'Vendido desde'], ['pct', 'Recuperado'], ['diasTotal', 'Tarda']].map(([k, label, left]) => (
+                  <th key={k} style={{ ...S.th, textAlign: left ? 'left' : 'right' }} onClick={() => recOrdenarPor(k)}>{label}{recOrden.k === k ? (recOrden.dir > 0 ? ' ▲' : ' ▼') : ''}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {recVisibles.slice(0, recMostrar).map(r => (
+                <tr key={r.id}>
+                  <td style={{ ...S.td, ...S.tdNombre }}>{r.nombre}<div style={S.codigo}>{r.id}{r.proveedor ? ` · ${r.proveedor}` : ''}</div></td>
+                  <td style={S.td}>{fechaDeDia(r.compraDia)}<div style={S.codigo}>{fmtN(r.compraCant)} u.</div></td>
+                  <td style={S.td}>${fmtN(r.compraCosto)}</td>
+                  <td style={S.td}>${fmtN(r.facturado)}<div style={S.codigo}>{fmtN(r.unidades)} u. vendidas</div></td>
+                  <td style={S.td}>
+                    <div style={S.recBarra}><div style={{ ...S.recBarraFill, width: `${Math.min(100, r.pct * 100)}%`, background: r.recuperado ? '#22c55e' : r.pct > 0 ? 'var(--accent)' : '#ef4444' }} /></div>
+                    <div style={S.codigo}>{Math.round(r.pct * 100)}%</div>
+                  </td>
+                  <td style={{ ...S.td, ...(r.recuperado ? { color: '#22c55e', fontWeight: 700 } : {}) }}>
+                    {r.recuperado ? (r.dias === 0 ? 'el mismo día' : `en ${fmtN(r.dias)} ${r.dias === 1 ? 'día' : 'días'}`)
+                      : r.faltan == null ? <span style={{ color: '#ef4444' }}>sin ventas</span>
+                      : r.diasTotal > 365 ? 'más de 1 año' : `≈ ${fmtN(r.diasTotal)} días`}
+                    <div style={S.codigo}>{r.recuperado ? 'recuperado' : `lleva ${fmtN(r.dias)} ${r.dias === 1 ? 'día' : 'días'}${r.faltan != null && r.diasTotal <= 365 ? ` · faltan ≈ ${fmtN(r.faltan)}` : ''}`}</div>
+                  </td>
+                </tr>
+              ))}
+              {!recVisibles.length && <tr><td style={{ ...S.td, textAlign: 'left' }} colSpan={6}>Sin compras para mostrar.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+        {recVisibles.length > recMostrar && <button style={S.masBtn} onClick={() => setRecMostrar(m => m + 30)}>Ver 30 más ({recVisibles.length - recMostrar} restantes)</button>}
       </div>
 
       <div style={S.chartCard}>
@@ -417,5 +534,7 @@ const S = {
   chipBaja: { background: 'rgba(106,140,204,0.15)', color: 'var(--muted)' },
   chipEstable: { border: '1px solid var(--border)', color: 'var(--muted)' },
   chipNuevo: { background: 'rgba(245,200,0,0.15)', color: 'var(--accent)' },
+  recBarra: { width: 90, height: 8, background: 'var(--surface2)', borderRadius: 4, overflow: 'hidden', marginLeft: 'auto' },
+  recBarraFill: { height: '100%', borderRadius: 4 },
   masBtn: { alignSelf: 'flex-start', marginTop: 10, background: 'var(--surface2)', border: '1.5px solid var(--border)', borderRadius: 10, color: 'var(--text)', fontFamily: 'Barlow, sans-serif', fontSize: 14, padding: '8px 16px', cursor: 'pointer' },
 }

@@ -1111,8 +1111,27 @@ export async function calcularStockTodos(articulos) {
   return articulos.map(art => ({ ...art, stockActualCalculado: estado[art.id]?.stock ?? 0, stockContado: !!estado[art.id]?.contado, ultimoConteoMs: estado[art.id]?.ultimoConteoMs || 0 }))
 }
 
+// PAGOS · P: MODIFICADO (fecha y hora de la última vez que se creó, editó o anuló desde la app).
+// Los pagos viejos no tienen el dato: se usa la fecha que lleva el ID (P261020-001 → 20/10/2026).
+let _encabezadoModificadoOk = false
+async function asegurarModificadoPagos() {
+  if (_encabezadoModificadoOk) return
+  try {
+    const h = await sheetsGet('PAGOS!P1')
+    if (!String((h.values || [])[0]?.[0] || '').trim()) await sheetsUpdate('PAGOS!P1', [['MODIFICADO']])
+    _encabezadoModificadoOk = true
+  } catch (e) { console.warn('No se pudo verificar la columna MODIFICADO de PAGOS', e) }
+}
+function ahoraModificado() { const dt = getArgentinaDate(); return `'${dt.fecha} ${dt.hora}` }
+function msModificadoPago(modificado, idPago) {
+  const m = String(modificado || '').replace(/^'/, '').trim()
+  if (m) { const ms = fechaHoraAMsAR(m.split(' ')[0], m.split(' ')[1] || ''); if (ms) return ms }
+  const x = String(idPago || '').match(/^P(\d{2})(\d{2})(\d{2})-(\d+)/)
+  return x ? Date.UTC(2000 + Number(x[1]), Number(x[2]) - 1, Number(x[3]), 3) + Number(x[4]) : 0
+}
+
 export async function getPagos() {
-  const data = await sheetsGet('PAGOS!A2:O')
+  const data = await sheetsGet('PAGOS!A2:P')
   const rows = data.values || []
   return rows.filter(r=>r[0]).map((r, idx) => ({
     rowNum:idx+2, idPago:r[0]||'', tipo:r[1]||'',
@@ -1123,6 +1142,7 @@ export async function getPagos() {
     costoTotal:parsePrecio(r[8]) || (Number(r[6])||0) * parsePrecio(r[7]),
     descripcion:r[9]||'', proveedor:r[10]||'', montoPagado:parsePrecio(r[11]),
     pagado:r[12]==='TRUE'||r[12]===true, empleado:r[13]||'', anulado:r[14]==='TRUE'||r[14]===true,
+    modificado: String(r[15] || '').replace(/^'/, ''), modificadoMs: msModificadoPago(r[15], r[0]),
   }))
 }
 
@@ -1136,7 +1156,8 @@ export async function registrarPago({ tipo, fechaIngreso, fechaPago, articuloId,
   // Montos como número limpio: acepta "$8.000", "8.000" o "8000"
   const cant = Number(cantidad)||0, cu = parsePrecio(costoUnitario), mp = parsePrecio(montoPagado)
   const costoTotal = cant*cu
-  const row = [idPago,tipo||'GASTO',fechaIngreso?`'${fechaIngreso}`:'',fechaPago?`'${fechaPago}`:'',articuloId||'',articuloNombre||'',cant,cu,costoTotal,descripcion||'',proveedor||'',mp,pagado?'TRUE':'FALSE',empleado||'','FALSE']
+  await asegurarModificadoPagos()
+  const row = [idPago,tipo||'GASTO',fechaIngreso?`'${fechaIngreso}`:'',fechaPago?`'${fechaPago}`:'',articuloId||'',articuloNombre||'',cant,cu,costoTotal,descripcion||'',proveedor||'',mp,pagado?'TRUE':'FALSE',empleado||'','FALSE',ahoraModificado()]
   await sheetsAppend('PAGOS!A1', [row])
   if (tipo==='MERCADERÍA'&&fechaIngreso&&articuloId) {
     const rowIngreso = [`I${idPago.slice(1)}`,`'${fechaIngreso}`,`'${dt.hora}`,articuloId,articuloNombre,cant,cu,costoTotal,proveedor||'',empleado||'',false]
@@ -1149,8 +1170,9 @@ export async function registrarPago({ tipo, fechaIngreso, fechaPago, articuloId,
 export async function actualizarPago(rowNum, campos, empleado = '') {
   const cant = Number(campos.cantidad)||0, cu = parsePrecio(campos.costoUnitario), mp = parsePrecio(campos.montoPagado)
   const costoTotal = cant*cu
-  const row = [campos.idPago,campos.tipo||'GASTO',campos.fechaIngreso?`'${campos.fechaIngreso}`:'',campos.fechaPago?`'${campos.fechaPago}`:'',campos.articuloId||'',campos.articuloNombre||'',cant,cu,costoTotal,campos.descripcion||'',campos.proveedor||'',mp,campos.pagado?'TRUE':'FALSE',campos.empleado||'',campos.anulado?'TRUE':'FALSE']
-  await sheetsUpdate(`PAGOS!A${rowNum}:O${rowNum}`, [row])
+  await asegurarModificadoPagos()
+  const row = [campos.idPago,campos.tipo||'GASTO',campos.fechaIngreso?`'${campos.fechaIngreso}`:'',campos.fechaPago?`'${campos.fechaPago}`:'',campos.articuloId||'',campos.articuloNombre||'',cant,cu,costoTotal,campos.descripcion||'',campos.proveedor||'',mp,campos.pagado?'TRUE':'FALSE',campos.empleado||'',campos.anulado?'TRUE':'FALSE',ahoraModificado()]
+  await sheetsUpdate(`PAGOS!A${rowNum}:P${rowNum}`, [row])
   if (campos.tipo==='MERCADERÍA'&&campos.fechaIngreso&&campos.articuloId&&campos.crearIngreso) {
     const costoTotalIng = costoTotal
     const hora = new Date().toLocaleString('es-AR',{timeZone:'America/Argentina/Buenos_Aires',hour12:false}).split(', ')[1]
@@ -1161,7 +1183,8 @@ export async function actualizarPago(rowNum, campos, empleado = '') {
 }
 
 export async function anularPago(rowNum, idPago, empleado = '') {
-  await sheetsUpdate(`PAGOS!O${rowNum}`, [['TRUE']])
+  await asegurarModificadoPagos()
+  await sheetsUpdate(`PAGOS!O${rowNum}:P${rowNum}`, [['TRUE', ahoraModificado()]])
   await registrarLog({ accion:'PAGO_ANULADO', detalle:`Pago ${idPago} anulado`, idReferencia:idPago, empleado, resultado:'OK' })
 }
 

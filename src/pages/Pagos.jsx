@@ -81,11 +81,8 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
     setError(null)
     try {
       const [pgs, arts] = await Promise.all([getPagos(), getArticulosAdmin()])
-      setPagos(pgs.sort((a, b) => {
-        const fa = (a.fechaPago || a.fechaIngreso || '').split('/').reverse().join('')
-        const fb = (b.fechaPago || b.fechaIngreso || '').split('/').reverse().join('')
-        return fb.localeCompare(fa)
-      }))
+      // Lo último que se cargó o modificó primero
+      setPagos(pgs.sort((a, b) => b.modificadoMs - a.modificadoMs || b.rowNum - a.rowNum))
       setArticulos(arts.filter(a => a.disponibilidad?.toUpperCase() === 'ACTIVO'))
     } catch (e) {
       setError('No se pudo cargar.')
@@ -178,6 +175,43 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
 
   const normalizr = str => str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
 
+  // Orden de la tabla: por defecto, última modificación primero. Tocar el título de una columna
+  // ordena por esa columna; tocarlo de nuevo invierte el orden.
+  const [orden, setOrden] = useState({ col: 'modificado', dir: 'desc' })
+  const fechaNum = f => { const [d, m, a] = String(f || '').split(' ')[0].split('/').map(Number); return d && m && a ? a * 10000 + m * 100 + d : 0 }
+  const COLUMNAS = [
+    { id: 'idPago', label: 'ID', valor: p => p.idPago },
+    { id: 'tipo', label: 'Tipo', valor: p => p.tipo },
+    { id: 'nombre', label: 'Descripción / Artículo', valor: p => normalizr(p.articuloNombre || p.descripcion) },
+    { id: 'fechaIngreso', label: 'F. Ingreso', valor: p => fechaNum(p.fechaIngreso), num: true },
+    { id: 'fechaPago', label: 'F. Pago', valor: p => fechaNum(p.fechaPago), num: true },
+    { id: 'cantidad', label: 'Cant.', valor: p => p.cantidad || 0, num: true },
+    { id: 'costoTotal', label: 'Costo total', valor: p => p.costoTotal || 0, num: true },
+    { id: 'montoPagado', label: 'Monto pagado', valor: p => p.montoPagado || 0, num: true },
+    { id: 'proveedor', label: 'Proveedor', valor: p => normalizr(p.proveedor) },
+    { id: 'empleado', label: 'Empleado', valor: p => normalizr(p.empleado) },
+    { id: 'modificado', label: 'Modificado', valor: p => p.modificadoMs || 0, num: true },
+  ]
+  function ordenarPor(col) {
+    const c = COLUMNAS.find(x => x.id === col)
+    setOrden(o => o.col === col ? { col, dir: o.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: c?.num ? 'desc' : 'asc' })
+  }
+  const colOrden = COLUMNAS.find(x => x.id === orden.col) || COLUMNAS[COLUMNAS.length - 1]
+  const comparar = (a, b) => {
+    const va = colOrden.valor(a), vb = colOrden.valor(b)
+    const r = colOrden.num ? va - vb : String(va).localeCompare(String(vb), 'es', { numeric: true })
+    // Desempate: lo modificado más recientemente primero
+    return (orden.dir === 'asc' ? r : -r) || (b.modificadoMs - a.modificadoMs)
+  }
+  const thOrden = col => {
+    const c = COLUMNAS.find(x => x.id === col), activa = orden.col === col
+    return (
+      <th style={{ ...S.th, ...S.thOrden, ...(activa ? { color: 'var(--accent)' } : {}) }} onClick={() => ordenarPor(col)} title="Tocá para ordenar" aria-sort={activa ? (orden.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+        {c.label}<span style={{ marginLeft: 4, opacity: activa ? 1 : 0.3 }}>{activa ? (orden.dir === 'asc' ? '▲' : '▼') : '↕'}</span>
+      </th>
+    )
+  }
+
   const pagosFiltrados = pagos
     .filter(p => filtroEstado === 'TODOS' || getEstado(p) === filtroEstado)
     .filter(p => {
@@ -186,6 +220,7 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
       return normalizr(p.articuloNombre).includes(q) || normalizr(p.descripcion).includes(q) ||
         normalizr(p.proveedor).includes(q) || normalizr(p.idPago).includes(q)
     })
+    .sort(comparar)
 
   // Últimos 10 artículos usados en pagos (por articuloId único, orden reciente)
   const ultimosUsados = (() => {
@@ -293,16 +328,17 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
             <thead>
               <tr>
                 <th style={S.th}></th>
-                <th style={S.th}>ID</th>
-                <th style={S.th}>Tipo</th>
-                <th style={S.th}>Descripción / Artículo</th>
-                <th style={S.th}>F. Ingreso</th>
-                <th style={S.th}>F. Pago</th>
-                <th style={S.th}>Cant.</th>
-                <th style={S.th}>Costo total</th>
-                <th style={S.th}>Monto pagado</th>
-                <th style={S.th}>Proveedor</th>
-                <th style={S.th}>Empleado</th>
+                {thOrden('idPago')}
+                {thOrden('tipo')}
+                {thOrden('nombre')}
+                {thOrden('fechaIngreso')}
+                {thOrden('fechaPago')}
+                {thOrden('cantidad')}
+                {thOrden('costoTotal')}
+                {thOrden('montoPagado')}
+                {thOrden('proveedor')}
+                {thOrden('empleado')}
+                {thOrden('modificado')}
                 <th style={S.th}></th>
               </tr>
             </thead>
@@ -335,6 +371,9 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
                     <td style={{...S.td, fontWeight:700, color:'var(--accent)'}}>${(p.montoPagado||0).toLocaleString('es-AR')}</td>
                     <td style={{...S.td, color:'var(--muted)'}}>{p.proveedor}</td>
                     <td style={{...S.td, color:'var(--muted)'}}>{p.empleado}</td>
+                    <td style={{...S.td, color:'var(--muted)', whiteSpace:'nowrap', fontSize:12}} title={p.modificado ? `Modificado ${p.modificado}` : 'Fecha de carga (según el ID)'}>
+                      {p.modificado ? p.modificado.replace(/^(\d{1,2}\/\d{1,2})\/\d{4}\s+(\d{1,2}:\d{2}).*$/, '$1 $2') : (p.modificadoMs ? new Date(p.modificadoMs - 3 * 3600000).toISOString().slice(0, 10).split('-').reverse().slice(0, 2).join('/') : '—')}
+                    </td>
                     <td style={S.td}>
                       <div style={{display:'flex', gap:6}}>
                         {!p.anulado && <button style={S.editBtn} onClick={() => abrirEditar(p)}>✏️</button>}
@@ -587,6 +626,7 @@ const S = {
   tableWrap: { flex:1, overflowX:'auto', padding:'0 20px 20px' },
   table: { width:'100%', borderCollapse:'collapse' },
   th: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:12, color:'var(--muted)', letterSpacing:1, textTransform:'uppercase', padding:'8px 10px', borderBottom:'2px solid var(--border)', textAlign:'left', background:'var(--surface)', position:'sticky', top:0, zIndex:1, whiteSpace:'nowrap' },
+  thOrden: { cursor:'pointer', userSelect:'none' },
   td: { fontFamily:'Barlow, sans-serif', fontSize:13, color:'var(--text)', padding:'8px 10px', borderBottom:'1px solid rgba(13,48,128,0.3)', verticalAlign:'middle' },
   tdId: { fontFamily:'Barlow Condensed, sans-serif', fontSize:12, color:'var(--muted)', whiteSpace:'nowrap' },
   tdNombre: { maxWidth:200 },

@@ -863,14 +863,35 @@ export async function toggleDisponibilidad(rowNum, artId, nuevaDisp, empleado = 
   await registrarLog({ accion:'ARTICULO_DISPONIBILIDAD', detalle:`${artId} → ${nuevaDisp}`, idReferencia:artId, empleado, resultado:'OK' })
 }
 
+// INGRESOS · L: MODIFICADO (fecha y hora en que se cargó o anuló desde la app).
+// Los ingresos viejos no lo tienen: se usa la fecha y hora de la fila (o la del ID si es posterior).
+let _encabezadoModifIngresosOk = false
+async function asegurarModificadoIngresos() {
+  if (_encabezadoModifIngresosOk) return
+  try {
+    const h = await sheetsGet('INGRESOS!L1')
+    if (!String((h.values || [])[0]?.[0] || '').trim()) await sheetsUpdate('INGRESOS!L1', [['MODIFICADO']])
+    _encabezadoModifIngresosOk = true
+  } catch (e) { console.warn('No se pudo verificar la columna MODIFICADO de INGRESOS', e) }
+}
+function msModificadoIngreso(modificado, id, fecha, hora) {
+  const m = String(modificado || '').replace(/^'/, '').trim()
+  if (m) { const ms = fechaHoraAMsAR(m.split(' ')[0], m.split(' ')[1] || ''); if (ms) return ms }
+  const deFila = fechaHoraAMsAR(fecha, hora)
+  const x = String(id || '').match(/^I(\d{2})(\d{2})(\d{2})-/)
+  const deId = x ? fechaHoraAMsAR(`${Number(x[3])}/${Number(x[2])}/${2000 + Number(x[1])}`, hora) : 0
+  return Math.max(deFila, deId)
+}
+
 export async function getIngresos() {
-  const data = await sheetsGet('INGRESOS!A2:K')
+  const data = await sheetsGet('INGRESOS!A2:L')
   const rows = data.values || []
   return rows.filter(r=>r[0]).map((r, idx) => ({
     rowNum:idx+2, idIngreso:r[0]||'', fecha:r[1]||'', hora:r[2]||'',
     articuloId:r[3]||'', articuloNombre:r[4]||'', cantidad:Number(r[5])||0,
     costoUnitario:parsePrecio(r[6]), costoTotal:parsePrecio(r[7]),
     proveedor:r[8]||'', empleado:r[9]||'', anulado:r[10]==='TRUE'||r[10]===true,
+    modificado: String(r[11] || '').replace(/^'/, ''), modificadoMs: msModificadoIngreso(r[11], r[0], r[1], r[2]),
   }))
 }
 
@@ -882,14 +903,16 @@ export async function registrarIngreso({ articuloId, articuloNombre, cantidad, c
   const hoy = rows.filter(r => r[0]?.startsWith(prefix))
   const idIngreso = `${prefix}-${String(hoy.length+1).padStart(3,'0')}`
   const costoTotal = cantidad * (Number(costoUnitario)||0)
-  const row = [idIngreso,`'${dt.fecha}`,`'${dt.hora}`,articuloId,articuloNombre,cantidad,costoUnitario||0,costoTotal,proveedor||'',empleado||'',false]
+  await asegurarModificadoIngresos()
+  const row = [idIngreso,`'${dt.fecha}`,`'${dt.hora}`,articuloId,articuloNombre,cantidad,costoUnitario||0,costoTotal,proveedor||'',empleado||'',false,ahoraModificado()]
   await sheetsAppend('INGRESOS!A1', [row])
   await registrarLog({ accion:'INGRESO_REGISTRADO', detalle:`${articuloId} · ${articuloNombre} · x${cantidad}`, idReferencia:idIngreso, empleado, resultado:'OK' })
   return idIngreso
 }
 
 export async function anularIngreso(rowNum, idIngreso, empleado = '') {
-  await sheetsUpdate(`INGRESOS!K${rowNum}`, [['TRUE']])
+  await asegurarModificadoIngresos()
+  await sheetsUpdate(`INGRESOS!K${rowNum}:L${rowNum}`, [['TRUE', ahoraModificado()]])
   await registrarLog({ accion:'INGRESO_ANULADO', detalle:`Ingreso ${idIngreso} anulado`, idReferencia:idIngreso, empleado, resultado:'OK' })
 }
 
@@ -1160,7 +1183,8 @@ export async function registrarPago({ tipo, fechaIngreso, fechaPago, articuloId,
   const row = [idPago,tipo||'GASTO',fechaIngreso?`'${fechaIngreso}`:'',fechaPago?`'${fechaPago}`:'',articuloId||'',articuloNombre||'',cant,cu,costoTotal,descripcion||'',proveedor||'',mp,pagado?'TRUE':'FALSE',empleado||'','FALSE',ahoraModificado()]
   await sheetsAppend('PAGOS!A1', [row])
   if (tipo==='MERCADERÍA'&&fechaIngreso&&articuloId) {
-    const rowIngreso = [`I${idPago.slice(1)}`,`'${fechaIngreso}`,`'${dt.hora}`,articuloId,articuloNombre,cant,cu,costoTotal,proveedor||'',empleado||'',false]
+    await asegurarModificadoIngresos()
+    const rowIngreso = [`I${idPago.slice(1)}`,`'${fechaIngreso}`,`'${dt.hora}`,articuloId,articuloNombre,cant,cu,costoTotal,proveedor||'',empleado||'',false,ahoraModificado()]
     await sheetsAppend('INGRESOS!A1', [rowIngreso])
   }
   await registrarLog({ accion:'PAGO_REGISTRADO', detalle:`${tipo} · ${articuloNombre||descripcion} · $${montoPagado}`, idReferencia:idPago, empleado, resultado:'OK' })
@@ -1176,7 +1200,8 @@ export async function actualizarPago(rowNum, campos, empleado = '') {
   if (campos.tipo==='MERCADERÍA'&&campos.fechaIngreso&&campos.articuloId&&campos.crearIngreso) {
     const costoTotalIng = costoTotal
     const hora = new Date().toLocaleString('es-AR',{timeZone:'America/Argentina/Buenos_Aires',hour12:false}).split(', ')[1]
-    const rowIngreso = [`I${campos.idPago.slice(1)}`,`'${campos.fechaIngreso}`,`'${hora}`,campos.articuloId,campos.articuloNombre,cant,cu,costoTotalIng,campos.proveedor||'',empleado||'',false]
+    await asegurarModificadoIngresos()
+    const rowIngreso = [`I${campos.idPago.slice(1)}`,`'${campos.fechaIngreso}`,`'${hora}`,campos.articuloId,campos.articuloNombre,cant,cu,costoTotalIng,campos.proveedor||'',empleado||'',false,ahoraModificado()]
     await sheetsAppend('INGRESOS!A1', [rowIngreso])
   }
   await registrarLog({ accion:'PAGO_ACTUALIZADO', detalle:`${campos.idPago} actualizado`, idReferencia:campos.idPago, empleado, resultado:'OK' })

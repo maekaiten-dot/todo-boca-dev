@@ -1,6 +1,6 @@
 // src/pages/Ingresos.jsx
 import { useState, useEffect } from 'react'
-import { getIngresos, getArticulosAdmin } from '../api/sheets.js'
+import { getIngresos, getArticulosAdmin, fechaHoraAMsAR } from '../api/sheets.js'
 
 export default function Ingresos() {
   const [ingresos, setIngresos] = useState([])
@@ -16,11 +16,7 @@ export default function Ingresos() {
     setError(null)
     try {
       const [ing, arts] = await Promise.all([getIngresos(), getArticulosAdmin()])
-      setIngresos(ing.sort((a, b) => {
-        const fa = a.fecha?.split('/').reverse().join('') + a.hora
-        const fb = b.fecha?.split('/').reverse().join('') + b.hora
-        return fb.localeCompare(fa)
-      }))
+      setIngresos(ing)
       setArticulos(arts)
     } catch (e) {
       setError('No se pudo cargar.')
@@ -31,6 +27,42 @@ export default function Ingresos() {
 
   const normalizr = str => str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
 
+  // Orden de la tabla: por defecto, última modificación primero. Tocar el título de una columna
+  // ordena por esa columna; tocarlo de nuevo invierte el orden (igual que en Pagos).
+  const [orden, setOrden] = useState({ col: 'modificado', dir: 'desc' })
+  const COLUMNAS = [
+    { id: 'idIngreso', label: 'ID', valor: i => i.idIngreso },
+    { id: 'fecha', label: 'Fecha', valor: i => fechaHoraAMsAR(i.fecha, i.hora), num: true },
+    { id: 'articulo', label: 'Artículo', valor: i => normalizr(i.articuloNombre || i.articuloId || '') },
+    { id: 'cantidad', label: 'Cant.', valor: i => i.cantidad || 0, num: true },
+    { id: 'costoUnitario', label: 'Costo unit.', valor: i => i.costoUnitario || 0, num: true },
+    { id: 'costoTotal', label: 'Costo total', valor: i => i.costoTotal || 0, num: true },
+    { id: 'proveedor', label: 'Proveedor', valor: i => normalizr(i.proveedor || '') },
+    { id: 'empleado', label: 'Empleado', valor: i => normalizr(i.empleado || '') },
+    { id: 'modificado', label: 'Modificado', valor: i => i.modificadoMs || 0, num: true },
+  ]
+  function ordenarPor(col) {
+    const c = COLUMNAS.find(x => x.id === col)
+    setOrden(o => o.col === col ? { col, dir: o.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: c?.num ? 'desc' : 'asc' })
+  }
+  const colOrden = COLUMNAS.find(x => x.id === orden.col) || COLUMNAS[COLUMNAS.length - 1]
+  const comparar = (a, b) => {
+    const va = colOrden.valor(a), vb = colOrden.valor(b)
+    const r = colOrden.num ? va - vb : String(va).localeCompare(String(vb), 'es', { numeric: true })
+    return (orden.dir === 'asc' ? r : -r) || (b.modificadoMs - a.modificadoMs) || (b.rowNum - a.rowNum)
+  }
+  const thOrden = col => {
+    const c = COLUMNAS.find(x => x.id === col), activa = orden.col === col
+    return (
+      <th key={col} style={{ ...S.th, cursor: 'pointer', userSelect: 'none', ...(activa ? { color: 'var(--accent)' } : {}) }} onClick={() => ordenarPor(col)} title="Tocá para ordenar" aria-sort={activa ? (orden.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+        {c.label}<span style={{ marginLeft: 4, opacity: activa ? 1 : 0.3 }}>{activa ? (orden.dir === 'asc' ? '▲' : '▼') : '↕'}</span>
+      </th>
+    )
+  }
+  const fmtModif = i => i.modificado
+    ? i.modificado.replace(/^(\d{1,2}\/\d{1,2})\/\d{4}\s+(\d{1,2}:\d{2}).*$/, '$1 $2')
+    : i.modificadoMs ? new Date(i.modificadoMs - 3 * 3600000).toISOString().slice(5, 16).replace(/^(\d{2})-(\d{2})T/, '$2/$1 ') : '—'
+
   const ingresosFiltrados = ingresos.filter(i => {
     if (!busqueda.trim()) return true
     const q = normalizr(busqueda)
@@ -38,7 +70,7 @@ export default function Ingresos() {
       normalizr(i.articuloId).includes(q) ||
       normalizr(i.proveedor).includes(q) ||
       normalizr(i.idIngreso).includes(q)
-  })
+  }).sort(comparar)
 
   if (loading) return <div style={S.center}><div style={S.loadingText}>Cargando ingresos...</div></div>
   if (error) return (
@@ -72,14 +104,7 @@ export default function Ingresos() {
           <table style={S.table}>
             <thead>
               <tr>
-                <th style={S.th}>ID</th>
-                <th style={S.th}>Fecha</th>
-                <th style={S.th}>Artículo</th>
-                <th style={S.th}>Cant.</th>
-                <th style={S.th}>Costo unit.</th>
-                <th style={S.th}>Costo total</th>
-                <th style={S.th}>Proveedor</th>
-                <th style={S.th}>Empleado</th>
+                {COLUMNAS.map(c => thOrden(c.id))}
               </tr>
             </thead>
             <tbody>
@@ -103,6 +128,7 @@ export default function Ingresos() {
                     <td style={{...S.td, color:'var(--accent)', fontWeight:700}}>${(ing.costoTotal||0).toLocaleString('es-AR')}</td>
                     <td style={{...S.td, color:'var(--muted)'}}>{ing.proveedor}</td>
                     <td style={{...S.td, color:'var(--muted)'}}>{ing.empleado}</td>
+                    <td style={{...S.td, color:'var(--muted)', whiteSpace:'nowrap', fontSize:12}} title={ing.modificado ? `Modificado ${ing.modificado}` : 'Fecha de carga'}>{fmtModif(ing)}</td>
                   </tr>
                 )
               })}

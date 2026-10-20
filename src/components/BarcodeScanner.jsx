@@ -4,7 +4,7 @@ import jsQR from 'jsqr'
 
 // onDetected puede devolver { ok, nombre } o una promesa (ej. fichadas, que consultan al servidor).
 // titulo: texto del encabezado · autoCerrarMs: cierra solo tras un resultado ok (0 = no cierra)
-export default function BarcodeScanner({ onDetected, onClose, titulo = 'ESCANEAR QR', autoCerrarMs = 0 }) {
+export default function BarcodeScanner({ onDetected, onClose, titulo = 'ESCANEAR QR', autoCerrarMs = 0, zIndex = 0 }) {
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
   const streamRef = useRef(null)
@@ -148,7 +148,7 @@ export default function BarcodeScanner({ onDetected, onClose, titulo = 'ESCANEAR
   }
 
   return (
-    <div style={S.overlay} onClick={handleClose}>
+    <div style={zIndex ? { ...S.overlay, zIndex } : S.overlay} onClick={handleClose}>
       <div style={S.box} onClick={e => e.stopPropagation()}>
         <div style={S.header}>
           <span style={S.title}>{titulo}</span>

@@ -1,5 +1,6 @@
 // src/pages/Articulos.jsx
 import { useState, useEffect, useRef } from 'react'
+import ModalArticulo from '../components/ModalArticulo.jsx'
 import { getArticulosAdmin, generarIdArticulo, agregarArticulo, editarArticulo, toggleDisponibilidad, calcularStockTodos } from '../api/sheets.js'
 
 const CLOUDINARY_CLOUD = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
@@ -271,145 +272,11 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
 
       {/* Modal formulario */}
       {modalAbierto && (
-        <div style={S.overlay} onClick={() => !saving && setModalAbierto(false)}>
-          <div style={S.modal} onClick={e => e.stopPropagation()}>
-            <div style={S.modalHeader}>
-              <div style={S.modalTitle}>{editando ? 'EDITAR ARTÍCULO' : 'NUEVO ARTÍCULO'}</div>
-              <button style={S.closeBtn} onClick={() => setModalAbierto(false)}>✕</button>
-            </div>
-
-            <div style={S.formScroll}>
-
-              <div style={S.fieldGroup}>
-                <label style={S.label}>ID ARTÍCULO *</label>
-                <input style={S.input} value={form.id} onChange={e => setForm(f => ({...f, id: e.target.value}))} />
-              </div>
-
-              <div style={S.fieldGroup}>
-                <label style={S.label}>NOMBRE *</label>
-                <input style={S.input} value={form.nombre} onChange={e => setForm(f => ({...f, nombre: e.target.value}))} />
-              </div>
-
-              <div style={S.fieldRow}>
-                <div style={S.fieldGroup}>
-                  <label style={S.label}>PRECIO UNITARIO</label>
-                  <input style={S.input} type="text" inputMode="numeric" value={form.precioUnitario} onChange={e => setForm(f => ({...f, precioUnitario: e.target.value}))} />
-                </div>
-                <div style={S.fieldGroup}>
-                  <label style={S.label}>COSTO UNITARIO</label>
-                  <input style={S.input} type="text" inputMode="numeric" value={form.costoUnitario} onChange={e => setForm(f => ({...f, costoUnitario: e.target.value}))} />
-                </div>
-              </div>
-
-              <div style={S.fieldRow}>
-                <div style={S.fieldGroup}>
-                  <label style={S.label}>STOCK INICIAL</label>
-                  <input style={S.input} type="text" inputMode="numeric" value={form.stockInicial} onChange={e => setForm(f => ({...f, stockInicial: e.target.value}))} />
-                </div>
-                <div style={S.fieldGroup}>
-                  <label style={S.label}>CANT. A REPONER</label>
-                  <input style={S.input} type="text" inputMode="numeric" value={form.cantidadReponer} onChange={e => setForm(f => ({...f, cantidadReponer: e.target.value}))} />
-                </div>
-              </div>
-
-              <div style={S.fieldGroup}>
-                <label style={S.label}>DISPONIBILIDAD</label>
-                <div style={S.dispBtns}>
-                  {['ACTIVO','INACTIVO'].map(d => (
-                    <button key={d} style={{...S.dispBtnOpt, ...(form.disponibilidad === d ? S.dispBtnOptActive : {})}} onClick={() => setForm(f => ({...f, disponibilidad: d}))}>
-                      {d}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div style={S.fieldGroup}>
-                <label style={S.label}>INFO</label>
-                <textarea style={S.textarea} value={form.info} onChange={e => setForm(f => ({...f, info: e.target.value}))} rows={2} />
-              </div>
-
-              {/* FOTO */}
-              <div style={S.fieldGroup}>
-                <label style={S.label}>FOTO</label>
-
-                {/* Preview */}
-                <div style={S.fotoPreviewWrap}>
-                  {form.foto ? (
-                    <img src={form.foto} alt="" style={S.fotoPreviewImg} onError={e => e.currentTarget.style.display='none'} />
-                  ) : (
-                    <div style={S.fotoPreviewVacio}>
-                      {uploadingFoto ? <span style={{fontSize:13, color:'var(--muted)'}}>Subiendo...</span> : <span style={{fontSize:32}}>📷</span>}
-                    </div>
-                  )}
-                </div>
-
-                {/* Botones foto */}
-                <div style={S.fotoBtns}>
-                  {/* Cámara trasera */}
-                  <button
-                    style={S.fotoBtn}
-                    onClick={() => fileInputCamara.current?.click()}
-                    disabled={uploadingFoto}
-                  >
-                    📷 Cámara
-                  </button>
-                  {/* Galería */}
-                  <button
-                    style={S.fotoBtn}
-                    onClick={() => fileInputGaleria.current?.click()}
-                    disabled={uploadingFoto}
-                  >
-                    🖼️ Galería
-                  </button>
-                  {/* Borrar foto */}
-                  {form.foto && (
-                    <button
-                      style={{...S.fotoBtn, ...S.fotoBtnBorrar}}
-                      onClick={() => setForm(f => ({...f, foto: ''}))}
-                      disabled={uploadingFoto}
-                    >
-                      🗑️
-                    </button>
-                  )}
-                </div>
-
-                {/* Input cámara trasera */}
-                <input
-                  ref={fileInputCamara}
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  style={{display:'none'}}
-                  onChange={handleFotoSeleccionada}
-                />
-                {/* Input galería */}
-                <input
-                  ref={fileInputGaleria}
-                  type="file"
-                  accept="image/*"
-                  style={{display:'none'}}
-                  onChange={handleFotoSeleccionada}
-                />
-
-                {/* URL manual como alternativa */}
-                <input
-                  style={{...S.input, marginTop:6, fontSize:13}}
-                  value={form.foto}
-                  onChange={e => setForm(f => ({...f, foto: e.target.value}))}
-                  placeholder="O pegá una URL manualmente..."
-                />
-              </div>
-
-            </div>
-
-            <div style={S.modalFooter}>
-              <button style={S.cancelBtn} onClick={() => setModalAbierto(false)} disabled={saving}>Cancelar</button>
-              <button style={{...S.saveBtn, opacity: (saving||uploadingFoto) ? 0.6 : 1}} onClick={guardar} disabled={saving||uploadingFoto}>
-                {saving ? 'Guardando...' : uploadingFoto ? 'Subiendo foto...' : 'Guardar'}
-              </button>
-            </div>
-          </div>
-        </div>
+        <ModalArticulo
+          inicial={form} editando={editando} empleado={empleado}
+          onCerrar={() => setModalAbierto(false)}
+          onGuardado={async () => { showToast(editando ? 'Artículo actualizado' : 'Artículo creado', 'success'); setModalAbierto(false); await cargar() }}
+        />
       )}
     </div>
   )

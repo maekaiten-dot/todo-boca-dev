@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import { getPagos, registrarPago, actualizarPago, anularPago, getArticulosAdmin } from '../api/sheets.js'
 import BarcodeScanner from '../components/BarcodeScanner.jsx'
+import EscanearFactura from '../components/EscanearFactura.jsx'
 
 // ── Helpers de estado ─────────────────────────────────────────────────────────
 function getEstado(p) {
@@ -68,6 +69,7 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
   const [artBusqueda, setArtBusqueda] = useState('')
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState(null)
+  const [escaneando, setEscaneando] = useState(false)
   const [confirmAnular, setConfirmAnular] = useState(null)
   const [anulando, setAnulando] = useState(false)
   const [scannerAbierto, setScannerAbierto] = useState(false)
@@ -271,9 +273,24 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
         <div style={S.headerTitle}>PAGOS</div>
         <div style={{display:'flex', gap:8}}>
           <button style={S.refreshBtn} onClick={cargar}>↻</button>
+          <button style={{...S.newBtn, background:'none', border:'1.5px solid var(--accent)', color:'var(--accent)'}} onClick={() => setEscaneando(true)}>📷 Escanear factura</button>
           <button style={S.newBtn} onClick={abrirNuevo}>+ Nuevo</button>
         </div>
       </div>
+
+      {escaneando && (
+        <EscanearFactura
+          articulos={articulos}
+          proveedores={[...new Set(pagos.map(p => p.proveedor).filter(Boolean))]}
+          empleado={empleadoFijo || empleado}
+          onCerrar={() => setEscaneando(false)}
+          onGuardado={async r => {
+            setEscaneando(false)
+            showToast(`Factura de ${r.proveedor} cargada: ${r.cantidad} ${r.cantidad === 1 ? 'producto' : 'productos'}${r.costosActualizados ? ` · ${r.costosActualizados} costo(s) actualizado(s)` : ''}`, 'success')
+            await cargar()
+          }}
+        />
+      )}
 
       {/* Resumen */}
       <div style={S.resumenRow}>

@@ -1528,3 +1528,67 @@ export async function resolverAvisoArticulo({ id, nota = '', quien = '' }) {
   await sheetsUpdate(`${HOJA_AVISOS}!I${idx + 2}:L${idx + 2}`, [['RESUELTO', quien, `'${dt.fecha} ${String(dt.hora).slice(0, 5)}`, nota.trim()]])
   await registrarLog({ accion: 'AVISO_RESUELTO', detalle: `Aviso ${id} resuelto${nota ? ` (${nota.trim()})` : ''}`, idReferencia: id, empleado: quien, resultado: 'OK' })
 }
+
+// ── Facturas de proveedores escaneadas ───────────────────────────────────────
+// Hoja MEMORIA FACTURAS · A:PROVEEDOR  B:CODIGO  C:DESCRIPCION  D:ARTICULO  E:ACTUALIZADO  F:QUIEN
+// Cada vez que se confirma una factura escaneada, se guarda qué artículo es cada renglón del proveedor:
+// la próxima vez que llegue el mismo código o descripción, se asigna solo. Si hay repetidos, gana el último.
+const HOJA_MEMORIA = 'MEMORIA FACTURAS'
+const ENCABEZADOS_MEMORIA = ['PROVEEDOR', 'CODIGO', 'DESCRIPCION', 'ARTICULO', 'ACTUALIZADO', 'QUIEN']
+let _hojaMemoriaLista = false
+async function asegurarHojaMemoria() {
+  if (_hojaMemoriaLista) return
+  const token = await getAccessToken()
+  const metaRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}?fields=sheets.properties.title`, { headers: { Authorization: `Bearer ${token}` } })
+  if (!metaRes.ok) throw new Error(`Sheets META error: ${metaRes.status}`)
+  const meta = await metaRes.json()
+  if (!(meta.sheets || []).some(s => s.properties?.title === HOJA_MEMORIA)) {
+    const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}:batchUpdate`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requests: [{ addSheet: { properties: { title: HOJA_MEMORIA } } }] }),
+    })
+    if (!res.ok) throw new Error(`Sheets ADD SHEET error: ${res.status}`)
+    await sheetsUpdate(`${HOJA_MEMORIA}!A1:F1`, [ENCABEZADOS_MEMORIA])
+  }
+  _hojaMemoriaLista = true
+}
+
+export async function getMemoriaFacturas() {
+  let data
+  try { data = await sheetsGet(`${HOJA_MEMORIA}!A2:F`) }
+  catch (e) { if (String(e.message).includes('400')) return []; throw e }
+  return (data.values || []).filter(r => r[0] && r[3]).map(r => ({ proveedor: r[0], codigo: r[1] || '', descripcion: r[2] || '', articuloId: r[3] }))
+}
+
+export async function guardarMemoriaFacturas(entradas, quien = '') {
+  if (!entradas.length) return
+  await asegurarHojaMemoria()
+  const dt = getArgentinaDate()
+  await sheetsAppend(`${HOJA_MEMORIA}!A1`, entradas.map(e => [e.proveedor, e.codigo ? `'${e.codigo}` : '', e.descripcion || '', e.articuloId, `'${dt.fecha} ${dt.hora}`, quien]))
+}
+
+// Carga todos los renglones de una factura como pagos de MERCADERÍA de una sola vez (una sola
+// escritura en PAGOS y otra en INGRESOS, con IDs seguidos). montoPagado de cada renglón ya viene repartido.
+export async function registrarPagosLote({ renglones, fechaIngreso, fechaPago, proveedor, descripcion = '', empleado = '' }) {
+  if (!renglones.length) return []
+  await asegurarModificadoPagos()
+  await asegurarModificadoIngresos()
+  const dt = getArgentinaDate()
+  const data = await sheetsGet('PAGOS!A2:A')
+  const prefix = `P${String(dt.raw.getFullYear()).slice(2)}${String(dt.raw.getMonth()+1).padStart(2,'0')}${String(dt.raw.getDate()).padStart(2,'0')}`
+  const usados = new Set((data.values || []).map(r => r[0]).filter(id => id?.startsWith(prefix)))
+  let seq = usados.size + 1
+  const ids = renglones.map(() => { while (usados.has(`${prefix}-${String(seq).padStart(3,'0')}`)) seq++; const id = `${prefix}-${String(seq).padStart(3,'0')}`; usados.add(id); return id })
+  const mod = ahoraModificado()
+  const filas = renglones.map((r, k) => {
+    const cant = Number(r.cantidad) || 0, cu = Math.round((Number(r.costoUnitario) || 0) * 100) / 100
+    return [ids[k], 'MERCADERÍA', fechaIngreso ? `'${fechaIngreso}` : '', r.pagado || r.montoPagado > 0 ? (fechaPago ? `'${fechaPago}` : '') : '', r.articuloId, r.articuloNombre, cant, cu, Math.round(cant * cu * 100) / 100, descripcion, proveedor || '', Math.round((Number(r.montoPagado) || 0) * 100) / 100, r.pagado ? 'TRUE' : 'FALSE', empleado || '', 'FALSE', mod]
+  })
+  await sheetsAppend('PAGOS!A1', filas)
+  if (fechaIngreso) {
+    await sheetsAppend('INGRESOS!A1', filas.map(f => [`I${f[0].slice(1)}`, `'${fechaIngreso}`, `'${dt.hora}`, f[4], f[5], f[6], f[7], f[8], proveedor || '', empleado || '', false, mod]))
+  }
+  const total = filas.reduce((s, f) => s + f[8], 0)
+  await registrarLog({ accion: 'FACTURA_ESCANEADA', detalle: `${proveedor} · ${descripcion} · ${filas.length} renglón(es) · $${Math.round(total).toLocaleString('es-AR')}`, idReferencia: ids[0], empleado, resultado: 'OK' })
+  return ids
+}

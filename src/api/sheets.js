@@ -1356,6 +1356,12 @@ export async function getTutoriales() {
     .sort((a, b) => b.ms - a.ms)
 }
 
+// Tutoriales que ya vio este dispositivo (para el aviso de tutoriales nuevos). El que sube un
+// tutorial desde la app lo marca como visto en su dispositivo: a quien lo subió no le avisa.
+export const CLAVE_TUTORIALES_VISTOS = 'tb_tutoriales_vistos'
+export function leerTutorialesVistos() { try { const v = JSON.parse(localStorage.getItem(CLAVE_TUTORIALES_VISTOS)); return Array.isArray(v) ? v : null } catch { return null } }
+export function guardarTutorialesVistos(ids) { try { localStorage.setItem(CLAVE_TUTORIALES_VISTOS, JSON.stringify([...new Set(ids)])) } catch {} }
+
 export async function agregarTutorial({ titulo, descripcion = '', link, subidoPor = '' }) {
   await asegurarHojaTutoriales()
   const dt = getArgentinaDate()
@@ -1365,6 +1371,8 @@ export async function agregarTutorial({ titulo, descripcion = '', link, subidoPo
   while (ids.has(`T${String(seq).padStart(3, '0')}`)) seq++
   const id = `T${String(seq).padStart(3, '0')}`
   await sheetsAppend(`${HOJA_TUTORIALES}!A1`, [[id, `'${dt.fecha}`, `'${dt.hora}`, titulo, descripcion, link, subidoPor, 'TRUE']])
+  const vistos = leerTutorialesVistos()
+  if (vistos) guardarTutorialesVistos([...vistos, id])
   await registrarLog({ accion: 'TUTORIAL_AGREGADO', detalle: titulo, idReferencia: id, empleado: subidoPor, resultado: 'OK' })
   return id
 }

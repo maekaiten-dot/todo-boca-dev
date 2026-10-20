@@ -17,7 +17,7 @@ import Asistencia from './pages/Asistencia.jsx'
 import Administracion from './pages/Administracion.jsx'
 import FicharTablet from './components/FicharTablet.jsx'
 import AvisoPrecios, { totalCambios, resumenCambios } from './components/AvisoPrecios.jsx'
-import { getArticulos, getUsuarios, registrarLog, calcularStockTodos, leerArticulosVistos, guardarArticulosVistos } from './api/sheets.js'
+import { getArticulos, getUsuarios, registrarLog, calcularStockTodos, leerArticulosVistos, guardarArticulosVistos, getTutoriales, leerTutorialesVistos, guardarTutorialesVistos } from './api/sheets.js'
 
 // Aviso de cambios en artículos (precios, productos nuevos, activados / desactivados): cada dispositivo
 // guarda los artículos que ya vio y la app vuelve a leer ARTICULOS cada INTERVALO_PRECIOS (y al volver
@@ -168,6 +168,11 @@ export default function App() {
   })
 
   const [cambiosPrecio, setCambiosPrecio] = useState(null)
+  // Tutoriales nuevos que este dispositivo todavía no vio (van en el mismo aviso)
+  const [tutosNuevos, setTutosNuevos] = useState([])
+  const [versionTutos, setVersionTutos] = useState(0)
+  const tutosRef = useRef([])
+  const avisoCambios = (cambiosPrecio || tutosNuevos.length) ? { ...(cambiosPrecio || {}), tutoriales: tutosNuevos } : null
   const [verAvisoPrecios, setVerAvisoPrecios] = useState(false) // Admin: abrió el detalle desde el aviso chico
   const perfilRef = useRef(perfilGuardado)
   perfilRef.current = perfilGuardado
@@ -203,7 +208,29 @@ export default function App() {
     setCambiosPrecio(cambios)
   }
 
+  // Compara los tutoriales activos con los que ya vio este dispositivo
+  function detectarTutoriales(tutos) {
+    const ids = tutos.map(t => t.id)
+    if (ids.join('|') !== tutosRef.current.map(t => t.id).join('|')) setVersionTutos(v => v + 1)
+    tutosRef.current = tutos
+    const vistos = leerTutorialesVistos()
+    if (!vistos) { guardarTutorialesVistos(ids); return }
+    const vistosSet = new Set(vistos)
+    setTutosNuevos(tutos.filter(t => !vistosSet.has(t.id)).map(t => ({ id: t.id, titulo: t.titulo, descripcion: t.descripcion, subidoPor: t.subidoPor, fecha: t.fecha })))
+  }
+  async function revisarTutoriales() {
+    try { detectarTutoriales(await getTutoriales()) } catch (e) { console.warn('No se pudieron leer los tutoriales', e) }
+  }
+
   function entendidoPrecios() {
+    const tutosVistos = tutosNuevos
+    if (tutosVistos.length) {
+      guardarTutorialesVistos([...(leerTutorialesVistos() || []), ...tutosRef.current.map(t => t.id)])
+      setTutosNuevos([])
+      registrarLog({ accion: 'TUTORIALES_NUEVOS_VISTOS', detalle: tutosVistos.map(t => `${t.id} ${t.titulo}`).join(' · ').slice(0, 400), empleado: perfilRef.current?.nombre || '', resultado: 'OK' })
+    }
+    setVerAvisoPrecios(false)
+    if (!cambiosPrecio) return
     const c = cambiosPrecio || {}
     const v = leerArticulosVistos() || { activos: {}, inactivos: {} }
     const activos = Object.fromEntries(articulosRef.current.map(a => [a.id, datoVisto(a)]))
@@ -230,6 +257,7 @@ export default function App() {
       if (firmaArticulos(arts) !== firmaArticulos(articulosRef.current)) { articulosRef.current = arts; setArticulos(arts) }
       detectarCambiosPrecio(arts)
     } catch (e) { console.warn('No se pudieron releer los artículos', e) }
+    revisarTutoriales()
   }
   useEffect(() => {
     const id = setInterval(() => { if (document.visibilityState === 'visible') refrescarArticulos() }, INTERVALO_PRECIOS)
@@ -250,6 +278,7 @@ export default function App() {
       articulosRef.current = arts
       setArticulos(arts)
       detectarCambiosPrecio(arts)
+      revisarTutoriales()
       recalcularStock(arts)
       await registrarLog({ accion:'ARTICULOS_CARGADOS', detalle:`${arts.length} artículos cargados`, empleado:perfilGuardado?.nombre||'', resultado:'OK' })
     } catch (e) { console.error(e) }
@@ -356,16 +385,17 @@ export default function App() {
   return (
     <>
       <style>{CSS_GLOBAL}</style>
-      <AvisoPrecios cambios={!esAdmin || verAvisoPrecios ? cambiosPrecio : null} onEntendido={entendidoPrecios} />
+      <AvisoPrecios cambios={!esAdmin || verAvisoPrecios ? avisoCambios : null} onEntendido={entendidoPrecios}
+        onVerTutoriales={() => { entendidoPrecios(); handleTabChange('tutos') }} />
       <div style={S.app}>
         <div style={S.header}>
           <div style={S.logo} onClick={handleLogoTap} role="button">
             <span style={S.logoTodo}>TODO</span><span style={S.logoBoca}>BOCA</span>
           </div>
           <div style={S.headerRight}>
-            {esAdmin && totalCambios(cambiosPrecio) > 0 && (
+            {esAdmin && totalCambios(avisoCambios) > 0 && (
               <button style={S.avisoPreciosPill} onClick={() => setVerAvisoPrecios(true)} title="Ver qué cambió en los artículos">
-                📢 {resumenCambios(cambiosPrecio)}
+                📢 {resumenCambios(avisoCambios)}
               </button>
             )}
             <FicharTablet />
@@ -397,7 +427,7 @@ export default function App() {
             <div style={tabStyle('conteo')}><Conteo articulos={articulos} usuarios={usuarios} perfilNombre={empleadoActual} esAdmin={esAdmin} onActualizado={() => recalcularStock()} /></div>
           )}
           {tabsVisitadas.has('tutos') && (
-            <div style={tabStyle('tutos')}><Tutoriales esAdmin={esAdmin} perfilNombre={empleadoActual} /></div>
+            <div style={tabStyle('tutos')}><Tutoriales esAdmin={esAdmin} perfilNombre={empleadoActual} version={versionTutos} /></div>
           )}
           {esAdmin && tabsVisitadas.has('rota') && (
             <div style={tabStyle('rota')}><Rotacion articulos={articulos} stockMap={stockMap} /></div>

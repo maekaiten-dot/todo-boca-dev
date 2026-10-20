@@ -16,7 +16,7 @@ function tipoDeLink(link) {
   return { icon: '🔗', label: 'Link' }
 }
 
-export default function Tutoriales({ esAdmin = false, perfilNombre = '' }) {
+export default function Tutoriales({ esAdmin = false, perfilNombre = '', version = 0 }) {
   const [tutoriales, setTutoriales] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -29,7 +29,8 @@ export default function Tutoriales({ esAdmin = false, perfilNombre = '' }) {
   const [quitando, setQuitando] = useState(false)
   const [toast, setToast] = useState(null)
 
-  useEffect(() => { cargar() }, [])
+  // version: la app la sube cuando detecta que cambió la lista de tutoriales (se recarga sola)
+  useEffect(() => { cargar() }, [version])
 
   async function cargar() {
     setLoading(true)

@@ -1,28 +1,31 @@
 // src/components/AvisoPrecios.jsx
 // Aviso por encima de todo cuando cambian los artículos: precios, productos nuevos, productos que
-// pasan a INACTIVO (ya no se venden) o que vuelven a ACTIVO.
+// pasan a INACTIVO (ya no se venden) o que vuelven a ACTIVO. También avisa los tutoriales nuevos.
 // La app vuelve a leer ARTICULOS cada 90 segundos (y al volver a la pestaña) y compara con lo que
 // ese dispositivo ya vio (guardado en el navegador). En la tablet el aviso queda hasta tocar
 // "Entendido" (no se cierra tocando afuera); a los Admin se les abre solo si tocan el aviso chico.
 const fmt$ = n => '$' + Math.round(n).toLocaleString('es-AR')
 
-export const totalCambios = c => !c ? 0 : (c.precios?.length || 0) + (c.nuevos?.length || 0) + (c.reactivados?.length || 0) + (c.bajas?.length || 0)
+export const totalCambios = c => !c ? 0 : (c.precios?.length || 0) + (c.nuevos?.length || 0) + (c.reactivados?.length || 0) + (c.bajas?.length || 0) + (c.tutoriales?.length || 0)
 
 // Texto corto para el aviso chico de los Admin
 export function resumenCambios(c) {
   const n = totalCambios(c)
   if (n === (c.precios?.length || 0)) return `${n} ${n === 1 ? 'precio cambió' : 'precios cambiaron'}`
-  return `${n} ${n === 1 ? 'cambio' : 'cambios'} en artículos`
+  if (n === (c.tutoriales?.length || 0)) return n === 1 ? '1 tutorial nuevo' : `${n} tutoriales nuevos`
+  if (!c.tutoriales?.length) return `${n} ${n === 1 ? 'cambio' : 'cambios'} en artículos`
+  return `${n} novedades`
 }
 
 function titulo(c) {
   const n = totalCambios(c)
-  const soloUno = [c.precios, c.nuevos, c.reactivados, c.bajas].filter(x => x?.length).length === 1
+  const soloUno = [c.precios, c.nuevos, c.reactivados, c.bajas, c.tutoriales].filter(x => x?.length).length === 1
+  if (soloUno && c.tutoriales?.length) return n === 1 ? 'Hay un tutorial nuevo' : `Hay ${n} tutoriales nuevos`
   if (soloUno && c.precios?.length) return n === 1 ? 'Cambió un precio' : `Cambiaron ${n} precios`
   if (soloUno && c.nuevos?.length) return n === 1 ? 'Hay un producto nuevo' : `Hay ${n} productos nuevos`
   if (soloUno && c.bajas?.length) return n === 1 ? 'Un producto ya no se vende' : `${n} productos ya no se venden`
   if (soloUno && c.reactivados?.length) return n === 1 ? 'Un producto vuelve a venderse' : `${n} productos vuelven a venderse`
-  return `${n} cambios en artículos`
+  return c.tutoriales?.length ? `${n} novedades` : `${n} cambios en artículos`
 }
 
 function Foto({ src }) {
@@ -39,7 +42,7 @@ function Seccion({ titulo, color, items, render }) {
   )
 }
 
-export default function AvisoPrecios({ cambios, onEntendido }) {
+export default function AvisoPrecios({ cambios, onEntendido, onVerTutoriales }) {
   if (!totalCambios(cambios)) return null
   const fila = (c, derecha, extra = {}) => (
     <div key={c.id} style={{ ...S.fila, ...extra }}>
@@ -55,7 +58,9 @@ export default function AvisoPrecios({ cambios, onEntendido }) {
     <div style={S.overlay} role="alertdialog" aria-modal="true" aria-label="Cambios en artículos">
       <div style={S.box}>
         <div style={S.titulo}>📢 {titulo(cambios)}</div>
-        <div style={S.sub}>Ya está actualizado en la app{cambios.precios?.length ? ': se cobra con el precio nuevo, también en el carrito' : ''}.</div>
+        <div style={S.sub}>{totalCambios(cambios) === (cambios.tutoriales?.length || 0)
+          ? 'Leelo cuando tengas un momento: está en la solapa Tutoriales.'
+          : `Ya está actualizado en la app${cambios.precios?.length ? ': se cobra con el precio nuevo, también en el carrito' : ''}.`}</div>
         <div style={S.lista}>
           <Seccion titulo="💲 Cambios de precio" color="var(--accent)" items={cambios.precios} render={c => {
             const sube = c.ahora > c.antes
@@ -66,9 +71,22 @@ export default function AvisoPrecios({ cambios, onEntendido }) {
           }} />
           <Seccion titulo="🆕 Productos nuevos" color="#22c55e" items={cambios.nuevos} render={c => fila(c, <div style={S.ahora}>{fmt$(c.precio)}</div>)} />
           <Seccion titulo="✅ Vuelven a venderse (activos)" color="#22c55e" items={cambios.reactivados} render={c => fila(c, <div style={S.ahora}>{fmt$(c.precio)}</div>)} />
+          <Seccion titulo="📘 Tutoriales nuevos" color="#60a5fa" items={cambios.tutoriales} render={t => (
+            <div key={t.id} style={S.fila}>
+              <div style={{ ...S.foto, fontSize: 28 }}>📘</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={S.nombre}>{t.titulo}</div>
+                {t.descripcion && <div style={{ ...S.codigo, fontSize: 13, color: 'var(--text)' }}>{t.descripcion}</div>}
+                <div style={S.codigo}>{t.fecha}{t.subidoPor ? ` · subido por ${t.subidoPor}` : ''}</div>
+              </div>
+            </div>
+          )} />
           <Seccion titulo="⛔ Ya no se venden (inactivos)" color="#ef4444" items={cambios.bajas} render={c => fila(c, <div style={{ ...S.antes, textDecoration: 'none' }}>INACTIVO</div>, { opacity: 0.8 })} />
         </div>
-        <button style={S.btn} onClick={onEntendido}>ENTENDIDO</button>
+        <div style={{ display: 'flex', gap: 10, flexShrink: 0 }}>
+          {cambios.tutoriales?.length > 0 && onVerTutoriales && <button style={S.btnSec} onClick={onVerTutoriales}>📘 VER TUTORIALES</button>}
+          <button style={S.btn} onClick={onEntendido}>ENTENDIDO</button>
+        </div>
       </div>
     </div>
   )
@@ -88,5 +106,6 @@ const S = {
   codigo: { fontFamily: 'Barlow, sans-serif', fontSize: 12, color: 'var(--muted)', marginTop: 2 },
   antes: { fontFamily: 'Barlow Condensed, sans-serif', fontSize: 16, color: 'var(--muted)', textDecoration: 'line-through' },
   ahora: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 26, color: 'var(--accent)', lineHeight: 1.1 },
-  btn: { width: '100%', padding: '16px', background: 'var(--accent)', border: 'none', borderRadius: 10, color: '#000', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 20, letterSpacing: 1, cursor: 'pointer', flexShrink: 0 },
+  btnSec: { flex: 1, padding: '16px', background: 'none', border: '2px solid #60a5fa', borderRadius: 10, color: '#60a5fa', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 18, letterSpacing: 1, cursor: 'pointer' },
+  btn: { flex: 1, width: '100%', padding: '16px', background: 'var(--accent)', border: 'none', borderRadius: 10, color: '#000', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 20, letterSpacing: 1, cursor: 'pointer', flexShrink: 0 },
 }

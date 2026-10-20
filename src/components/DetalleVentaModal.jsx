@@ -2,6 +2,8 @@
 import { useState } from 'react'
 import { anularItemVenta, registrarLog, metodosDe, repartoPago } from '../api/sheets.js'
 
+const m$ = n => (n < 0 ? '−$' : '$') + Math.abs(Math.round(n || 0)).toLocaleString('es-AR')  // monto con signo (los cambios tienen renglones en negativo)
+
 export default function DetalleVentaModal({ venta, onClose, onActualizar }) {
   const [confirmItem, setConfirmItem] = useState(null)
   const [anulando, setAnulando] = useState(false)
@@ -10,7 +12,7 @@ export default function DetalleVentaModal({ venta, onClose, onActualizar }) {
   const METODO_ICONS = {
     'Efectivo Pesos':'💵','Efectivo ARS':'💵',
     'Tarjeta de Crédito':'💳','Tarjeta de Débito':'💳','Tarjeta':'💳',
-    'QR':'📱','Transferencia':'🏦','Pix':'💠',
+    'QR':'📱','Transferencia':'🏦','Pix':'💠','Cambio':'🔄',
     'Efectivo Dólares':'🇺🇸','Efectivo USD':'🇺🇸',
     'Efectivo Reales':'🇧🇷','Efectivo BRL':'🇧🇷',
     'Efectivo Euros':'🇪🇺','Efectivo EUR':'🇪🇺',
@@ -111,7 +113,7 @@ export default function DetalleVentaModal({ venta, onClose, onActualizar }) {
                   <div style={{...S.itemNombre, ...(item.anulado ? S.strikethrough : {})}}>{item.nombre}</div>
                   <div style={S.itemSku}>{item.articulo}</div>
                   <div style={S.itemDetalle}>
-                    {item.cantidad} × ${(item.precioUnitario || 0).toLocaleString('es-AR')}
+                    {item.cantidad < 0 ? `↩ Devuelve ${-item.cantidad}` : item.cantidad} × ${(item.precioUnitario || 0).toLocaleString('es-AR')}
                     {item.descuento > 0 && <span style={S.descTag}> -{item.descuento}%</span>}
                     {item.descCarrito && item.descCarrito !== '0' && item.descCarrito !== '' &&
                       <span style={S.descTag}> carrito {item.descCarrito}</span>
@@ -121,7 +123,7 @@ export default function DetalleVentaModal({ venta, onClose, onActualizar }) {
               </div>
               <div style={S.itemRight}>
                 <div style={{...S.itemTotal, ...(item.anulado ? S.strikethrough : {})}}>
-                  ${Math.round(item.precioTotalFinal || item.precioTotal || 0).toLocaleString('es-AR')}
+                  {m$(item.precioTotalFinal || item.precioTotal || 0)}
                 </div>
                 {item.anulado
                   ? <div style={S.anuladoTag}>ANULADO</div>

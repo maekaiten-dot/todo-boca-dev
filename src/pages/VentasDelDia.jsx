@@ -7,7 +7,7 @@ import DetalleVentaModal from '../components/DetalleVentaModal.jsx'
 const METODO_ICONS = {
   'Efectivo Pesos':'💵','Efectivo ARS':'💵',
   'Tarjeta de Crédito':'💳','Tarjeta de Débito':'💳','Tarjeta':'💳',
-  'QR':'📱','Transferencia':'🏦','Pix':'💠',
+  'QR':'📱','Transferencia':'🏦','Pix':'💠','Cambio':'🔄',
   'Efectivo Dólares':'🇺🇸','Efectivo USD':'🇺🇸',
   'Efectivo Reales':'🇧🇷','Efectivo BRL':'🇧🇷',
   'Efectivo Euros':'🇪🇺','Efectivo EUR':'🇪🇺',
@@ -16,6 +16,7 @@ const METODO_ICONS = {
 // Métodos que cuentan como pesos en efectivo dentro de la caja
 const METODOS_EFECTIVO_PESOS = new Set(['Efectivo Pesos', 'Efectivo ARS', 'Efectivo'])
 const DIVISAS = { USD: 'US$', BRL: 'R$', EUR: '€' }
+const m$ = n => (n < 0 ? '−$' : '$') + Math.abs(Math.round(n || 0)).toLocaleString('es-AR')  // monto con signo (los cambios tienen renglones en negativo)
 // Íconos de un método (o de los dos, si se cobró con 2 medios)
 const iconos = m => metodosDe(m).map(x => METODO_ICONS[x] || '💰').join('') || '💰'
 // "Efectivo Pesos $20.000 + Tarjeta de Débito $15.000" (montos de toda la venta)
@@ -214,7 +215,7 @@ export default function VentasDelDia({ refreshKey, usuarios = [], perfilNombre =
 
           {Object.keys(porMetodo).length > 0 && (
             <div style={S.metodoSection}>
-              {Object.entries(porMetodo).sort((a, b) => b[1] - a[1]).map(([m, total]) => (
+              {Object.entries(porMetodo).filter(([, t]) => Math.round(t) !== 0).sort((a, b) => b[1] - a[1]).map(([m, total]) => (
                 <div key={m} style={S.metodoRow}>
                   <span>{iconos(m)} {m}</span>
                   <span style={S.metodoTotal}>${Math.round(total).toLocaleString('es-AR')}</span>
@@ -265,7 +266,7 @@ export default function VentasDelDia({ refreshKey, usuarios = [], perfilNombre =
                       <td colSpan={5} style={S.ventaHeaderId}>
                         {v.anulado && <span style={S.badge_anulada}>ANULADA</span>}
                         {tieneParcial && <span style={S.badge_parcial}>PARCIAL</span>}
-                        <span>{v.idVenta}</span>
+                        <span>{v.idVenta}</span>{v.items.some(i => i.cantidad < 0) && <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 800, color: '#f59e0b', border: '1px solid #f59e0b', borderRadius: 4, padding: '0 5px' }}>🔄 CAMBIO</span>}
                       </td>
                       <td colSpan={2} style={S.ventaHeaderTotal}>
                         {v.anulado ? (
@@ -311,20 +312,20 @@ export default function VentasDelDia({ refreshKey, usuarios = [], perfilNombre =
                           <td style={{...S.td, verticalAlign:'middle'}}>
                             {item.anulado ? (
                               <span style={{textDecoration:'line-through', opacity:0.5, color:'var(--muted)', fontWeight:700}}>
-                                ${pt.toLocaleString('es-AR')}
+                                {m$(pt)}
                               </span>
                             ) : tieneDto ? (
                               <span style={{display:'flex', alignItems:'center', gap:6}}>
                                 <span style={{textDecoration:'line-through', opacity:0.45, color:'var(--muted)', fontWeight:600, fontSize:12}}>
-                                  ${pt.toLocaleString('es-AR')}
+                                  {m$(pt)}
                                 </span>
                                 <span style={{color:'#22c55e', fontWeight:700, fontFamily:'Barlow Condensed, sans-serif', fontSize:15}}>
-                                  ${ptf.toLocaleString('es-AR')}
+                                  {m$(ptf)}
                                 </span>
                               </span>
                             ) : (
                               <span style={{color:'var(--accent)', fontWeight:700}}>
-                                ${ptf > 0 ? ptf.toLocaleString('es-AR') : pt.toLocaleString('es-AR')}
+                                {m$(ptf !== 0 ? ptf : pt)}
                               </span>
                             )}
                           </td>

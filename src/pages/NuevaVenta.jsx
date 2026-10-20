@@ -211,6 +211,11 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
   const [carrito, setCarrito] = useState([])
   const [busqueda, setBusqueda] = useState('')
   const [metodoPago, setMetodoPago] = useState('Efectivo Pesos')
+  // Cambio de producto: lo que devuelve el cliente (al precio actual) entra en negativo.
+  // Si queda saldo a favor del cliente no se devuelve: tiene que llevar algo más en el momento.
+  const [modoCambio, setModoCambio] = useState(false)
+  const [devueltos, setDevueltos] = useState([])
+  const [destino, setDestino] = useState('devuelve') // a dónde van los productos que se tocan / escanean
   // Cobro con 2 medios: el primero es metodoPago (con el monto que se cobró con él) y el segundo se lleva el resto
   const [dividido, setDividido] = useState(false)
   const [metodo2, setMetodo2] = useState('')
@@ -220,7 +225,7 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
   const [empleado, setEmpleado] = useState('')
   const [socio, setSocio] = useState(false)
   // El descuento manual por porcentaje se sacó: el único descuento de carrito es el de socio
-  const descAplicado = socio && socioPermitido(metodoCompleto) ? DTO_SOCIO : 0
+  const descAplicado = socio && !modoCambio && socioPermitido(metodoCompleto) ? DTO_SOCIO : 0
   const [usuarios, setUsuarios] = useState([])
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState(null)
@@ -305,6 +310,15 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
   }
 
   function agregarAlCarrito(art) {
+    if (modoCambio && destino === 'devuelve') {
+      setDevueltos(prev => {
+        const idx = prev.findIndex(i => i.id === art.id)
+        if (idx >= 0) return prev.map((i, k) => k === idx ? { ...i, cantidad: i.cantidad + 1 } : i)
+        return [...prev, { id: art.id, nombre: art.nombre, foto: art.foto, precioUnitario: art.precioUnitario, costoUnitario: art.costoUnitario, cantidad: 1, articulo: art.id }]
+      })
+      registrarLog({ accion:'CAMBIO_DEVUELVE', detalle:`${art.nombre} (${art.id}) · $${art.precioUnitario.toLocaleString('es-AR')}`, empleado, resultado:'OK' })
+      return
+    }
     setCarrito(prev => {
       const idx = prev.findIndex(i => i.id === art.id)
       if (idx >= 0) {
@@ -336,8 +350,17 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
     setCarrito(prev => prev.filter((_, i) => i !== idx))
   }
 
+  function cambiarDevuelto(idx, delta) {
+    setDevueltos(prev => prev.map((i, k) => k === idx ? { ...i, cantidad: i.cantidad + delta } : i).filter(i => i.cantidad > 0))
+  }
+  function activarCambio(on) {
+    setModoCambio(on); setDevueltos([]); setDestino('devuelve')
+    registrarLog({ accion: on ? 'CAMBIO_INICIADO' : 'CAMBIO_CANCELADO', detalle: '', empleado, resultado: 'OK' })
+  }
+
   function reiniciarCarrito() {
     registrarLog({ accion:'CARRITO_REINICIADO', detalle:`${carrito.length} producto(s)`, empleado, resultado:'OK' })
+    setModoCambio(false); setDevueltos([])
     setCarrito([])
     setSocio(false)
     setConfirmarReinicio(false)
@@ -347,10 +370,17 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
   // Socio pagando en Efectivo Pesos: el total se redondea hacia abajo a $500
   const redondeoCalc = calcularRedondeoSocio({ montoActual: totales.totalNeto, metodoPago: metodoCompleto, socio: descAplicado > 0 })
   const totalFinal = redondeoCalc.total
+  // Cambio: lo devuelto se toma al precio actual, sin promos. Se cobra solo la diferencia.
+  const totalDevuelto = devueltos.reduce((s, i) => s + i.precioUnitario * i.cantidad, 0)
+  const aCobrar = modoCambio ? totalFinal - totalDevuelto : totalFinal
+  const cobraAlgo = Math.round(aCobrar) > 0
+  const errorCambio = !modoCambio ? '' : devueltos.length === 0 ? 'Agregá lo que devuelve el cliente'
+    : carrito.length === 0 ? 'Agregá lo que se lleva el cliente'
+    : aCobrar < 0 ? `Saldo a favor del cliente: $${Math.round(-aCobrar).toLocaleString('es-AR')}. No se devuelve: tiene que llevar algo más.` : ''
   // Pago con 2 medios: monto del primero (en pesos, sin decimales) y el resto para el segundo
   const monto1Num = Number(String(monto1).replace(/[^\d]/g, '')) || 0
-  const resto2 = Math.round(totalFinal) - monto1Num
-  const errorDividido = !dividido ? '' : !metodo2 ? 'Elegí el segundo medio de pago'
+  const resto2 = Math.round(aCobrar) - monto1Num
+  const errorDividido = !dividido || !cobraAlgo ? '' : !metodo2 ? 'Elegí el segundo medio de pago'
     : !monto1Num ? `Poné cuánto se cobró con ${labelMetodo(metodoPago)}`
     : resto2 <= 0 ? 'El monto tiene que ser menor que el total' : ''
   // Aclaración en el renglón de socio cuando hay remeras del 2x1 (que quedan afuera)
@@ -362,12 +392,12 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
 
   // Posnet: se define solo según el bruto MENOS las promos (imanes, alfajores, 2x1 XXXL),
   // antes del descuento de socio: menos de $50.000 → amarillo, $50.000 o más → blanco
-  const usaPosnet = metodoUsaPosnet(metodoCompleto)
-  const posnetAuto = posnetSugerido(totales.subtotalConDesc)
+  const usaPosnet = cobraAlgo && metodoUsaPosnet(metodoCompleto)
+  const posnetAuto = posnetSugerido(modoCambio ? aCobrar : totales.subtotalConDesc)
   const posnet = usaPosnet ? posnetAuto : ''
 
   // Socio: no corresponde pagando con dólares, euros, reales o Pix (se apaga solo si cambian el método)
-  const socioHabilitado = socioPermitido(metodoCompleto)
+  const socioHabilitado = !modoCambio && socioPermitido(metodoCompleto)
   useEffect(() => {
     if (socio && !socioHabilitado) setSocio(false)
   }, [socio, socioHabilitado])
@@ -381,15 +411,17 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
 
   async function cerrarVenta() {
     if (carrito.length === 0) return
+    if (errorCambio) { showToast(errorCambio, 'error'); return }
     if (errorDividido) { showToast(errorDividido, 'error'); return }
     setSaving(true)
     try {
       const notaDivisa = (d, monto) => d && monto ? `${d.prefijo || ''}${d.code} ${monto}` : ''
-      const notas = [notaDivisa(divisaActual, montoDivisa), notaDivisa(divisa2, montoDivisa2)].filter(Boolean).join(' · ')
+      const notas = [modoCambio ? 'CAMBIO' : '', ...(cobraAlgo ? [notaDivisa(divisaActual, montoDivisa), notaDivisa(divisa2, montoDivisa2)] : [])].filter(Boolean).join(' · ')
       const idVenta = await registrarVenta({
         items: carrito,
-        metodoPago,
-        pagos: dividido ? [{ metodo: metodoPago, monto: monto1Num }, { metodo: metodo2 }] : null,
+        devueltos: modoCambio ? devueltos : [],
+        metodoPago: cobraAlgo ? metodoPago : 'Cambio',
+        pagos: dividido && cobraAlgo ? [{ metodo: metodoPago, monto: monto1Num }, { metodo: metodo2 }] : null,
         descCarrito: descAplicado,
         socio,
         descuentoXXXLEsperado: totales.descuentoXXXL,
@@ -400,7 +432,8 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
         descuentoImanes: totales.descuentoImanes,
         descuentoPromo: totales.descuentoPromo,
       })
-      showToast('Venta ' + idVenta + ' registrada ✓', 'success')
+      showToast((modoCambio ? 'Cambio ' : 'Venta ') + idVenta + ' registrado ✓', 'success')
+      setModoCambio(false); setDevueltos([])
       setCarrito([])
       setSocio(false)
       setMontoDivisa('')
@@ -417,6 +450,11 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
       }
       if (e?.message === 'TOTAL_NO_COINCIDE') {
         showToast('El total cambió. Revisalo y cerrá de nuevo.', 'error')
+        setSaving(false)
+        return
+      }
+      if (e?.message === 'CAMBIO_SALDO_A_FAVOR') {
+        showToast('Queda saldo a favor del cliente: tiene que llevar algo más.', 'error')
         setSaving(false)
         return
       }
@@ -524,11 +562,47 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
       {/* CARRITO */}
       <div style={isMobile ? S.blockMobile : S.col}>
         <div style={S.colHeader}>
-          <span style={S.colTitle}>DETALLE ÚLTIMA VENTA</span>
+          <span style={S.colTitle}>{modoCambio ? '🔄 CAMBIO' : 'DETALLE ÚLTIMA VENTA'}</span>
           {carrito.length > 0 && <span style={S.badge}>{carrito.reduce((s,i)=>s+i.cantidad,0)}</span>}
+          <button style={{...S.cambioBtn, ...(modoCambio ? S.cambioBtnActivo : {})}} onClick={() => activarCambio(!modoCambio)} aria-pressed={modoCambio}>
+            {modoCambio ? '✕ Salir de cambio' : '🔄 Cambio'}
+          </button>
         </div>
+        {modoCambio && (
+          <div style={S.destinoRow}>
+            <span style={S.destinoTxt}>Lo que toques o escanees va a:</span>
+            <button style={{...S.destinoBtn, ...(destino === 'devuelve' ? S.destinoDevuelve : {})}} onClick={() => setDestino('devuelve')}>↩ Devuelve</button>
+            <button style={{...S.destinoBtn, ...(destino === 'lleva' ? S.destinoLleva : {})}} onClick={() => setDestino('lleva')}>🛍 Se lleva</button>
+          </div>
+        )}
         <div style={isMobile ? S.scrollListMobile : S.scrollList}>
-          {carrito.length === 0 ? (
+          {modoCambio && (
+            <>
+              <div style={{...S.seccionCambio, color:'#ef4444'}}>↩ DEVUELVE (precio actual)</div>
+              {devueltos.length === 0 && <div style={S.cambioVacio}>Tocá o escaneá lo que trae el cliente.</div>}
+              {devueltos.map((item, idx) => (
+                <div key={'d' + item.id} style={{...(isMobile ? S.artRowMobile : S.cartItem), background:'rgba(239,68,68,0.07)'}}>
+                  {item.foto
+                    ? <img src={item.foto} alt="" style={isMobile ? S.thumbMobile : S.thumb} onError={e=>e.target.style.display='none'} />
+                    : <div style={isMobile ? S.thumbPHMobile : S.thumbPH}>📦</div>}
+                  <div style={S.artInfo}>
+                    <div style={isMobile ? S.artNombreMobile : S.artNombre}>{item.nombre}</div>
+                    <div style={S.artSku}>{item.id} · ${item.precioUnitario.toLocaleString('es-AR')} c/u</div>
+                  </div>
+                  <div style={S.cartRight}>
+                    <div style={S.qtyRow}>
+                      <button style={S.qtyBtn} onClick={()=>cambiarDevuelto(idx,-1)} aria-label={`Quitar uno de ${item.nombre} (devuelve)`}>−</button>
+                      <span style={S.qty}>{item.cantidad}</span>
+                      <button style={S.qtyBtn} onClick={()=>cambiarDevuelto(idx,+1)}>+</button>
+                    </div>
+                    <div style={{...S.cartTotal, color:'#ef4444'}}>−${(item.precioUnitario * item.cantidad).toLocaleString('es-AR')}</div>
+                  </div>
+                </div>
+              ))}
+              <div style={{...S.seccionCambio, color:'#22c55e'}}>🛍 SE LLEVA</div>
+            </>
+          )}
+          {carrito.length === 0 ? (modoCambio ? <div style={S.cambioVacio}>Elegí “Se lleva” y agregá lo que se lleva.</div> :
             <div style={S.emptyCarrito}><div style={{fontSize:48}}>🛒</div><div>El carrito está vacío</div></div>
           ) : carrito.map((item, idx) => {
             const precioEfectivo = precioEfectivoItem(item, totales)
@@ -578,8 +652,29 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
       <div style={{...(isMobile ? S.blockMobile : S.col), borderRight:'none'}}>
         <div style={S.colHeader}><span style={S.colTitle}>TOTAL VENTA</span></div>
         <div style={S.totalPanel}>
-          <div style={S.totalNeto}>${Math.round(totalFinal).toLocaleString('es-AR')}</div>
-          <div style={S.totalNetoLabel}>TOTAL NETO</div>
+          {modoCambio ? (
+            <>
+              <div style={{...S.totalNeto, ...(aCobrar < 0 ? { color:'#f59e0b' } : {})}}>${Math.round(Math.abs(aCobrar)).toLocaleString('es-AR')}</div>
+              <div style={S.totalNetoLabel}>{aCobrar < 0 ? 'SALDO A FAVOR DEL CLIENTE' : cobraAlgo ? 'DIFERENCIA A COBRAR' : 'SIN DIFERENCIA'}</div>
+              <div style={S.totalBrutoRow}>
+                <span style={{fontFamily:'Barlow,sans-serif',fontSize:16,color:'var(--muted)'}}>Se lleva</span>
+                <span style={{fontFamily:'Barlow Condensed,sans-serif',fontWeight:700,fontSize:18,color:'var(--text)'}}>${Math.round(totalFinal).toLocaleString('es-AR')}</span>
+              </div>
+              <div style={S.totalBrutoRow}>
+                <span style={{fontFamily:'Barlow,sans-serif',fontSize:16,color:'var(--muted)'}}>Devuelve</span>
+                <span style={{fontFamily:'Barlow Condensed,sans-serif',fontWeight:700,fontSize:18,color:'#ef4444'}}>−${Math.round(totalDevuelto).toLocaleString('es-AR')}</span>
+              </div>
+              {aCobrar < 0 && carrito.length + devueltos.length > 0 && (
+                <div style={S.saldoAviso}>El saldo a favor no se devuelve. Decile al cliente que todavía tiene <b>${Math.round(-aCobrar).toLocaleString('es-AR')}</b> y que tiene que completarlo llevando algo más ahora.</div>
+              )}
+              <div style={{...S.totalNetoLabel, marginTop:8}}>LO QUE SE LLEVA</div>
+            </>
+          ) : (
+            <>
+              <div style={S.totalNeto}>${Math.round(totalFinal).toLocaleString('es-AR')}</div>
+              <div style={S.totalNetoLabel}>TOTAL NETO</div>
+            </>
+          )}
 
           <div style={S.totalBrutoRow}>
             <span style={{fontFamily:'Barlow,sans-serif',fontSize:16,color:'var(--muted)'}}>TOTAL BRUTO</span>
@@ -636,7 +731,8 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
 
           <div style={S.divider}/>
 
-          <div style={S.fieldLabel}>MÉTODO DE PAGO</div>
+          {cobraAlgo && (<>
+          <div style={S.fieldLabel}>{modoCambio ? 'MEDIO DE PAGO DE LA DIFERENCIA' : 'MÉTODO DE PAGO'}</div>
           <div style={S.metodosGrid}>
             {METODOS_PAGO.map(m => (
               <button key={m.valor} style={{...S.metodoBtn,...(metodoPago===m.valor?S.metodoBtnActive:{})}} onClick={()=>elegirMetodo1(m.valor)}>
@@ -703,6 +799,7 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
               <div style={{...S.posnetRect, background: posnet === 'AMARILLO' ? '#f5c800' : '#f0f4ff'}} />
             </div>
           )}
+          </>)}
 
           <div style={S.fieldLabel}>EMPLEADO</div>
           <div style={S.metodosGrid}>
@@ -730,8 +827,8 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
 
           <div style={S.divider}/>
 
-          <button style={{...S.cerrarBtn,opacity:(saving||carrito.length===0||errorDividido)?0.5:1}} onClick={cerrarVenta} disabled={saving||carrito.length===0}>
-            {saving?'Guardando...':`CERRAR VENTA · $${Math.round(totalFinal).toLocaleString('es-AR')}`}
+          <button style={{...S.cerrarBtn,opacity:(saving||carrito.length===0||errorDividido||errorCambio)?0.5:1}} onClick={cerrarVenta} disabled={saving||carrito.length===0}>
+            {saving?'Guardando...':modoCambio ? (errorCambio && aCobrar < 0 ? 'FALTA COMPLETAR EL SALDO' : `CERRAR CAMBIO · $${Math.round(Math.max(0, aCobrar)).toLocaleString('es-AR')}`) : `CERRAR VENTA · $${Math.round(totalFinal).toLocaleString('es-AR')}`}
           </button>
           <button style={{...S.reiniciarBtn,opacity:carrito.length===0?0.4:1}} onClick={()=>setConfirmarReinicio(true)} disabled={carrito.length===0}>
             REINICIAR CARRITO
@@ -807,6 +904,16 @@ const S = {
   metodoBtnIcon: { fontSize:20 },
   metodoBtnLabel: { fontFamily:'Barlow Condensed,sans-serif', fontWeight:700, fontSize:15, letterSpacing:0.5, textAlign:'center', lineHeight:1.2 },
   empleadoBtn: { padding:'8px 6px', background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, cursor:'pointer', color:'var(--muted)', fontFamily:'Barlow Condensed,sans-serif', fontWeight:700, fontSize:15, letterSpacing:0.5, textAlign:'center' },
+  cambioBtn: { marginLeft:'auto', padding:'4px 10px', background:'none', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--muted)', fontFamily:'Barlow Condensed,sans-serif', fontWeight:700, fontSize:14, cursor:'pointer', whiteSpace:'nowrap' },
+  cambioBtnActivo: { borderColor:'#ef4444', color:'#ef4444' },
+  destinoRow: { display:'flex', alignItems:'center', gap:6, padding:'8px 12px', borderBottom:'1px solid var(--border)', flexWrap:'wrap' },
+  destinoTxt: { fontFamily:'Barlow,sans-serif', fontSize:13, color:'var(--muted)', marginRight:'auto' },
+  destinoBtn: { padding:'8px 14px', background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--muted)', fontFamily:'Barlow Condensed,sans-serif', fontWeight:800, fontSize:16, cursor:'pointer' },
+  destinoDevuelve: { borderColor:'#ef4444', color:'#ef4444', background:'rgba(239,68,68,0.12)' },
+  destinoLleva: { borderColor:'#22c55e', color:'#22c55e', background:'rgba(34,197,94,0.12)' },
+  seccionCambio: { fontFamily:'Barlow Condensed,sans-serif', fontWeight:800, fontSize:14, letterSpacing:1, padding:'10px 14px 4px' },
+  cambioVacio: { fontFamily:'Barlow,sans-serif', fontSize:13, color:'var(--muted)', padding:'4px 14px 10px' },
+  saldoAviso: { marginTop:8, padding:'10px 12px', borderRadius:8, background:'rgba(245,158,11,0.12)', border:'1.5px solid #f59e0b', color:'var(--text)', fontFamily:'Barlow,sans-serif', fontSize:14, lineHeight:1.35 },
   dividirBtn: { width:'100%', marginTop:6, padding:'9px 8px', background:'none', border:'1.5px dashed var(--border)', borderRadius:8, cursor:'pointer', color:'var(--muted)', fontFamily:'Barlow Condensed,sans-serif', fontWeight:700, fontSize:15, letterSpacing:0.5 },
   dividirBtnActivo: { borderStyle:'solid', color:'var(--text)' },
   resumenDividido: { display:'flex', justifyContent:'space-between', gap:8, flexWrap:'wrap', marginTop:6, padding:'8px 10px', background:'var(--surface2)', borderRadius:8, fontFamily:'Barlow,sans-serif', fontSize:14, color:'var(--muted)' },

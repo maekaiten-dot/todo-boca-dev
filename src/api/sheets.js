@@ -494,7 +494,7 @@ export function calcularRedondeoSocio({ montoActual, metodoPago, socio }) {
   return { aplica: true, redondeo: montoActual - total, antesRedondeo: montoActual, total }
 }
 
-export async function registrarVenta({ items, metodoPago, pagos = null, descCarrito = 0, empleado = '', notas = '', descuentoImanes = 0, descuentoPromo = 0, socio = false, descuentoXXXLEsperado = 0, totalEsperado = null, posnet = '' }) {
+export async function registrarVenta({ items, devueltos = [], metodoPago, pagos = null, descCarrito = 0, empleado = '', notas = '', descuentoImanes = 0, descuentoPromo = 0, socio = false, descuentoXXXLEsperado = 0, totalEsperado = null, posnet = '' }) {
   // Pago con 2 medios: [{ metodo, monto }, { metodo }]. El segundo se lleva el resto del total.
   const dividido = Array.isArray(pagos) && pagos.length === 2
   if (dividido) {
@@ -585,10 +585,19 @@ export async function registrarVenta({ items, metodoPago, pagos = null, descCarr
     throw new Error('TOTAL_NO_COINCIDE')
   }
 
+  // Cambio de producto: lo que devuelve el cliente va en negativo, al precio actual y sin promos.
+  // El saldo a favor del cliente no se devuelve: lo nuevo tiene que valer igual o más.
+  const devs = (devueltos || []).filter(d => d && d.cantidad > 0)
+  const totalDevuelto = devs.reduce((s, d) => s + Math.round(d.cantidad * d.precioUnitario), 0)
+  if (devs.length) {
+    if (socio) throw new Error('SOCIO_NO_APLICA')
+    if (lineas.reduce((s, l) => s + Math.round(l.precioTotalFinal), 0) - totalDevuelto < 0) throw new Error('CAMBIO_SALDO_A_FAVOR')
+  }
+
   // Pago con 2 medios: lo del primero tiene que ser más que 0 y menos que el total
   let textoPagosVenta = ''
   if (dividido) {
-    const total = lineas.reduce((s, l) => s + Math.round(l.precioTotalFinal), 0)
+    const total = lineas.reduce((s, l) => s + Math.round(l.precioTotalFinal), 0) - totalDevuelto
     const m1 = Math.round(Number(pagos[0].monto) || 0)
     if (!(m1 > 0 && m1 < total)) throw new Error('PAGOS_MONTO')
     textoPagosVenta = textoPagos([{ metodo: pagos[0].metodo, monto: m1 }, { metodo: pagos[1].metodo, monto: total - m1 }])
@@ -625,6 +634,25 @@ export async function registrarVenta({ items, metodoPago, pagos = null, descCarr
       ...extras.slice(0, ultimaExtra + 1),
     ]
   })
+  // Renglones de lo devuelto (cantidad, precio, costo e ingreso en negativo): el stock lo vuelve a sumar
+  devs.forEach((d, k) => {
+    const cant = -Math.abs(d.cantidad)
+    const total = Math.round(cant * d.precioUnitario), costo = Math.round(cant * (d.costoUnitario || 0))
+    const extras = ['', '', '', '', posnetVenta, '', textoPagosVenta]
+    rows.push([
+      `${idVenta}-${String(lineas.length + k + 1).padStart(2,'0')}`, idVenta, `'${dt.fecha}`, `'${dt.hora}`, dt.mes, dt.anio,
+      d.articulo || d.id, d.nombre, d.foto || '',
+      cant, d.precioUnitario, total,
+      d.costoUnitario || 0, costo,
+      empleado, metodoPago,
+      '', '',
+      total, notas, false,
+      total - costo,
+      0, 0, 0, 0, 0,
+      '', '', '',
+      ...extras.slice(0, ultimaExtra + 1),
+    ])
+  })
   const ultimaCol = ['AD', COL_DTO_SOCIO, COL_DTO_XXXL, COL_DTO_EFECTIVO, COL_REDONDEO, COL_POSNET, COL_CORRECCION_POSNET, COL_PAGOS][ultimaExtra + 1]
 
   await Promise.all(rows.map((row, idx) =>
@@ -636,7 +664,7 @@ export async function registrarVenta({ items, metodoPago, pagos = null, descCarr
   const totalDtoAlfajores = items.reduce((s, item) => s + calcularDescuentoAlfajorItem(item, items), 0)
   await registrarLog({
     accion:'VENTA_REGISTRADA',
-    detalle:`${items.length} producto(s) · ${textoPagosVenta || metodoPago}${posnetVenta?` · POSNET ${posnetVenta}`:''}${socio?' · SOCIO':''}${conRedondeo?` · REDONDEO $${Math.round(redondeoCalc.redondeo)}`:''}${conXXXL?` · 2x1 XXXL $${Math.round(promoXXXL.descuento)} (${promoXXXL.unidadesEnPromo}u)`:''}${descCarrito>0?` · DTO ${descCarrito}%`:''}${totalDtoImanes>0?` · DTO imanes $${totalDtoImanes}`:''}${descuentoPromo>0?` · DTO promos $${Math.round(descuentoPromo)}`:''}${totalDtoAlfajores>0?` · DTO alfajores $${Math.round(totalDtoAlfajores)}`:''} · Total $${Math.round(totalVenta).toLocaleString('es-AR')}`,
+    detalle:`${devs.length ? `CAMBIO · devuelve ${devs.map(d => `${d.cantidad}× ${d.id}`).join(', ')} · ` : ''}${items.length} producto(s) · ${textoPagosVenta || metodoPago}${posnetVenta?` · POSNET ${posnetVenta}`:''}${socio?' · SOCIO':''}${conRedondeo?` · REDONDEO $${Math.round(redondeoCalc.redondeo)}`:''}${conXXXL?` · 2x1 XXXL $${Math.round(promoXXXL.descuento)} (${promoXXXL.unidadesEnPromo}u)`:''}${descCarrito>0?` · DTO ${descCarrito}%`:''}${totalDtoImanes>0?` · DTO imanes $${totalDtoImanes}`:''}${descuentoPromo>0?` · DTO promos $${Math.round(descuentoPromo)}`:''}${totalDtoAlfajores>0?` · DTO alfajores $${Math.round(totalDtoAlfajores)}`:''} · Total $${Math.round(totalVenta).toLocaleString('es-AR')}`,
     idReferencia:idVenta, empleado, resultado:'OK',
   })
   return idVenta

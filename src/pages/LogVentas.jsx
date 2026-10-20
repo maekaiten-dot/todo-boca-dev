@@ -3,10 +3,11 @@ import { useState, useMemo, useEffect } from 'react'
 import { getHistoricoVentas, getVentasDesde, registrarLog, metodosDe } from '../api/sheets.js'
 import DetalleVentaModal from '../components/DetalleVentaModal.jsx'
 
+const m$ = n => (n < 0 ? '−$' : '$') + Math.abs(Math.round(n || 0)).toLocaleString('es-AR')  // monto con signo (los cambios tienen renglones en negativo)
 const METODO_ICONS = {
   'Efectivo Pesos':'💵','Efectivo ARS':'💵',
   'Tarjeta de Crédito':'💳','Tarjeta de Débito':'💳','Tarjeta':'💳',
-  'QR':'📱','Transferencia':'🏦','Pix':'💠',
+  'QR':'📱','Transferencia':'🏦','Pix':'💠','Cambio':'🔄',
   'Efectivo Dólares':'🇺🇸','Efectivo USD':'🇺🇸',
   'Efectivo Reales':'🇧🇷','Efectivo BRL':'🇧🇷',
   'Efectivo Euros':'🇪🇺','Efectivo EUR':'🇪🇺',
@@ -184,7 +185,7 @@ export default function LogVentas() {
                           <td colSpan={6} style={S.ventaHeaderId}>
                             {v.anulado && <span style={S.badge_anulada}>ANULADA</span>}
                             {tieneParcial && <span style={S.badge_parcial}>PARCIAL</span>}
-                            <span>{v.idVenta}</span>
+                            <span>{v.idVenta}</span>{v.items.some(i => i.cantidad < 0) && <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 800, color: '#f59e0b', border: '1px solid #f59e0b', borderRadius: 4, padding: '0 5px' }}>🔄 CAMBIO</span>}
                           </td>
                           <td colSpan={2} style={S.ventaHeaderTotal}>
                             {v.anulado ? (
@@ -216,7 +217,7 @@ export default function LogVentas() {
                             <td style={{...S.td, textAlign:'center'}}>{item.cantidad}</td>
                             <td style={S.td}>${(item.precioUnitario || 0).toLocaleString('es-AR')}</td>
                             <td style={{...S.td, color: item.anulado ? 'var(--muted)' : 'var(--accent)', fontWeight:700, textDecoration: item.anulado ? 'line-through' : 'none'}}>
-                              ${Math.round(item.precioTotalFinal || item.precioTotal || 0).toLocaleString('es-AR')}
+                              {m$(item.precioTotalFinal || item.precioTotal || 0)}
                             </td>
                             <td style={S.td}>{metodosDe(item.metodoPago).map(m => METODO_ICONS[m] || '💰').join('') || '💰'} {item.metodoPago}</td>
                             <td style={S.td}>{item.empleado}</td>

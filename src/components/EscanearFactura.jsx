@@ -347,7 +347,7 @@ export default function EscanearFactura({ articulos = [], proveedores = [], empl
       {creando != null && (
         <ModalArticulo
           inicial={{ nombre: renglones[creando]?.descripcion || '', costoUnitario: String(Math.round(costoDe({ ...renglones[creando], precioUnit: num(renglones[creando]?.precioUnit) }) || 0)), precioUnitario: '0' }}
-          empleado={empleado}
+          empleado={empleado} articulos={arts}
           aviso={`Producto de la factura de ${cab.proveedor || 'el proveedor'}: "${renglones[creando]?.descripcion}". Completá el precio de venta y lo que falte; después se ingresa con esta factura.`}
           onCerrar={() => setCreando(null)}
           onGuardado={form => {

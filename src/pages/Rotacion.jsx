@@ -31,8 +31,23 @@ function hoyArgentina() {
   return Math.floor(Date.UTC(a, m - 1, d) / 86400000)
 }
 
-// Agrupa las ventas por artículo y ventana: [unidades, tickets, facturación]
-function calcularRotacion(ventas, articulos) {
+// Grupos de artículos (columna GRUPO de ARTICULOS): modelos distintos del mismo producto.
+// deArt: id del artículo → clave del grupo. grupos: clave → { nombre, modelos: [ids] }
+const claveGrupo = g => 'G:' + g.trim().toLowerCase()
+function armarGrupos(articulos) {
+  const deArt = {}, grupos = {}
+  for (const a of articulos) {
+    const g = String(a.grupo || '').trim()
+    if (!g || !a.id) continue
+    const k = claveGrupo(g)
+    deArt[a.id] = k
+    ;(grupos[k] ||= { clave: k, nombre: g, modelos: [] }).modelos.push(a.id)
+  }
+  return { deArt, grupos }
+}
+
+// Agrupa las ventas por artículo (o por grupo, si se pasa agr) y ventana: [unidades, tickets, facturación]
+function calcularRotacion(ventas, articulos, agr = null) {
   const hoy = hoyArgentina()
   const nombres = {}
   articulos.forEach(a => { nombres[a.id] = a.nombre })
@@ -45,8 +60,11 @@ function calcularRotacion(ventas, articulos) {
     if (dia == null) continue
     const antig = hoy - dia
     if (antig < 0 || antig >= 365) continue
-    const a = porArt[v.articulo] || (porArt[v.articulo] = {
-      id: v.articulo, nombre: nombres[v.articulo] || v.nombre || v.articulo, ultimaVenta: dia,
+    const clave = agr?.deArt[v.articulo] || v.articulo
+    const grupo = agr?.grupos[clave]
+    const a = porArt[clave] || (porArt[clave] = {
+      id: clave, nombre: grupo ? grupo.nombre : nombres[v.articulo] || v.nombre || v.articulo, ultimaVenta: dia,
+      esGrupo: !!grupo, nModelos: grupo ? grupo.modelos.length : 1,
       w: Object.fromEntries(VENTANAS.map(w => [w, { u: 0, t: new Set(), r: 0 }])),
     })
     if (dia > a.ultimaVenta) a.ultimaVenta = dia
@@ -76,26 +94,31 @@ function calcularRotacion(ventas, articulos) {
 // facturado alcanza el costo total de la compra, esa es la cantidad de días que tardó en recuperarse.
 // Si todavía no llegó, estima cuánto falta al ritmo que viene vendiendo desde la compra.
 const parseArs = v => typeof v === 'number' ? v : Number(String(v ?? '0').replace(/[$\s]/g, '').replace(/\./g, '').replace(',', '.')) || 0
-function calcularRecupero(ventas, ingresos, articulos, hoy) {
+// Por grupo: la última compra es el último día en que entró cualquier modelo del grupo (se suman
+// todos los modelos que entraron ese día) y se cuentan las ventas de todos los modelos.
+function calcularRecupero(ventas, ingresos, articulos, hoy, agr = null) {
   const arts = Object.fromEntries(articulos.map(a => [a.id, a]))
+  const claveDe = id => agr?.deArt[id] || id
   const compras = {}
   for (const i of ingresos) {
     if (i.anulado || !i.articuloId || !(i.cantidad > 0)) continue
     const dia = diaDesdeFecha(i.fecha)
     if (dia == null || dia > hoy) continue
-    const c = compras[i.articuloId]
+    const k = claveDe(i.articuloId)
+    const c = compras[k]
     if (c && dia < c.dia) continue
     const costo = i.costoTotal || i.cantidad * (i.costoUnitario || parseArs(arts[i.articuloId]?.costoUnitario))
-    if (!c || dia > c.dia) compras[i.articuloId] = { dia, cantidad: i.cantidad, costo, proveedor: i.proveedor || '' }
+    if (!c || dia > c.dia) compras[k] = { dia, cantidad: i.cantidad, costo, proveedor: i.proveedor || '' }
     else { c.cantidad += i.cantidad; c.costo += costo; if (i.proveedor && !c.proveedor.includes(i.proveedor)) c.proveedor = c.proveedor ? `${c.proveedor}, ${i.proveedor}` : i.proveedor }
   }
   const porDia = {}
   for (const v of ventas) {
-    const c = compras[v.articulo]
+    const k = claveDe(v.articulo)
+    const c = compras[k]
     if (!c || v.anulado) continue
     const dia = diaDesdeFecha(v.fecha)
     if (dia == null || dia < c.dia) continue
-    const m = (porDia[v.articulo] ||= {})
+    const m = (porDia[k] ||= {})
     const d = (m[dia] ||= { r: 0, u: 0 })
     d.r += v.precioTotalFinal || v.precioTotal || 0
     d.u += v.cantidad || 0
@@ -111,7 +134,7 @@ function calcularRecupero(ventas, ingresos, articulos, hoy) {
     const ritmo = facturado / Math.max(1, transcurridos + 1) // $ por día desde la compra
     const faltan = recuperado ? 0 : (ritmo > 0 ? Math.ceil((c.costo - facturado) / ritmo) : null)
     return {
-      id, nombre: arts[id]?.nombre || id, compraDia: c.dia, compraCant: c.cantidad, compraCosto: c.costo, proveedor: c.proveedor,
+      id, nombre: agr?.grupos[id]?.nombre || arts[id]?.nombre || id, esGrupo: !!agr?.grupos[id], nModelos: agr?.grupos[id]?.modelos.length || 1, compraDia: c.dia, compraCant: c.cantidad, compraCosto: c.costo, proveedor: c.proveedor,
       facturado, unidades, pct: facturado / c.costo, recuperado,
       dias: recuperado ? diaRecupero - c.dia : transcurridos, faltan,
       diasTotal: recuperado ? diaRecupero - c.dia : (faltan != null ? transcurridos + faltan : null),
@@ -120,7 +143,24 @@ function calcularRecupero(ventas, ingresos, articulos, hoy) {
   })
 }
 
+// Ritmo de venta y reposición de cada fila (artículo o grupo)
+function armarFilas(lista, stockMap) {
+  return lista.map(a => {
+    const w30 = a.w[30].u / 30 * 7, w90 = a.w[90].u / 90 * 7, w365 = a.w[365].u / 365 * 7
+    const ritmoDia = Math.max(w30, w90) / 7
+    const tieneStock = Object.prototype.hasOwnProperty.call(stockMap, a.id)
+    const stock = tieneStock ? stockMap[a.id] : null
+    const stockUtil = Math.max(0, stock ?? 0)
+    const cobertura = tieneStock && ritmoDia > 0 ? stockUtil / ritmoDia : null
+    const reponer = Math.max(0, Math.ceil(ritmoDia * DIAS_COBERTURA - stockUtil))
+    const tendencia = w365 > 0 ? w30 / w365 : (w30 > 0 ? 99 : 0)
+    return { id: a.id, nombre: a.nombre, esGrupo: a.esGrupo, nModelos: a.nModelos, w30, w90, w365, tendencia, t30: a.w[30].t, ultimaVenta: a.ultimaVenta, stock, cobertura, reponer, tieneStock }
+  })
+}
+const filaVacia = (a, stockMap) => armarFilas([{ id: a.id, nombre: a.nombre, ultimaVenta: null, w: Object.fromEntries(VENTANAS.map(w => [w, { u: 0, t: 0, r: 0 }])) }], stockMap)[0]
+
 function fechaDeDia(dia) {
+  if (dia == null) return '–'
   const d = new Date(dia * 86400000)
   return `${d.getUTCDate()}/${d.getUTCMonth() + 1}`
 }
@@ -139,6 +179,9 @@ export default function Rotacion({ articulos = [], stockMap = {} }) {
   const [recOrden, setRecOrden] = useState({ k: 'diasTotal', dir: -1 })
   const [recBusqueda, setRecBusqueda] = useState('')
   const [recMostrar, setRecMostrar] = useState(30)
+  const [vista, setVista] = useState('modelo') // modelo | grupo
+  const [abiertos, setAbiertos] = useState(() => new Set()) // grupos desplegados (clave de sección + id)
+  const alternar = k => setAbiertos(s => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n })
 
   useEffect(() => { cargar() }, [])
 
@@ -153,7 +196,28 @@ export default function Rotacion({ articulos = [], stockMap = {} }) {
     finally { setLoading(false) }
   }
 
-  const { lista, totales, hoy } = useMemo(() => calcularRotacion(ventas, articulos), [ventas, articulos])
+  const agr = useMemo(() => armarGrupos(articulos), [articulos])
+  const nGrupos = Object.keys(agr.grupos).length
+  const porGrupo = vista === 'grupo' && nGrupos > 0
+  const rotModelo = useMemo(() => calcularRotacion(ventas, articulos), [ventas, articulos])
+  const rotGrupo = useMemo(() => calcularRotacion(ventas, articulos, agr), [ventas, articulos, agr])
+  const { lista, totales, hoy } = porGrupo ? rotGrupo : rotModelo
+  const nombresArt = useMemo(() => Object.fromEntries(articulos.map(a => [a.id, a.nombre])), [articulos])
+
+  // Stock por grupo = suma del stock de sus modelos (solo los que tienen stock calculado)
+  const stockVista = useMemo(() => {
+    if (!porGrupo) return stockMap
+    const out = {}
+    for (const [id, st] of Object.entries(stockMap)) {
+      const k = agr.deArt[id] || id
+      out[k] = (out[k] || 0) + (k === id ? st : Math.max(0, st))
+    }
+    return out
+  }, [porGrupo, stockMap, agr])
+  // Texto donde se busca: en un grupo, el nombre del grupo y el de todos sus modelos
+  const textoBusqueda = r => r.esGrupo
+    ? [r.nombre, ...(agr.grupos[r.id]?.modelos || []).flatMap(id => [id, nombresArt[id] || ''])].join(' ')
+    : `${r.nombre} ${r.id}`
 
   // "Nuevo en el top": está en el top de la ventana pero no en el top del año
   const topAnio = useMemo(() => new Set(
@@ -166,26 +230,30 @@ export default function Rotacion({ articulos = [], stockMap = {} }) {
   // en las ventanas que empiezan antes de que llegara (no tuvo tiempo de venderse).
   const llegadaNuevos = useMemo(() => {
     const primerIngreso = {}, primeraVenta = {}
-    ingresos.forEach(i => { if (i.anulado || !i.articuloId) return; const d = diaDesdeFecha(i.fecha); if (d != null && (primerIngreso[i.articuloId] == null || d < primerIngreso[i.articuloId])) primerIngreso[i.articuloId] = d })
-    ventas.forEach(v => { if (v.anulado || !v.articulo) return; const d = diaDesdeFecha(v.fecha); if (d != null && (primeraVenta[v.articulo] == null || d < primeraVenta[v.articulo])) primeraVenta[v.articulo] = d })
+    const k = id => (porGrupo && agr.deArt[id]) || id
+    ingresos.forEach(i => { if (i.anulado || !i.articuloId) return; const d = diaDesdeFecha(i.fecha), c = k(i.articuloId); if (d != null && (primerIngreso[c] == null || d < primerIngreso[c])) primerIngreso[c] = d })
+    ventas.forEach(v => { if (v.anulado || !v.articulo) return; const d = diaDesdeFecha(v.fecha), c = k(v.articulo); if (d != null && (primeraVenta[c] == null || d < primeraVenta[c])) primeraVenta[c] = d })
     const out = {}
     Object.entries(primerIngreso).forEach(([id, d]) => { if (primeraVenta[id] == null || primeraVenta[id] >= d) out[id] = d })
     return out
-  }, [ingresos, ventas])
+  }, [ingresos, ventas, porGrupo, agr])
 
   const menosVendidos = useMemo(() => {
     const porId = Object.fromEntries(lista.map(a => [a.id, a]))
-    const candidatos = articulos.filter(a => {
+    const base = porGrupo
+      ? [...articulos.filter(a => !agr.deArt[a.id]), ...Object.values(agr.grupos).map(g => ({ id: g.clave, nombre: g.nombre, nModelos: g.modelos.length }))]
+      : articulos
+    const candidatos = base.filter(a => {
       if (!a.id || !a.nombre) return false
-      const tieneStock = Object.prototype.hasOwnProperty.call(stockMap, a.id)
-      return !tieneStock || stockMap[a.id] > 0
+      const tieneStock = Object.prototype.hasOwnProperty.call(stockVista, a.id)
+      return !tieneStock || stockVista[a.id] > 0
     })
     const out = {}
     for (const w of VENTANAS) {
       out[w] = candidatos.filter(a => llegadaNuevos[a.id] == null || llegadaNuevos[a.id] <= hoy - w).map(a => {
         const r = porId[a.id]
-        const tieneStock = Object.prototype.hasOwnProperty.call(stockMap, a.id)
-        return { id: a.id, nombre: a.nombre, valor: r ? r.w[w][metrica] : 0, stock: tieneStock ? stockMap[a.id] : null, ultimaVenta: r ? r.ultimaVenta : null }
+        const tieneStock = Object.prototype.hasOwnProperty.call(stockVista, a.id)
+        return { id: a.id, nombre: a.nombre, nModelos: a.nModelos || 1, valor: r ? r.w[w][metrica] : 0, stock: tieneStock ? stockVista[a.id] : null, ultimaVenta: r ? r.ultimaVenta : null }
       }).sort((x, y) =>
         x.valor - y.valor ||
         (y.stock ?? 0) - (x.stock ?? 0) ||
@@ -193,31 +261,40 @@ export default function Rotacion({ articulos = [], stockMap = {} }) {
       ).slice(0, top)
     }
     return out
-  }, [lista, articulos, stockMap, metrica, top, llegadaNuevos, hoy])
+  }, [lista, articulos, stockVista, metrica, top, llegadaNuevos, hoy, porGrupo, agr])
 
-  const filas = useMemo(() => lista.map(a => {
-    const w30 = a.w[30].u / 30 * 7, w90 = a.w[90].u / 90 * 7, w365 = a.w[365].u / 365 * 7
-    const ritmoDia = Math.max(w30, w90) / 7
-    const tieneStock = Object.prototype.hasOwnProperty.call(stockMap, a.id)
-    const stock = tieneStock ? stockMap[a.id] : null
-    const stockUtil = Math.max(0, stock ?? 0)
-    const cobertura = tieneStock && ritmoDia > 0 ? stockUtil / ritmoDia : null
-    const reponer = Math.max(0, Math.ceil(ritmoDia * DIAS_COBERTURA - stockUtil))
-    const tendencia = w365 > 0 ? w30 / w365 : (w30 > 0 ? 99 : 0)
-    return { id: a.id, nombre: a.nombre, w30, w90, w365, tendencia, t30: a.w[30].t, ultimaVenta: a.ultimaVenta, stock, cobertura, reponer, tieneStock }
-  }), [lista, stockMap])
+  const filasModelo = useMemo(() => armarFilas(rotModelo.lista, stockMap), [rotModelo, stockMap])
+  const filas = useMemo(() => {
+    if (!porGrupo) return filasModelo
+    const porId = Object.fromEntries(filasModelo.map(r => [r.id, r]))
+    // Grupos sin ventas en el año igual aparecen (con sus modelos), para ver el stock
+    const conVentas = new Set(rotGrupo.lista.map(a => a.id))
+    const sinVentas = Object.values(agr.grupos).filter(g => !conVentas.has(g.clave)).map(g => ({ ...filaVacia({ id: g.clave, nombre: g.nombre }, stockVista), esGrupo: true, nModelos: g.modelos.length }))
+    return [...armarFilas(rotGrupo.lista, stockVista), ...sinVentas].map(r => {
+      if (!r.esGrupo) return r
+      const modelos = agr.grupos[r.id].modelos.map(id => porId[id] || filaVacia({ id, nombre: nombresArt[id] || id }, stockMap))
+        .sort((a, b) => b.w30 - a.w30 || b.w90 - a.w90 || a.nombre.localeCompare(b.nombre))
+      return { ...r, modelos, reponerModelos: modelos.reduce((s, m) => s + m.reponer, 0) }
+    })
+  }, [porGrupo, filasModelo, rotGrupo, stockVista, stockMap, agr, nombresArt])
 
   const filasVisibles = useMemo(() => {
     const q = normalizar(busqueda.trim())
-    const f = filas.filter(r => !q || normalizar(r.nombre).includes(q) || normalizar(r.id).includes(q))
+    const f = filas.filter(r => !q || normalizar(textoBusqueda(r)).includes(q))
     const val = r => { const v = r[orden.k]; return v == null ? (orden.dir > 0 ? Infinity : -Infinity) : v }
     return f.sort((a, b) => {
       const A = val(a), B = val(b)
       return (typeof A === 'string' ? A.localeCompare(B) : A - B) * orden.dir
     })
-  }, [filas, busqueda, orden])
+  }, [filas, busqueda, orden, agr, nombresArt])
 
-  const recupero = useMemo(() => calcularRecupero(ventas, ingresos, articulos, hoy), [ventas, ingresos, articulos, hoy])
+  const recModelo = useMemo(() => calcularRecupero(ventas, ingresos, articulos, hoy), [ventas, ingresos, articulos, hoy])
+  const recupero = useMemo(() => {
+    if (!porGrupo) return recModelo
+    const porId = Object.fromEntries(recModelo.map(r => [r.id, r]))
+    return calcularRecupero(ventas, ingresos, articulos, hoy, agr).map(r => !r.esGrupo ? r
+      : { ...r, modelos: agr.grupos[r.id].modelos.map(id => porId[id]).filter(Boolean).sort((a, b) => b.compraDia - a.compraDia || b.facturado - a.facturado) })
+  }, [porGrupo, recModelo, ventas, ingresos, articulos, hoy, agr])
   const recResumen = useMemo(() => {
     const rec = recupero.filter(r => r.recuperado).map(r => r.dias).sort((a, b) => a - b)
     const curso = recupero.filter(r => !r.recuperado)
@@ -225,10 +302,10 @@ export default function Rotacion({ articulos = [], stockMap = {} }) {
   }, [recupero])
   const recVisibles = useMemo(() => {
     const q = normalizar(recBusqueda.trim())
-    const f = recupero.filter(r => (recFiltro === 'todos' || (recFiltro === 'rec' ? r.recuperado : !r.recuperado)) && (!q || normalizar(r.nombre).includes(q) || normalizar(r.id).includes(q)))
+    const f = recupero.filter(r => (recFiltro === 'todos' || (recFiltro === 'rec' ? r.recuperado : !r.recuperado)) && (!q || normalizar(textoBusqueda(r)).includes(q)))
     const val = r => { const v = r[recOrden.k]; return v == null ? Infinity : v } // sin ventas = lo peor
     return f.sort((a, b) => { const A = val(a), B = val(b); return (typeof A === 'string' ? A.localeCompare(B) : (A - B || 0)) * recOrden.dir })
-  }, [recupero, recFiltro, recOrden, recBusqueda])
+  }, [recupero, recFiltro, recOrden, recBusqueda, agr, nombresArt])
   const recOrdenarPor = k => setRecOrden(o => o.k === k ? { k, dir: -o.dir } : { k, dir: k === 'nombre' ? 1 : -1 })
 
   function ordenarPor(k) {
@@ -274,7 +351,10 @@ export default function Rotacion({ articulos = [], stockMap = {} }) {
       <div style={S.controls}>
         <Segmento opciones={METRICAS.map(m => ({ v: m.id, label: m.label }))} valor={metrica} onChange={setMetrica} />
         <Segmento opciones={TOPS.map(n => ({ v: n, label: `Top ${n}` }))} valor={top} onChange={setTop} />
+        <Segmento opciones={[{ v: 'modelo', label: 'Por modelo' }, { v: 'grupo', label: `Por grupo${nGrupos ? ` (${nGrupos})` : ''}` }]} valor={vista} onChange={setVista} />
       </div>
+      {vista === 'grupo' && !nGrupos && <div style={{ ...S.legend, paddingTop: 10, color: 'var(--accent)' }}>Todavía no hay grupos: se arman en Arts., editando cada artículo (campo GRUPO).</div>}
+      {porGrupo && <div style={{ ...S.legend, paddingTop: 10 }}>🔗 Los modelos con el mismo GRUPO se suman como un solo producto. Tocá un grupo en las tablas para ver sus modelos.</div>}
 
       <div style={S.statsRow}>
         {VENTANAS.map(w => (
@@ -304,7 +384,7 @@ export default function Rotacion({ articulos = [], stockMap = {} }) {
                   <div key={a.id} style={S.barRow}>
                     <span style={S.rank}>{i + 1}</span>
                     <div style={{ minWidth: 0 }}>
-                      <div style={S.barName} title={`${a.id} · ${a.nombre}`}>{a.nombre}</div>
+                      <div style={S.barName} title={a.esGrupo ? `Grupo · ${a.nModelos} modelos` : `${a.id} · ${a.nombre}`}>{a.esGrupo && '🔗 '}{a.nombre}{a.esGrupo && <span style={S.nMod}> · {a.nModelos} mod.</span>}</div>
                       <div style={S.barLine}>
                         <div style={{ ...S.bar, width: `${Math.max(1, a.w[w][metrica] / max * 80)}%`, background: sube ? 'var(--accent)' : '#2196f3' }} />
                         <span style={S.barVal}>{fmtVal(a.w[w][metrica])}</span>
@@ -337,7 +417,7 @@ export default function Rotacion({ articulos = [], stockMap = {} }) {
                 <div key={a.id} style={S.barRow}>
                   <span style={S.rank}>{i + 1}</span>
                   <div style={{ minWidth: 0 }}>
-                    <div style={S.barName} title={`${a.id} · ${a.nombre}`}>{a.nombre}</div>
+                    <div style={S.barName} title={a.nModelos > 1 ? `Grupo · ${a.nModelos} modelos` : `${a.id} · ${a.nombre}`}>{a.nModelos > 1 && '🔗 '}{a.nombre}{a.nModelos > 1 && <span style={S.nMod}> · {a.nModelos} mod.</span>}</div>
                     <div style={S.barLine}>
                       <div style={{ ...S.bar, width: `${a.valor > 0 ? Math.max(1, a.valor / max * 80) : 1}%`, background: a.valor > 0 ? '#6a8ccc' : '#ef4444' }} />
                       <span style={S.barVal}>{a.valor === 0 ? '0' : fmtVal(a.valor)}</span>
@@ -363,6 +443,7 @@ export default function Rotacion({ articulos = [], stockMap = {} }) {
         <div style={S.nota}>
           Para cada artículo se toma su última compra (lo que entró por Ingresos ese día) y se suma lo que se vendió de ese artículo desde ese día.
           "Recuperado en" son los días que tardaron las ventas en llegar al costo total de la compra. Si todavía no llegó, se estima cuánto falta al ritmo que viene vendiendo desde la compra.
+          {porGrupo && ' En un grupo, la última compra es el último día que entró cualquiera de sus modelos (se suman todos los que entraron ese día) y se cuentan las ventas de todos los modelos. Abriendo el grupo se ve cada modelo con su propia última compra.'}
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginBottom: 8 }}>
           <Segmento opciones={[{ v: 'curso', label: `En curso (${recResumen.nCurso})` }, { v: 'rec', label: `Recuperadas (${recResumen.nRec})` }, { v: 'todos', label: 'Todas' }]} valor={recFiltro} onChange={v => { setRecFiltro(v); setRecMostrar(30) }} />
@@ -378,24 +459,14 @@ export default function Rotacion({ articulos = [], stockMap = {} }) {
               </tr>
             </thead>
             <tbody>
-              {recVisibles.slice(0, recMostrar).map(r => (
-                <tr key={r.id}>
-                  <td style={{ ...S.td, ...S.tdNombre }}>{r.nombre}<div style={S.codigo}>{r.id}{r.proveedor ? ` · ${r.proveedor}` : ''}</div></td>
-                  <td style={S.td}>{fechaDeDia(r.compraDia)}<div style={S.codigo}>{fmtN(r.compraCant)} u.</div></td>
-                  <td style={S.td}>${fmtN(r.compraCosto)}</td>
-                  <td style={S.td}>${fmtN(r.facturado)}<div style={S.codigo}>{fmtN(r.unidades)} u. vendidas</div></td>
-                  <td style={S.td}>
-                    <div style={S.recBarra}><div style={{ ...S.recBarraFill, width: `${Math.min(100, r.pct * 100)}%`, background: r.recuperado ? '#22c55e' : r.pct > 0 ? 'var(--accent)' : '#ef4444' }} /></div>
-                    <div style={S.codigo}>{Math.round(r.pct * 100)}%</div>
-                  </td>
-                  <td style={{ ...S.td, ...(r.recuperado ? { color: '#22c55e', fontWeight: 700 } : {}) }}>
-                    {r.recuperado ? (r.dias === 0 ? 'el mismo día' : `en ${fmtN(r.dias)} ${r.dias === 1 ? 'día' : 'días'}`)
-                      : r.faltan == null ? <span style={{ color: '#ef4444' }}>sin ventas</span>
-                      : r.diasTotal > 365 ? 'más de 1 año' : `≈ ${fmtN(r.diasTotal)} días`}
-                    <div style={S.codigo}>{r.recuperado ? 'recuperado' : `lleva ${fmtN(r.dias)} ${r.dias === 1 ? 'día' : 'días'}${r.faltan != null && r.diasTotal <= 365 ? ` · faltan ≈ ${fmtN(r.faltan)}` : ''}`}</div>
-                  </td>
-                </tr>
-              ))}
+              {recVisibles.slice(0, recMostrar).map(r => {
+                const abierto = r.esGrupo && abiertos.has('rec' + r.id)
+                return [
+                  <FilaRecupero key={r.id} r={r} abierto={abierto} onClick={r.esGrupo ? () => alternar('rec' + r.id) : undefined} />,
+                  ...(abierto ? r.modelos.map(m => <FilaRecupero key={r.id + m.id} r={m} modelo />) : []),
+                  ...(abierto && !r.modelos.length ? [<tr key={r.id + '-'}><td style={{ ...S.td, ...S.tdModelo, textAlign: 'left' }} colSpan={6}>Ningún modelo tiene compras cargadas en Ingresos.</td></tr>] : []),
+                ]
+              })}
               {!recVisibles.length && <tr><td style={{ ...S.td, textAlign: 'left' }} colSpan={6}>Sin compras para mostrar.</td></tr>}
             </tbody>
           </table>
@@ -409,6 +480,7 @@ export default function Rotacion({ articulos = [], stockMap = {} }) {
           Unidades por semana en cada ventana. La tendencia compara los últimos 30 días con el promedio del año.
           "Alcanza" son los días que dura el stock al ritmo más alto entre 30 y 90 días.
           "Reponer" es lo que falta para cubrir {DIAS_COBERTURA} días a ese ritmo, ya descontando el stock.
+          {porGrupo && ' En un grupo, "Reponer" se calcula con la venta y el stock de todos sus modelos juntos; abajo, "suma modelos" es lo que da si se calcula modelo por modelo (siempre es igual o más, porque no compensa un modelo que sobra con otro que falta).'}
         </div>
         <input
           style={S.search}
@@ -429,22 +501,13 @@ export default function Rotacion({ articulos = [], stockMap = {} }) {
               </tr>
             </thead>
             <tbody>
-              {filasVisibles.slice(0, mostrar).map(r => (
-                <tr key={r.id}>
-                  <td style={{ ...S.td, ...S.tdNombre }}>
-                    {r.nombre}
-                    <div style={S.codigo}>{r.id} · última venta {fechaDeDia(r.ultimaVenta)}</div>
-                  </td>
-                  <td style={{ ...S.td, ...S.tdReponer }}>{r.reponer || '–'}</td>
-                  <td style={{ ...S.td, color: r.stock != null && r.stock <= 0 ? '#ef4444' : 'var(--text)' }}>{r.stock == null ? '–' : fmtN(r.stock)}</td>
-                  <td style={{ ...S.td, ...coberturaColor(r.cobertura) }}>{r.cobertura == null ? '–' : r.cobertura >= 365 ? '+1 año' : `${fmtN(r.cobertura)} d`}</td>
-                  <td style={S.td}>{fmt1(r.w30)}</td>
-                  <td style={S.td}>{fmt1(r.w90)}</td>
-                  <td style={S.td}>{fmt1(r.w365)}</td>
-                  <td style={S.td}><Tendencia r={r} /></td>
-                  <td style={S.td}>{r.t30 || '–'}</td>
-                </tr>
-              ))}
+              {filasVisibles.slice(0, mostrar).map(r => {
+                const abierto = r.esGrupo && abiertos.has('rit' + r.id)
+                return [
+                  <FilaRitmo key={r.id} r={r} abierto={abierto} onClick={r.esGrupo ? () => alternar('rit' + r.id) : undefined} />,
+                  ...(abierto ? r.modelos.map(m => <FilaRitmo key={r.id + m.id} r={m} modelo />) : []),
+                ]
+              })}
             </tbody>
           </table>
         </div>
@@ -453,6 +516,57 @@ export default function Rotacion({ articulos = [], stockMap = {} }) {
         )}
       </div>
     </div>
+  )
+}
+
+function NombreFila({ r, abierto, modelo, extra }) {
+  return (
+    <td style={{ ...S.td, ...S.tdNombre, ...(modelo ? S.tdModelo : {}) }}>
+      {r.esGrupo && <span style={S.flecha}>{abierto ? '▾' : '▸'}</span>}
+      {modelo && <span style={{ color: 'var(--muted)' }}>└ </span>}
+      {r.esGrupo && '🔗 '}{r.nombre}
+      <div style={S.codigo}>{r.esGrupo ? `${r.nModelos} ${r.nModelos === 1 ? 'modelo' : 'modelos'}` : r.id}{extra}</div>
+    </td>
+  )
+}
+
+function FilaRitmo({ r, abierto, modelo, onClick }) {
+  return (
+    <tr onClick={onClick} style={{ ...(onClick ? { cursor: 'pointer' } : {}), ...(r.esGrupo ? S.trGrupo : {}) }} data-grupo={r.esGrupo ? r.nombre : undefined}>
+      <NombreFila r={r} abierto={abierto} modelo={modelo} extra={` · última venta ${fechaDeDia(r.ultimaVenta)}`} />
+      <td style={{ ...S.td, ...S.tdReponer, ...(modelo ? { fontSize: 15, color: 'var(--text)' } : {}) }}>
+        {r.reponer || '–'}
+        {r.esGrupo && <div style={{ ...S.codigo, fontFamily: 'Barlow, sans-serif', fontWeight: 400 }}>suma modelos {r.reponerModelos || 0}</div>}
+      </td>
+      <td style={{ ...S.td, color: r.stock != null && r.stock <= 0 ? '#ef4444' : 'var(--text)' }}>{r.stock == null ? '–' : fmtN(r.stock)}</td>
+      <td style={{ ...S.td, ...coberturaColor(r.cobertura) }}>{r.cobertura == null ? '–' : r.cobertura >= 365 ? '+1 año' : `${fmtN(r.cobertura)} d`}</td>
+      <td style={S.td}>{fmt1(r.w30)}</td>
+      <td style={S.td}>{fmt1(r.w90)}</td>
+      <td style={S.td}>{fmt1(r.w365)}</td>
+      <td style={S.td}><Tendencia r={r} /></td>
+      <td style={S.td}>{r.t30 || '–'}</td>
+    </tr>
+  )
+}
+
+function FilaRecupero({ r, abierto, modelo, onClick }) {
+  return (
+    <tr onClick={onClick} style={{ ...(onClick ? { cursor: 'pointer' } : {}), ...(r.esGrupo ? S.trGrupo : {}) }} data-grupo={r.esGrupo ? r.nombre : undefined}>
+      <NombreFila r={r} abierto={abierto} modelo={modelo} extra={r.proveedor ? ` · ${r.proveedor}` : ''} />
+      <td style={S.td}>{fechaDeDia(r.compraDia)}<div style={S.codigo}>{fmtN(r.compraCant)} u.</div></td>
+      <td style={S.td}>${fmtN(r.compraCosto)}</td>
+      <td style={S.td}>${fmtN(r.facturado)}<div style={S.codigo}>{fmtN(r.unidades)} u. vendidas</div></td>
+      <td style={S.td}>
+        <div style={S.recBarra}><div style={{ ...S.recBarraFill, width: `${Math.min(100, r.pct * 100)}%`, background: r.recuperado ? '#22c55e' : r.pct > 0 ? 'var(--accent)' : '#ef4444' }} /></div>
+        <div style={S.codigo}>{Math.round(r.pct * 100)}%</div>
+      </td>
+      <td style={{ ...S.td, ...(r.recuperado ? { color: '#22c55e', fontWeight: 700 } : {}) }}>
+        {r.recuperado ? (r.dias === 0 ? 'el mismo día' : `en ${fmtN(r.dias)} ${r.dias === 1 ? 'día' : 'días'}`)
+          : r.faltan == null ? <span style={{ color: '#ef4444' }}>sin ventas</span>
+          : r.diasTotal > 365 ? 'más de 1 año' : `≈ ${fmtN(r.diasTotal)} días`}
+        <div style={S.codigo}>{r.recuperado ? 'recuperado' : `lleva ${fmtN(r.dias)} ${r.dias === 1 ? 'día' : 'días'}${r.faltan != null && r.diasTotal <= 365 ? ` · faltan ≈ ${fmtN(r.faltan)}` : ''}`}</div>
+      </td>
+    </tr>
   )
 }
 
@@ -536,5 +650,9 @@ const S = {
   chipNuevo: { background: 'rgba(245,200,0,0.15)', color: 'var(--accent)' },
   recBarra: { width: 90, height: 8, background: 'var(--surface2)', borderRadius: 4, overflow: 'hidden', marginLeft: 'auto' },
   recBarraFill: { height: '100%', borderRadius: 4 },
+  trGrupo: { background: 'rgba(96,165,250,0.06)' },
+  tdModelo: { paddingLeft: 26, fontSize: 13, color: 'var(--muted)' },
+  flecha: { display: 'inline-block', width: 16, color: '#60a5fa' },
+  nMod: { color: 'var(--muted)', fontSize: 11 },
   masBtn: { alignSelf: 'flex-start', marginTop: 10, background: 'var(--surface2)', border: '1.5px solid var(--border)', borderRadius: 10, color: 'var(--text)', fontFamily: 'Barlow, sans-serif', fontSize: 14, padding: '8px 16px', cursor: 'pointer' },
 }

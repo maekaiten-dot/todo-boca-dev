@@ -26,7 +26,7 @@ import { getArticulos, getUsuarios, registrarLog, calcularStockTodos, leerArticu
 // hasta tocar "Entendido"; a los Admin, con un aviso chico arriba que abre el detalle si lo tocan.
 // Los cambios guardados desde este mismo dispositivo se marcan como vistos (no avisan a quien los hizo).
 const INTERVALO_PRECIOS = 90 * 1000
-const firmaArticulos = arts => arts.map(a => `${a.id}|${a.precioUnitario}|${a.costoUnitario}|${a.nombre}|${a.foto}`).join('\n')
+const firmaArticulos = arts => arts.map(a => `${a.id}|${a.precioUnitario}|${a.costoUnitario}|${a.nombre}|${a.foto}|${a.grupo || ""}`).join('\n')
 
 // Barra inferior: solapas de uso diario. El resto de las solapas de Admin va en el menú "Más".
 const TABS_POR_TIPO = {

@@ -11,7 +11,7 @@ export const FORM_ARTICULO_VACIO = {
   id: '', nombre: '', stockInicial: '0', info: '',
   disponibilidad: 'ACTIVO', foto: '',
   precioUnitario: '0', costoUnitario: '0',
-  cantidadReponer: '0', stockCierre: '0', stockActual: '0',
+  cantidadReponer: '0', stockCierre: '0', stockActual: '0', grupo: '',
 }
 
 async function subirFotoCloudinary(file) {
@@ -27,8 +27,17 @@ async function subirFotoCloudinary(file) {
 // inicial: valores del formulario (para uno nuevo puede venir sin id: se genera solo)
 // editando: el artículo que se edita (con rowNum) o null si es nuevo
 // onGuardado(form): después de guardar en la planilla
-export default function ModalArticulo({ inicial, editando = null, empleado = '', onCerrar, onGuardado, aviso = '' }) {
-  const [form, setForm] = useState({ ...FORM_ARTICULO_VACIO, ...inicial })
+// articulos: lista de artículos (para sugerir los grupos que ya existen)
+export default function ModalArticulo({ inicial, editando = null, empleado = '', onCerrar, onGuardado, aviso = '', articulos = [] }) {
+  const [form, setForm] = useState({ ...FORM_ARTICULO_VACIO, ...inicial, grupo: inicial?.grupo || '' })
+  // Grupos existentes con la cantidad de modelos de cada uno
+  const grupos = (() => {
+    const m = new Map()
+    articulos.forEach(a => { const g = String(a.grupo || '').trim(); if (g) m.set(g, (m.get(g) || 0) + 1) })
+    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0], 'es'))
+  })()
+  const grupoNorm = String(form.grupo || '').trim().toLowerCase()
+  const otrosDelGrupo = grupoNorm ? articulos.filter(a => a.id !== form.id && String(a.grupo || '').trim().toLowerCase() === grupoNorm) : []
   const [saving, setSaving] = useState(false)
   const [uploadingFoto, setUploadingFoto] = useState(false)
   const [error, setError] = useState('')
@@ -51,10 +60,14 @@ export default function ModalArticulo({ inicial, editando = null, empleado = '',
   async function guardar() {
     if (!String(form.id).trim() || !String(form.nombre).trim()) { setError('ID y Nombre son obligatorios'); return }
     setSaving(true); setError('')
+    // Si escribió un grupo que ya existe con otras mayúsculas/espacios, usa el nombre existente
+    const g = String(form.grupo || '').trim().replace(/\s+/g, ' ')
+    const existente = grupos.find(([n]) => n.toLowerCase() === g.toLowerCase())
+    const datos = { ...form, grupo: existente ? existente[0] : g }
     try {
-      if (editando) await editarArticulo(editando.rowNum, form, empleado)
-      else await agregarArticulo(form, empleado)
-      await onGuardado?.(form)
+      if (editando) await editarArticulo(editando.rowNum, datos, empleado)
+      else await agregarArticulo(datos, empleado)
+      await onGuardado?.(datos)
     } catch (e) {
       setError('Error al guardar')
     } finally {
@@ -117,6 +130,25 @@ export default function ModalArticulo({ inicial, editando = null, empleado = '',
                   </div>
                 </div>
   
+                <div style={S.fieldGroup}>
+                  <label style={S.label}>GRUPO</label>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <input style={{ ...S.input, flex: 1 }} list="tb-grupos-articulo" value={form.grupo} placeholder="Ej: Bufanda $22.000 (vacío = sin grupo)"
+                      onChange={e => setForm(f => ({...f, grupo: e.target.value}))} />
+                    {form.grupo && <button style={{ ...S.fotoBtn, ...S.fotoBtnBorrar, marginTop: 0 }} title="Sacar del grupo" onClick={() => setForm(f => ({...f, grupo: ''}))}>✕</button>}
+                  </div>
+                  <datalist id="tb-grupos-articulo">
+                    {grupos.map(([n, c]) => <option key={n} value={n}>{c} {c === 1 ? 'modelo' : 'modelos'}</option>)}
+                  </datalist>
+                  <div style={S.ayuda}>
+                    {grupoNorm
+                      ? otrosDelGrupo.length
+                        ? `Se suma en Rotación con ${otrosDelGrupo.length} ${otrosDelGrupo.length === 1 ? 'modelo más' : 'modelos más'}: ${otrosDelGrupo.slice(0, 4).map(a => a.nombre).join(', ')}${otrosDelGrupo.length > 4 ? '…' : ''}`
+                        : 'Grupo nuevo: poné el mismo nombre en los otros modelos para que se sumen.'
+                      : 'Los modelos del mismo producto con el mismo grupo se suman en Rotación.'}
+                  </div>
+                </div>
+
                 <div style={S.fieldGroup}>
                   <label style={S.label}>INFO</label>
                   <textarea style={S.textarea} value={form.info} onChange={e => setForm(f => ({...f, info: e.target.value}))} rows={2} />
@@ -232,5 +264,6 @@ const S = {
   cancelBtn: { flex:1, padding:'13px', background:'none', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--muted)', fontFamily:'Barlow, sans-serif', fontSize:15, cursor:'pointer' },
   saveBtn: { flex:2, padding:'13px', background:'var(--accent)', border:'none', borderRadius:8, color:'#000', fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:17, cursor:'pointer', letterSpacing:1 },
   aviso: { fontFamily:'Barlow, sans-serif', fontSize:13, color:'var(--text)', background:'rgba(245,200,0,0.1)', border:'1px solid var(--accent)', borderRadius:8, padding:'8px 12px', marginBottom:10 },
+  ayuda: { fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)', lineHeight:1.35 },
   error: { fontFamily:'Barlow, sans-serif', fontSize:13, color:'#ef4444', marginBottom:8 },
 }

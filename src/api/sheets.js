@@ -211,6 +211,7 @@ export async function getArticulos() {
   const iReponer = col('CANTIDAD REPONER','REPONER','CANT REPONER')
   const iStockC = col('STOCK CIERRE','CIERRE')
   const iStockA = col('STOCK ACTUAL','ACTUAL')
+  const iGrupo = headers.findIndex(h => h === 'GRUPO')
   const idx = (found, fallback) => found >= 0 ? found : fallback
   const parseNum = v => Number(String(v||'0').replace(/[$\s]/g,'').replace(/\./g,'').replace(',','.')) || 0
   return rows.slice(1)
@@ -222,6 +223,7 @@ export async function getArticulos() {
       precioUnitario: parseNum(r[idx(iPrecio,6)]), costoUnitario: parseNum(r[idx(iCosto,7)]),
       cantidadReponer: parseNum(r[idx(iReponer,8)]), stockCierre: parseNum(r[idx(iStockC,9)]),
       stockActual: parseNum(r[idx(iStockA,10)]),
+      grupo: String(r[idx(iGrupo,11)] || '').trim(),
     }))
     .filter(a => { const d = a.disponibilidad?.toString().toUpperCase(); return !d||d==='ACTIVO'||d==='SI'||d==='TRUE'||d==='1' })
 }
@@ -776,14 +778,51 @@ async function historicoSeguro(fn, id, empleado) {
 }
 
 export async function getArticulosAdmin() {
-  const data = await sheetsGet('ARTICULOS!A1:K')
+  const data = await sheetsGet('ARTICULOS!A1:L')
   const rows = data.values || []
   if (rows.length===0) return []
   return rows.slice(1).map((r, idx) => ({
     rowNum:idx+2, id:r[0]||'', nombre:r[1]||'', stockInicial:r[2]||'0', info:r[3]||'',
     disponibilidad:r[4]||'ACTIVO', foto:r[5]||'', precioUnitario:r[6]||'0',
     costoUnitario:r[7]||'0', cantidadReponer:r[8]||'0', stockCierre:r[9]||'0', stockActual:r[10]||'0',
+    grupo:String(r[11]||'').trim(),
   })).filter(r => r.id)
+}
+
+// Columna L de ARTICULOS: GRUPO (une modelos del mismo producto para Rotación). Se crea el
+// encabezado la primera vez que se guarda un artículo con grupo.
+async function asegurarColumnaGrupo() {
+  try {
+    const enc = await sheetsGet('ARTICULOS!L1')
+    if (!enc.values?.[0]?.[0]) await sheetsUpdate('ARTICULOS!L1', [['GRUPO']])
+  } catch (e) { console.warn('No se pudo crear la columna GRUPO:', e) }
+}
+// Carga de una sola vez los grupos aprobados (mapa: nombre del grupo → [ids]). Escribe toda la
+// columna L en un solo pedido, sin tocar los grupos que ya estén cargados. Devuelve cuántos asignó.
+export async function cargarGruposIniciales(mapa, empleado = '') {
+  const data = await sheetsGet('ARTICULOS!A1:L')
+  const rows = data.values || []
+  const grupoDe = {}
+  Object.entries(mapa).forEach(([g, ids]) => ids.forEach(id => { grupoDe[id] = g }))
+  let asignados = 0
+  const col = rows.map((r, i) => {
+    if (i === 0) return ['GRUPO']
+    const actual = String(r[11] || '').trim()
+    if (actual) return [actual]
+    const g = grupoDe[String(r[0] || '').trim()]
+    if (g) { asignados++; return [g] }
+    return ['']
+  })
+  if (!asignados) return 0
+  await sheetsUpdate(`ARTICULOS!L1:L${rows.length}`, col)
+  await registrarLog({ accion:'GRUPOS_CARGADOS', detalle:`${asignados} artículos en ${Object.keys(mapa).length} grupos`, idReferencia:'', empleado, resultado:'OK' })
+  return asignados
+}
+
+const filaArticulo = art => {
+  const row = [art.id,art.nombre,art.stockInicial||'0',art.info||'',art.disponibilidad||'ACTIVO',art.foto||'',art.precioUnitario||'0',art.costoUnitario||'0',art.cantidadReponer||'0',art.stockCierre||'0',art.stockActual||'0']
+  if (art.grupo !== undefined) row.push(String(art.grupo || '').trim())
+  return row
 }
 
 export async function generarIdArticulo() {
@@ -828,8 +867,9 @@ export async function agregarArticulo(art, empleado = '') {
   let lastTBRow = 1
   rows.forEach((r, i) => { if (r[0]&&String(r[0]).trim().startsWith('TB')) lastTBRow=i+1 })
   const nextRow = lastTBRow+1
-  const row = [art.id,art.nombre,art.stockInicial||'0',art.info||'',art.disponibilidad||'ACTIVO',art.foto||'',art.precioUnitario||'0',art.costoUnitario||'0',art.cantidadReponer||'0',art.stockCierre||'0',art.stockActual||'0']
-  try { await sheetsUpdate(`ARTICULOS!A${nextRow}:K${nextRow}`, [row]) }
+  const row = filaArticulo(art)
+  if (art.grupo) await asegurarColumnaGrupo()
+  try { await sheetsUpdate(`ARTICULOS!A${nextRow}:${row.length > 11 ? 'L' : 'K'}${nextRow}`, [row]) }
   catch (e) { await sheetsAppend('ARTICULOS!A1', [row]) }
   marcarArticuloVisto(art)
   await registrarLog({ accion:'ARTICULO_CREADO', detalle:`${art.id} · ${art.nombre} · $${art.precioUnitario}`, idReferencia:art.id, empleado, resultado:'OK' })
@@ -844,8 +884,9 @@ export async function editarArticulo(rowNum, art, empleado = '') {
     const r = (prev.values || [])[0] || []
     if (r[0] === art.id) anterior = { precio: r[6], costo: r[7] }
   } catch (e) { console.error(e) }
-  const row = [art.id,art.nombre,art.stockInicial||'0',art.info||'',art.disponibilidad||'ACTIVO',art.foto||'',art.precioUnitario||'0',art.costoUnitario||'0',art.cantidadReponer||'0',art.stockCierre||'0',art.stockActual||'0']
-  await sheetsUpdate(`ARTICULOS!A${rowNum}:K${rowNum}`, [row])
+  const row = filaArticulo(art)
+  if (art.grupo) await asegurarColumnaGrupo()
+  await sheetsUpdate(`ARTICULOS!A${rowNum}:${row.length > 11 ? 'L' : 'K'}${rowNum}`, [row])
   marcarArticuloVisto(art)
   await registrarLog({ accion:'ARTICULO_EDITADO', detalle:`${art.id} · ${art.nombre} · $${art.precioUnitario}`, idReferencia:art.id, empleado, resultado:'OK' })
   if (anterior) {

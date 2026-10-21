@@ -1,7 +1,8 @@
 // src/pages/Articulos.jsx
 import { useState, useEffect, useRef } from 'react'
 import ModalArticulo from '../components/ModalArticulo.jsx'
-import { getArticulosAdmin, generarIdArticulo, agregarArticulo, editarArticulo, toggleDisponibilidad, calcularStockTodos } from '../api/sheets.js'
+import { GRUPOS_INICIALES } from '../lib/gruposIniciales.js'
+import { cargarGruposIniciales, getArticulosAdmin, generarIdArticulo, agregarArticulo, editarArticulo, toggleDisponibilidad, calcularStockTodos } from '../api/sheets.js'
 
 const CLOUDINARY_CLOUD = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
 const CLOUDINARY_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET
@@ -31,6 +32,7 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [busqueda, setBusqueda] = useState('')
+  const [cargandoGrupos, setCargandoGrupos] = useState(false)
   const [filtroDisp, setFiltroDisp] = useState('TODOS')
   const [modalAbierto, setModalAbierto] = useState(false)
   const [editando, setEditando] = useState(null)
@@ -81,7 +83,7 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
       info: art.info, disponibilidad: art.disponibilidad, foto: art.foto,
       precioUnitario: art.precioUnitario, costoUnitario: art.costoUnitario,
       cantidadReponer: art.cantidadReponer, stockCierre: art.stockCierre,
-      stockActual: art.stockActual,
+      stockActual: art.stockActual, grupo: art.grupo || '',
     })
     setEditando(art)
     setModalAbierto(true)
@@ -157,7 +159,7 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
     .filter(a => {
       if (!busqueda.trim()) return true
       const q = normalizr(busqueda)
-      return normalizr(a.nombre).includes(q) || normalizr(a.id).includes(q)
+      return normalizr(a.nombre).includes(q) || normalizr(a.id).includes(q) || normalizr(a.grupo || '').includes(q)
     })
 
   if (loading) return (
@@ -205,6 +207,21 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
         )}
       </div>
 
+      {esAdmin && !loading && articulos.length > 0 && !articulos.some(a => a.grupo) && (
+        <div style={S.gruposBanner}>
+          <div style={{ flex: 1 }}>
+            <b>🔗 Grupos listos para cargar:</b> {Object.entries(GRUPOS_INICIALES).map(([g, ids]) => `${g} (${ids.length})`).join(' · ')}.
+            <div style={{ color: 'var(--muted)', fontSize: 12, marginTop: 2 }}>Se guardan en la columna GRUPO de ARTICULOS. Después se cambian editando cada artículo.</div>
+          </div>
+          <button style={S.newBtn} disabled={cargandoGrupos} onClick={async () => {
+            setCargandoGrupos(true)
+            try { const n = await cargarGruposIniciales(GRUPOS_INICIALES, empleado); showToast(`${n} artículos agrupados ✓`, 'success'); await cargar() }
+            catch (e) { console.error(e); showToast('No se pudieron cargar los grupos', 'error') }
+            finally { setCargandoGrupos(false) }
+          }}>{cargandoGrupos ? 'Cargando…' : 'CARGAR GRUPOS'}</button>
+        </div>
+      )}
+
       <div style={S.conteo}>{articulosFiltrados.length} artículos</div>
 
       <div style={S.tableWrap}>
@@ -235,6 +252,7 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
                   <td style={{...S.td, ...S.tdSku}}>{art.id}</td>
                   <td style={{...S.td, ...S.tdNombre}}>
                     {art.nombre}
+                    {art.grupo && <div style={S.grupoTag} title="Grupo: se suma con los otros modelos en Rotación">🔗 {art.grupo}</div>}
                     {esAdmin && sinCosto(art) && <div style={S.avisoSinCosto}>⚠ Sin costo unitario cargado</div>}
                   </td>
                   <td style={S.td}>${Number(String(art.precioUnitario).replace(/[$\s.]/g,'').replace(',','.')||0).toLocaleString('es-AR')}</td>
@@ -273,7 +291,7 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
       {/* Modal formulario */}
       {modalAbierto && (
         <ModalArticulo
-          inicial={form} editando={editando} empleado={empleado}
+          inicial={form} editando={editando} empleado={empleado} articulos={articulos}
           onCerrar={() => setModalAbierto(false)}
           onGuardado={async () => { showToast(editando ? 'Artículo actualizado' : 'Artículo creado', 'success'); setModalAbierto(false); await cargar() }}
         />
@@ -283,6 +301,8 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
 }
 
 const S = {
+  gruposBanner: { display:'flex', alignItems:'center', gap:12, margin:'10px 16px 0', padding:'10px 14px', background:'rgba(96,165,250,0.08)', border:'1.5px solid #60a5fa', borderRadius:10, fontFamily:'Barlow, sans-serif', fontSize:14, color:'var(--text)' },
+  grupoTag: { fontFamily:'Barlow, sans-serif', fontSize:11, color:'#60a5fa', marginTop:2 },
   page: { display:'flex', flexDirection:'column', height:'100%', overflowY:'auto', position:'relative' },
   center: { display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', height:'100%', gap:12 },
   loadingText: { fontFamily:'Barlow Condensed, sans-serif', fontSize:22, color:'var(--muted)' },

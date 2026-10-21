@@ -4,6 +4,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { getHistoricoVentas, montoConMetodo, repartoPago, usaPosnet } from '../api/sheets.js'
 import CorregirPosnetModal from '../components/CorregirPosnetModal.jsx'
 import MonotributoPosnet from '../components/MonotributoPosnet.jsx'
+import IndiceEficiencia from '../components/IndiceEficiencia.jsx'
 
 function esTarjetaOQR(metodo) {
   if (!metodo) return false
@@ -726,6 +727,8 @@ export default function Estadisticas({ esAdmin = false, usuarios = [], perfilNom
           <div style={S.statLabel}>Mejor día ({mejorDia?.label})</div>
         </div>
       </div>
+
+      {esAdmin && <IndiceEficiencia ventas={ventasTodas} />}
 
       {/* Gráfico diario */}
       <div style={S.chartCard}>

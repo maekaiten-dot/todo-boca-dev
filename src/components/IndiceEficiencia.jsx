@@ -10,11 +10,12 @@
 // stock (GMROI) y stock parado.
 import { useState, useEffect, useMemo } from 'react'
 import { repartoPago } from '../api/sheets.js'
+import { generarRecomendaciones, costoValido } from '../lib/recomendaciones.js'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Cell } from 'recharts'
 
 export const COMPONENTES = [
   { id: 'margen', nombre: 'Margen bruto', peso: 30, fmt: v => `${(v * 100).toLocaleString('es-AR', { maximumFractionDigits: 1 })}%`,
-    ayuda: 'Venta menos costo de lo vendido, sobre la venta. Solo cuenta lo vendido que tiene costo cargado.' },
+    ayuda: 'Venta menos costo de lo vendido, sobre la venta. Solo cuenta lo vendido con costo cargado (y que no sea mayor que el precio).' },
   { id: 'porHora', nombre: 'Venta por hora trabajada', peso: 30, fmt: v => fmt$(v),
     ayuda: 'Venta del mes (a precios de hoy) dividida por las horas fichadas de entrada a salida.' },
   { id: 'ticket', nombre: 'Ticket promedio', peso: 15, fmt: v => fmt$(v),
@@ -96,7 +97,7 @@ export function calcularIndice(ventas, { indices = null, horas = {}, mesActual }
     const $ = monto(v)
     x.venta += $
     x.comision += repartoPago(v).reduce((s, p) => s + p.monto * comisionDe(p.metodo, v.posnet), 0)
-    if (v.costoTotal) { x.ventaConCosto += $; x.costo += v.costoTotal }
+    if (costoValido(v)) { x.ventaConCosto += $; x.costo += v.costoTotal }
     // Solo filas con ticket real (las cargas viejas de resumen mensual no tienen ID de venta)
     if (v.idVenta && !cambio.has(v.idVenta)) { x.tickets.add(v.idVenta); x.ventaTk += $; x.unidadesTk += v.cantidad || 0 }
   }
@@ -145,6 +146,8 @@ export function calcularIndice(ventas, { indices = null, horas = {}, mesActual }
   return { meses: resultado }
 }
 
+const COLOR_REC = { alerta: '#ef4444', idea: 'var(--accent)', bien: '#22c55e' }
+const ICONO_REC = { alerta: '⚠️', idea: '💡', bien: '✅' }
 const colorIndice = v => v == null ? 'var(--muted)' : v >= 105 ? '#22c55e' : v <= 95 ? '#ef4444' : 'var(--accent)'
 
 export default function IndiceEficiencia({ ventas = [] }) {
@@ -167,6 +170,7 @@ export default function IndiceEficiencia({ ventas = [] }) {
   const conIndice = meses.filter(x => x.indice != null)
   const grafico = conIndice.slice(-12)
   const sel = meses.find(x => x.mes === elegido) || conIndice[conIndice.length - 1]
+  const recs = useMemo(() => sel ? generarRecomendaciones(ventas, sel.mes, sel.comp, { fichadas: fichadas || [], comisionDe, enCurso: sel.enCurso }) : [], [ventas, sel, fichadas])
   if (!ventas.length) return null
 
   return (
@@ -232,6 +236,19 @@ export default function IndiceEficiencia({ ventas = [] }) {
           </table>
         </div>
         <div style={S.hint}>Los componentes sin dato o sin al menos {MIN_BASE} meses de historia no cuentan ese mes: su peso se reparte entre los demás.</div>
+
+        {recs.length > 0 && (
+          <div style={S.recs} aria-label="Recomendaciones">
+            <div style={S.recsTitulo}>Recomendaciones · {sel.label}{sel.enCurso ? ' (mes en curso, puede cambiar)' : ''}</div>
+            {recs.map((r, i) => (
+              <div key={i} style={{ ...S.rec, borderColor: COLOR_REC[r.tipo] }} data-rec={r.tipo}>
+                <div style={{ ...S.recTitulo, color: COLOR_REC[r.tipo] }}>{ICONO_REC[r.tipo]} {r.titulo}</div>
+                <div style={S.recTexto}>{r.texto}</div>
+                {r.accion && <div style={S.recAccion}>👉 {r.accion}</div>}
+              </div>
+            ))}
+          </div>
+        )}
       </>)}
     </div>
   )
@@ -251,5 +268,11 @@ const S = {
   tabla: { width: '100%', minWidth: 620, borderCollapse: 'collapse' },
   th: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 12, color: 'var(--muted)', letterSpacing: 1, textTransform: 'uppercase', padding: 8, borderBottom: '1.5px solid var(--border)', textAlign: 'right', whiteSpace: 'nowrap' },
   td: { fontFamily: 'Barlow, sans-serif', fontSize: 14, color: 'var(--text)', padding: 8, borderBottom: '1px solid var(--border)', textAlign: 'right', whiteSpace: 'nowrap', verticalAlign: 'top', fontVariantNumeric: 'tabular-nums' },
+  recs: { display: 'flex', flexDirection: 'column', gap: 10, marginTop: 14 },
+  recsTitulo: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 16, color: 'var(--accent)', letterSpacing: 1, textTransform: 'uppercase' },
+  rec: { background: 'var(--surface2)', border: '1.5px solid', borderLeftWidth: 1.5, borderRadius: 10, padding: '10px 14px' },
+  recTitulo: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 17, lineHeight: 1.2 },
+  recTexto: { fontFamily: 'Barlow, sans-serif', fontSize: 14, color: 'var(--text)', lineHeight: 1.45, marginTop: 4 },
+  recAccion: { fontFamily: 'Barlow, sans-serif', fontSize: 14, color: 'var(--muted)', lineHeight: 1.45, marginTop: 6 },
   chico: { fontSize: 11, color: 'var(--muted)', fontWeight: 400, marginTop: 2 },
 }

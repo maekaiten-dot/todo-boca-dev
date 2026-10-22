@@ -190,6 +190,42 @@ export async function registrarLog({ accion, detalle, idReferencia = '', emplead
   } catch (e) { console.warn('Error al registrar log:', e) }
 }
 
+// ── Artículos unificados ─────────────────────────────────────────────────────────
+// ARTICULOS · M: UNIFICADO EN (el código que queda) · N: UNIFICADO EL (fecha y hora).
+// El artículo unificado queda INACTIVO y todo lo suyo (ventas, ingresos, stock, etiquetas) se toma
+// como del que queda. No se reescribe nada del historial: deshacerlo es borrar M y N.
+let _alias = {}            // { idViejo: { a: idQueQueda, ms, stockInicial } }
+let _aliasPromesa = null
+function armarAlias(rows) {
+  const h = (rows[0] || []).map(x => String(x || '').toUpperCase().trim())
+  const iEn = h.indexOf('UNIFICADO EN') >= 0 ? h.indexOf('UNIFICADO EN') : 12
+  const iEl = h.indexOf('UNIFICADO EL') >= 0 ? h.indexOf('UNIFICADO EL') : 13
+  const out = {}
+  rows.slice(1).forEach(r => {
+    const id = String(r[0] || '').trim(), a = String(r[iEn] || '').trim()
+    if (!id || !a || a === id) return
+    const [f, hr] = String(r[iEl] || '').replace(/^'/, '').split(' ')
+    out[id] = { a, ms: fechaHoraAMsAR(f, hr || '') || 0, stockInicial: Number(r[2]) || 0 }
+  })
+  _alias = out
+  _aliasPromesa = Promise.resolve(out)
+  return out
+}
+async function asegurarAlias() {
+  if (!_aliasPromesa) _aliasPromesa = sheetsGet('ARTICULOS!A1:N').then(d => armarAlias(d.values || [])).catch(e => { console.warn('No se pudieron leer los unificados', e); _aliasPromesa = null; return {} })
+  return _aliasPromesa
+}
+export const getAlias = () => _alias
+// Código que queda para un código (sigue la cadena si se unificó más de una vez)
+export function idCanonico(id) {
+  let x = String(id ?? '').trim(), n = 0
+  if (!_alias[x] && _alias[x.toUpperCase()]) x = x.toUpperCase()
+  while (_alias[x] && n++ < 10) x = _alias[x].a
+  return x
+}
+// Los códigos que fueron unificados en este (directa o indirectamente)
+export const unificadosEn = id => Object.keys(_alias).filter(k => k !== id && idCanonico(k) === id)
+
 export async function getArticulos() {
   const data = await sheetsGet('ARTICULOS!A1:Z')
   const rows = data.values || []
@@ -212,6 +248,7 @@ export async function getArticulos() {
   const iStockC = col('STOCK CIERRE','CIERRE')
   const iStockA = col('STOCK ACTUAL','ACTUAL')
   const iGrupo = headers.findIndex(h => h === 'GRUPO')
+  armarAlias(rows)
   const idx = (found, fallback) => found >= 0 ? found : fallback
   const parseNum = v => Number(String(v||'0').replace(/[$\s]/g,'').replace(/\./g,'').replace(',','.')) || 0
   return rows.slice(1)
@@ -263,11 +300,15 @@ export async function getVentasHoy() {
   return rows.filter(r => r[2]===fecha).map(mapRow)
 }
 
-export async function getHistoricoVentas() {
+// unificar: true → las ventas de artículos unificados se cuentan como del artículo que quedó
+// (para estadísticas y rotación). El listado de ventas usa el código original.
+export async function getHistoricoVentas({ unificar = false } = {}) {
   // Hasta AK para incluir el POSNET (amarillo/blanco) y su corrección manual
-  const data = await sheetsGet('DETALLE DE VENTAS!A2:AK')
+  const [data] = await Promise.all([sheetsGet('DETALLE DE VENTAS!A2:AK'), unificar ? asegurarAlias() : null])
   const rows = data.values || []
-  return rows.filter(r => r[0]).map(mapRow)
+  const ventas = rows.filter(r => r[0]).map(mapRow)
+  if (unificar) ventas.forEach(v => { const c = idCanonico(v.articulo); if (c !== v.articulo) { v.articuloOriginal = v.articulo; v.articulo = c } })
+  return ventas
 }
 
 // Ventas desde una fecha (aaaa-mm-dd). Primero lee solo la columna FECHA (liviana) para ubicar
@@ -778,14 +819,16 @@ async function historicoSeguro(fn, id, empleado) {
 }
 
 export async function getArticulosAdmin() {
-  const data = await sheetsGet('ARTICULOS!A1:L')
+  const data = await sheetsGet('ARTICULOS!A1:N')
   const rows = data.values || []
   if (rows.length===0) return []
+  armarAlias(rows)
   return rows.slice(1).map((r, idx) => ({
     rowNum:idx+2, id:r[0]||'', nombre:r[1]||'', stockInicial:r[2]||'0', info:r[3]||'',
     disponibilidad:r[4]||'ACTIVO', foto:r[5]||'', precioUnitario:r[6]||'0',
     costoUnitario:r[7]||'0', cantidadReponer:r[8]||'0', stockCierre:r[9]||'0', stockActual:r[10]||'0',
     grupo:String(r[11]||'').trim(),
+    unificadoEn:String(r[12]||'').trim(), unificadoEl:String(r[13]||'').replace(/^'/, '').trim(),
   })).filter(r => r.id)
 }
 
@@ -797,6 +840,43 @@ async function asegurarColumnaGrupo() {
     if (!enc.values?.[0]?.[0]) await sheetsUpdate('ARTICULOS!L1', [['GRUPO']])
   } catch (e) { console.warn('No se pudo crear la columna GRUPO:', e) }
 }
+async function asegurarColumnasUnificado() {
+  try {
+    const enc = await sheetsGet('ARTICULOS!M1:N1')
+    const v = (enc.values || [])[0] || []
+    if (!v[0] || !v[1]) await sheetsUpdate('ARTICULOS!M1:N1', [['UNIFICADO EN', 'UNIFICADO EL']])
+  } catch (e) { console.warn('No se pudieron crear las columnas de unificados:', e) }
+}
+
+// Unifica "viejo" en "queda": el viejo pasa a INACTIVO y se anota en M/N a qué código se unificó.
+export async function unificarArticulo(viejo, queda, empleado = '') {
+  if (!viejo?.rowNum || !queda?.id || viejo.id === queda.id) throw new Error('Datos incompletos')
+  if (idCanonico(queda.id) === viejo.id) throw new Error('No se puede: el otro ya está unificado en este')
+  await asegurarColumnasUnificado()
+  const prev = await sheetsGet(`ARTICULOS!A${viejo.rowNum}`)
+  if (String((prev.values || [])[0]?.[0] || '').trim() !== viejo.id) throw new Error('La planilla cambió: recargá Arts. y probá de nuevo')
+  const dt = getArgentinaDate()
+  await sheetsUpdate(`ARTICULOS!E${viejo.rowNum}`, [['INACTIVO']])
+  await sheetsUpdate(`ARTICULOS!M${viejo.rowNum}:N${viejo.rowNum}`, [[idCanonico(queda.id), `'${dt.fecha} ${dt.hora}`]])
+  _alias = { ..._alias, [viejo.id]: { a: idCanonico(queda.id), ms: Date.now(), stockInicial: Number(viejo.stockInicial) || 0 } }
+  _aliasPromesa = Promise.resolve(_alias)
+  marcarArticuloVisto(viejo, false)
+  await registrarLog({ accion:'ARTICULO_UNIFICADO', detalle:`${viejo.id} · ${viejo.nombre} → ${queda.id} · ${queda.nombre}`, idReferencia:viejo.id, empleado, resultado:'OK' })
+}
+
+// Deshace la unificación: vuelve a ACTIVO y se borra M/N
+export async function deshacerUnificacion(art, empleado = '') {
+  if (!art?.rowNum) throw new Error('Datos incompletos')
+  const prev = await sheetsGet(`ARTICULOS!A${art.rowNum}`)
+  if (String((prev.values || [])[0]?.[0] || '').trim() !== art.id) throw new Error('La planilla cambió: recargá Arts. y probá de nuevo')
+  await sheetsUpdate(`ARTICULOS!E${art.rowNum}`, [['ACTIVO']])
+  await sheetsUpdate(`ARTICULOS!M${art.rowNum}:N${art.rowNum}`, [['', '']])
+  const { [art.id]: _, ...resto } = _alias
+  _alias = resto; _aliasPromesa = Promise.resolve(_alias)
+  marcarArticuloVisto(art, true)
+  await registrarLog({ accion:'ARTICULO_DESUNIFICADO', detalle:`${art.id} · ${art.nombre} (estaba en ${art.unificadoEn})`, idReferencia:art.id, empleado, resultado:'OK' })
+}
+
 // Carga de una sola vez los grupos aprobados (mapa: nombre del grupo → [ids]). Escribe toda la
 // columna L en un solo pedido, sin tocar los grupos que ya estén cargados. Devuelve cuántos asignó.
 export async function cargarGruposIniciales(mapa, empleado = '') {
@@ -924,12 +1004,12 @@ function msModificadoIngreso(modificado, id, fecha, hora) {
   return Math.max(deFila, deId)
 }
 
-export async function getIngresos() {
-  const data = await sheetsGet('INGRESOS!A2:L')
+export async function getIngresos({ unificar = false } = {}) {
+  const [data] = await Promise.all([sheetsGet('INGRESOS!A2:L'), unificar ? asegurarAlias() : null])
   const rows = data.values || []
   return rows.filter(r=>r[0]).map((r, idx) => ({
     rowNum:idx+2, idIngreso:r[0]||'', fecha:r[1]||'', hora:r[2]||'',
-    articuloId:r[3]||'', articuloNombre:r[4]||'', cantidad:Number(r[5])||0,
+    articuloId: unificar ? idCanonico(r[3]||'') : r[3]||'', articuloNombre:r[4]||'', cantidad:Number(r[5])||0,
     costoUnitario:parsePrecio(r[6]), costoTotal:parsePrecio(r[7]),
     proveedor:r[8]||'', empleado:r[9]||'', anulado:r[10]==='TRUE'||r[10]===true,
     modificado: String(r[11] || '').replace(/^'/, ''), modificadoMs: msModificadoIngreso(r[11], r[0], r[1], r[2]),
@@ -1032,7 +1112,23 @@ export async function getDatosStock() {
 }
 
 // Cálculo puro (sin leer la planilla): devuelve { [id]: { stock, contado, ultimoConteoMs, ultimoConteo } }
-export function calcularStockDesdeDatos(articulos, { ventas, ingresos, movimientos }) {
+// Con artículos unificados: hasta que se cuenta el que queda (después de unificar), su stock es el
+// suyo más el que tenían los unificados. Cuando se lo cuenta, el conteo ya incluye todo.
+export function calcularStockDesdeDatos(articulos, datos) {
+  const ids = new Set(articulos.map(a => a.id))
+  const viejos = Object.keys(_alias).filter(k => ids.has(idCanonico(k)) && !ids.has(k))
+  const out = calcularStockCrudo(viejos.length ? [...articulos, ...viejos.map(id => ({ id, stockInicial: _alias[id].stockInicial }))] : articulos, datos)
+  for (const v of Object.keys(_alias)) {
+    const c = idCanonico(v)
+    if (!out[c] || !out[v] || c === v) continue
+    // Un conteo del que queda posterior a la unificación ya incluye las unidades del viejo
+    const msUnif = Math.max(...Object.keys(_alias).filter(k => idCanonico(k) === c).map(k => _alias[k].ms || 0))
+    if (!(out[c].ultimoConteoMs > msUnif)) out[c].stock += out[v].stock
+  }
+  viejos.forEach(id => { delete out[id] })
+  return out
+}
+function calcularStockCrudo(articulos, { ventas, ingresos, movimientos }) {
   const ultimoConteo = {}
   movimientos.forEach(m => {
     if (m.anulado || m.tipo !== 'CONTEO') return

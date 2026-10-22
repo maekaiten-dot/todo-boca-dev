@@ -1,6 +1,6 @@
 // src/pages/NuevaVenta.jsx
 import { useState, useEffect } from 'react'
-import { registrarVenta, registrarLog, REMERAS_XXXL, calcularPromoXXXL, getPromoXXXLEstado, POSNET_METODOS, posnetSugerido, socioPermitido, calcularRedondeoSocio, usaPosnet as metodoUsaPosnet, SEP_METODOS } from '../api/sheets.js'
+import { idCanonico, registrarVenta, registrarLog, REMERAS_XXXL, calcularPromoXXXL, getPromoXXXLEstado, POSNET_METODOS, posnetSugerido, socioPermitido, calcularRedondeoSocio, usaPosnet as metodoUsaPosnet, SEP_METODOS } from '../api/sheets.js'
 import BarcodeScanner from '../components/BarcodeScanner.jsx'
 
 const METODOS_PAGO = [
@@ -288,7 +288,8 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
   const articulosFiltrados = articulos.filter(a => {
     if (!busqueda.trim()) return true
     const q = normalizr(busqueda)
-    return normalizr(a.nombre).includes(q) || normalizr(a.id).includes(q)
+    // El código viejo de un artículo unificado encuentra el que quedó
+    return normalizr(a.nombre).includes(q) || normalizr(a.id).includes(q) || (busqueda.trim().length >= 5 && idCanonico(busqueda) === a.id && idCanonico(busqueda) !== busqueda.trim())
   })
 
   const hayRemeraXXXL = carrito.some(i => REMERAS_XXXL.has(i.id))
@@ -478,7 +479,8 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
   }
 
   function handleScan(codigo) {
-    const art = articulos.find(a => a.id === codigo || a.id === codigo.trim())
+    const cod = idCanonico(codigo) // una etiqueta vieja de un artículo unificado carga el que quedó
+    const art = articulos.find(a => a.id === cod || a.id === codigo || a.id === codigo.trim())
     if (art) {
       agregarAlCarrito(art)
       registrarLog({ accion:'SCAN_EXITOSO', detalle:`${art.nombre} (${art.id})`, empleado, resultado:'OK' })

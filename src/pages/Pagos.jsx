@@ -1,6 +1,6 @@
 // src/pages/Pagos.jsx
 import { useState, useEffect } from 'react'
-import { getPagos, registrarPago, actualizarPago, anularPago, getArticulosAdmin } from '../api/sheets.js'
+import { getPagos, registrarPago, actualizarPago, anularPago, getArticulosAdmin, idCanonico } from '../api/sheets.js'
 import BarcodeScanner from '../components/BarcodeScanner.jsx'
 import EscanearFactura from '../components/EscanearFactura.jsx'
 
@@ -161,7 +161,8 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
   }
 
   function handleScan(codigo) {
-    const art = articulos.find(a => a.id === codigo.trim())
+    const cod = idCanonico(codigo.trim())
+    const art = articulos.find(a => a.id === cod) || articulos.find(a => a.id === codigo.trim())
     if (art) {
       seleccionarArticulo(art)
       setScannerAbierto(false)

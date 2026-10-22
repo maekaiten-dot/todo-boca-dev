@@ -171,11 +171,22 @@ export default function IndiceEficiencia({ ventas = [] }) {
   const grafico = conIndice.slice(-12)
   const sel = meses.find(x => x.mes === elegido) || conIndice[conIndice.length - 1]
   const recs = useMemo(() => sel ? generarRecomendaciones(ventas, sel.mes, sel.comp, { fichadas: fichadas || [], comisionDe, enCurso: sel.enCurso }) : [], [ventas, sel, fichadas])
+  const nAlertas = recs.filter(r => r.tipo === 'alerta').length
+  // Plegado por defecto; se recuerda en este dispositivo (como el detalle de Hoy)
+  const [abierto, setAbierto] = useState(() => { try { return localStorage.getItem('tb_indice_abierto') === '1' } catch { return false } })
+  const alternarAbierto = () => setAbierto(v => { try { localStorage.setItem('tb_indice_abierto', v ? '0' : '1') } catch {} return !v })
   if (!ventas.length) return null
 
   return (
     <div style={S.card}>
-      <div style={S.titulo}>Índice de eficiencia</div>
+      <button style={S.barra} onClick={alternarAbierto} aria-expanded={abierto}>
+        <span style={S.titulo}>Índice de eficiencia</span>
+        {sel && <span style={{ ...S.barraNum, color: colorIndice(sel.indice) }}>{Math.round(sel.indice)}</span>}
+        {sel && <span style={S.barraSub}>{sel.label}{sel.enCurso ? ' (en curso)' : ''}</span>}
+        {!abierto && nAlertas > 0 && <span style={S.barraAlerta}>⚠️ {nAlertas} {nAlertas === 1 ? 'alerta' : 'alertas'}</span>}
+        <span style={S.barraToggle}>{abierto ? 'Ocultar ▴' : 'Detalle ▾'}</span>
+      </button>
+      {abierto && (<>
       <div style={S.hint}>
         100 = igual a tu promedio de los 12 meses anteriores; 110 = 10% mejor, 90 = 10% peor. Junta {COMPONENTES.length} indicadores ponderados; los montos van a precios de hoy (inflación INDEC).
         {!indices && ' Sin datos de inflación por ahora: los montos se comparan en pesos corrientes.'}
@@ -250,12 +261,18 @@ export default function IndiceEficiencia({ ventas = [] }) {
           </div>
         )}
       </>)}
+      </>)}
     </div>
   )
 }
 
 const S = {
   card: { margin: '0 20px 16px', background: 'var(--surface)', borderRadius: 14, border: '1.5px solid var(--accent)', padding: 16 },
+  barra: { display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: '4px 14px', width: '100%', background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left', color: 'inherit' },
+  barraNum: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 30, lineHeight: 1 },
+  barraSub: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 14, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1 },
+  barraAlerta: { fontFamily: 'Barlow, sans-serif', fontSize: 13, color: '#ef4444' },
+  barraToggle: { marginLeft: 'auto', fontFamily: 'Barlow, sans-serif', fontSize: 13, color: 'var(--muted)' },
   titulo: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 18, color: 'var(--accent)', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 },
   hint: { fontFamily: 'Barlow, sans-serif', fontSize: 12, color: 'var(--muted)', lineHeight: 1.45, margin: '4px 0 8px' },
   vacio: { fontFamily: 'Barlow, sans-serif', fontSize: 14, color: 'var(--muted)', padding: '20px 0' },

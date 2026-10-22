@@ -8,6 +8,7 @@ import {
   getEstadoStock, registrarConteo, registrarBaja, anularMovimientoStock,
   armarListaConteoDelDia, MOTIVOS_BAJA, FRECUENCIA_CONTEO, ARTICULOS_POR_DIA,
   getAvisosArticulos, registrarAvisoArticulo, resolverAvisoArticulo, TIPOS_AVISO,
+  idCanonico,
 } from '../api/sheets.js'
 
 const fmt$ = n => (n < 0 ? '−$' : '$') + Math.abs(Math.round(n)).toLocaleString('es-AR')
@@ -284,11 +285,11 @@ export default function Conteo({ articulos = [], usuarios = [], perfilNombre = '
   ]
 
   const bajaResultados = bajaBusqueda.trim()
-    ? articulos.filter(a => normalizar(a.nombre).includes(normalizar(bajaBusqueda)) || normalizar(a.id).includes(normalizar(bajaBusqueda))).slice(0, 12)
+    ? articulos.filter(a => normalizar(a.nombre).includes(normalizar(bajaBusqueda)) || normalizar(a.id).includes(normalizar(bajaBusqueda)) || (idCanonico(bajaBusqueda) === a.id && idCanonico(bajaBusqueda) !== bajaBusqueda.trim())).slice(0, 12)
     : []
 
   function escanearBaja(codigo) {
-    const c = String(codigo || '').trim()
+    const c = idCanonico(String(codigo || '').trim())
     const art = articulos.find(a => a.id === c || a.id.toLowerCase() === c.toLowerCase())
     if (!art) return { ok: false, nombre: `No encontrado: ${c}` }
     setBajaArt(art); setBajaBusqueda('')

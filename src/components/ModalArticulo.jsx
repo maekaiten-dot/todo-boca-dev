@@ -3,6 +3,7 @@
 // (que la abre con el nombre y el costo leídos de la factura ya completos).
 import { useState, useEffect, useRef } from 'react'
 import { generarIdArticulo, agregarArticulo, editarArticulo } from '../api/sheets.js'
+import HerramientasArticulo from './HerramientasArticulo.jsx'
 
 const CLOUDINARY_CLOUD = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
 const CLOUDINARY_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET
@@ -28,7 +29,8 @@ async function subirFotoCloudinary(file) {
 // editando: el artículo que se edita (con rowNum) o null si es nuevo
 // onGuardado(form): después de guardar en la planilla
 // articulos: lista de artículos (para sugerir los grupos que ya existen)
-export default function ModalArticulo({ inicial, editando = null, empleado = '', onCerrar, onGuardado, aviso = '', articulos = [] }) {
+export default function ModalArticulo({ inicial, editando = null, empleado = '', onCerrar, onGuardado, aviso = '', articulos = [], stockMap = {} }) {
+  const [ocupado, setOcupado] = useState(false)
   const [form, setForm] = useState({ ...FORM_ARTICULO_VACIO, ...inicial, grupo: inicial?.grupo || '' })
   // Grupos existentes con la cantidad de modelos de cada uno
   const grupos = (() => {
@@ -76,7 +78,7 @@ export default function ModalArticulo({ inicial, editando = null, empleado = '',
   }
 
   return (
-        <div style={S.overlay} onClick={() => !saving && onCerrar()}>
+        <div style={S.overlay} onClick={() => !saving && !ocupado && onCerrar()}>
             <div style={S.modal} onClick={e => e.stopPropagation()}>
               <div style={S.modalHeader}>
                 <div style={S.modalTitle}>{editando ? 'EDITAR ARTÍCULO' : 'NUEVO ARTÍCULO'}</div>
@@ -226,11 +228,15 @@ export default function ModalArticulo({ inicial, editando = null, empleado = '',
                   />
                 </div>
   
+                {editando && (
+                  <HerramientasArticulo editando={editando} form={form} articulos={articulos} stockMap={stockMap} empleado={empleado}
+                    ocupado={ocupado || saving} setOcupado={setOcupado} onListo={msg => onGuardado?.(form, msg)} />
+                )}
               </div>
   
               <div style={S.modalFooter}>
                 <button style={S.cancelBtn} onClick={() => onCerrar()} disabled={saving}>Cancelar</button>
-                <button style={{...S.saveBtn, opacity: (saving||uploadingFoto) ? 0.6 : 1}} onClick={guardar} disabled={saving||uploadingFoto}>
+                <button style={{...S.saveBtn, opacity: (saving||uploadingFoto) ? 0.6 : 1}} onClick={guardar} disabled={saving||uploadingFoto||ocupado}>
                   {saving ? 'Guardando...' : uploadingFoto ? 'Subiendo foto...' : 'Guardar'}
                 </button>
               </div>

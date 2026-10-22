@@ -17,7 +17,7 @@ import Asistencia from './pages/Asistencia.jsx'
 import Administracion from './pages/Administracion.jsx'
 import FicharTablet from './components/FicharTablet.jsx'
 import AvisoPrecios, { totalCambios, resumenCambios } from './components/AvisoPrecios.jsx'
-import { getArticulos, getUsuarios, registrarLog, calcularStockTodos, leerArticulosVistos, guardarArticulosVistos, getTutoriales, leerTutorialesVistos, guardarTutorialesVistos } from './api/sheets.js'
+import { getAlias, getArticulos, getUsuarios, registrarLog, calcularStockTodos, leerArticulosVistos, guardarArticulosVistos, getTutoriales, leerTutorialesVistos, guardarTutorialesVistos } from './api/sheets.js'
 
 // Aviso de cambios en artículos (precios, productos nuevos, activados / desactivados): cada dispositivo
 // guarda los artículos que ya vio y la app vuelve a leer ARTICULOS cada INTERVALO_PRECIOS (y al volver
@@ -197,7 +197,8 @@ export default function App() {
         .map(a => ({ id: a.id, nombre: a.nombre, foto: a.foto, antes: v.activos[a.id].p, ahora: a.precioUnitario })),
       nuevos: arts.filter(a => !v.activos[a.id] && esNuevo(a)).map(a => ({ id: a.id, nombre: a.nombre, foto: a.foto, precio: a.precioUnitario })),
       reactivados: arts.filter(a => !v.activos[a.id] && !esNuevo(a)).map(a => ({ id: a.id, nombre: a.nombre, foto: a.foto, precio: a.precioUnitario })),
-      bajas: Object.entries(v.activos).filter(([id]) => !idsActivos.has(id)).map(([id, d]) => ({ id, nombre: d.n, precio: d.p })),
+      // Un artículo unificado en otro no es una baja: se sigue vendiendo con el otro código
+      bajas: Object.entries(v.activos).filter(([id]) => !idsActivos.has(id) && !getAlias()[id]).map(([id, d]) => ({ id, nombre: d.n, precio: d.p })),
     }
     if (!totalCambios(cambios)) {
       // Sin cambios: solo se actualizan los nombres guardados si alguno cambió

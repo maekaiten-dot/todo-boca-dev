@@ -1,5 +1,6 @@
 // src/components/ProductSearch.jsx
 import { useState, useEffect, useRef } from 'react'
+import { idCanonico } from '../api/sheets.js'
 
 export default function ProductSearch({ articulos, onAdd, loading }) {
   const [query, setQuery] = useState('')
@@ -10,10 +11,13 @@ export default function ProductSearch({ articulos, onAdd, loading }) {
   useEffect(() => {
     if (!query.trim()) { setResults([]); setOpen(false); return }
     const q = query.toLowerCase()
+    // Un código viejo (unificado) encuentra el artículo que quedó
+    const canon = idCanonico(query.trim())
     const filtered = articulos
       .filter(a =>
         a.nombre.toLowerCase().includes(q) ||
-        a.id.toLowerCase().includes(q)
+        a.id.toLowerCase().includes(q) ||
+        (canon !== query.trim() && a.id === canon)
       )
       .slice(0, 8)
     setResults(filtered)

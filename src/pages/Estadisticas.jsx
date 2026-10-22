@@ -656,7 +656,7 @@ export default function Estadisticas({ esAdmin = false, usuarios = [], perfilNom
     setLoading(true)
     setError(null)
     try {
-      const ventas = await getHistoricoVentas()
+      const ventas = await getHistoricoVentas({ unificar: true })
       const dias = getUltimos35Dias()
 
       ventas

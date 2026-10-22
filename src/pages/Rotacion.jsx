@@ -189,7 +189,7 @@ export default function Rotacion({ articulos = [], stockMap = {} }) {
     setLoading(true)
     setError(null)
     try {
-      const [v, ing] = await Promise.all([getHistoricoVentas(), getIngresos().catch(() => [])])
+      const [v, ing] = await Promise.all([getHistoricoVentas({ unificar: true }), getIngresos({ unificar: true }).catch(() => [])])
       setVentas(v); setIngresos(ing)
     }
     catch (e) { console.error(e); setError('No se pudo cargar. Intentá de nuevo.') }

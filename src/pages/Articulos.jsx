@@ -32,6 +32,7 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [busqueda, setBusqueda] = useState('')
+  const [orden, setOrden] = useState({ col: null, dir: 'asc' })
   const [cargandoGrupos, setCargandoGrupos] = useState(false)
   const [filtroDisp, setFiltroDisp] = useState('TODOS')
   const [modalAbierto, setModalAbierto] = useState(false)
@@ -138,17 +139,47 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
     }
   }
 
-  function showToast(msg, type) {
+  function showToast(msg, type, ms = 3000) {
     setToast({ msg, type })
-    setTimeout(() => setToast(null), 3000)
+    setTimeout(() => setToast(null), ms)
   }
 
   // Sin costo = costo vacío o en $0 (solo se marca para administradores)
   const sinCosto = a => (Number(String(a.costoUnitario ?? '').replace(/[$\s.]/g,'').replace(',','.')) || 0) <= 0
   const [soloSinCosto, setSoloSinCosto] = useState(false)
 
+  const nombreDe = id => articulos.find(a => a.id === id)?.nombre || ''
   const normalizr = str => str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-  const articulosFiltrados = articulos
+  // Orden: por defecto, el de la planilla. Tocar el título de una columna ordena por ella; de nuevo, invierte.
+  const numArs = v => Number(String(v ?? '').replace(/[$\s.]/g,'').replace(',','.')) || 0
+  const COLS = {
+    id: { label: 'SKU', valor: a => a.id, texto: true },
+    nombre: { label: 'Nombre', valor: a => a.nombre, texto: true },
+    precio: { label: 'Precio', valor: a => numArs(a.precioUnitario) },
+    costo: { label: 'Costo', valor: a => numArs(a.costoUnitario) },
+    stock: { label: 'Stock actual', valor: a => a.unificadoEn ? null : (stockMap[a.id] ?? null) },
+    estado: { label: 'Estado', valor: a => a.disponibilidad?.toUpperCase() === 'ACTIVO' ? 'ACTIVO' : 'INACTIVO', texto: true },
+  }
+  const ordenar = lista => {
+    const c = COLS[orden.col]; if (!c) return lista
+    const sgn = orden.dir === 'asc' ? 1 : -1
+    return [...lista].sort((a, b) => {
+      const va = c.valor(a), vb = c.valor(b)
+      if (va == null || vb == null) return va == null && vb == null ? 0 : va == null ? 1 : -1 // sin dato, siempre al final
+      return (c.texto ? String(va).localeCompare(String(vb), 'es', { numeric: true }) : va - vb) * sgn
+    })
+  }
+  const ordenarPor = col => setOrden(o => o.col === col ? (o.dir === (COLS[col].texto ? 'asc' : 'desc') ? { col, dir: COLS[col].texto ? 'desc' : 'asc' } : { col: null, dir: 'asc' }) : { col, dir: COLS[col].texto ? 'asc' : 'desc' })
+  const thOrden = col => {
+    const activa = orden.col === col
+    return (
+      <th style={{ ...S.th, cursor: 'pointer', userSelect: 'none', ...(activa ? { color: 'var(--accent)' } : {}) }} onClick={() => ordenarPor(col)} title="Tocá para ordenar" aria-sort={activa ? (orden.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+        {COLS[col].label}<span style={{ marginLeft: 4, opacity: activa ? 1 : 0.3 }}>{activa ? (orden.dir === 'asc' ? '▲' : '▼') : '↕'}</span>
+      </th>
+    )
+  }
+
+  const articulosFiltrados = ordenar(articulos
     .filter(a => esAdmin || a.disponibilidad?.toUpperCase() === 'ACTIVO')
     .filter(a => {
       if (filtroDisp === 'ACTIVO') return a.disponibilidad?.toUpperCase() === 'ACTIVO'
@@ -160,7 +191,7 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
       if (!busqueda.trim()) return true
       const q = normalizr(busqueda)
       return normalizr(a.nombre).includes(q) || normalizr(a.id).includes(q) || normalizr(a.grupo || '').includes(q)
-    })
+    }))
 
   if (loading) return (
     <div style={S.center}><div style={S.loadingText}>Cargando artículos...</div></div>
@@ -229,12 +260,12 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
           <thead>
             <tr>
               <th style={S.th}>Foto</th>
-              <th style={S.th}>SKU</th>
-              <th style={S.th}>Nombre</th>
-              <th style={S.th}>Precio</th>
-              {esAdmin && <th style={S.th}>Costo</th>}
-              <th style={S.th}>Stock actual</th>
-              <th style={S.th}>Estado</th>
+              {thOrden('id')}
+              {thOrden('nombre')}
+              {thOrden('precio')}
+              {esAdmin && thOrden('costo')}
+              {thOrden('stock')}
+              {thOrden('estado')}
               {esAdmin && <th style={S.th}></th>}
             </tr>
           </thead>
@@ -253,12 +284,13 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
                   <td style={{...S.td, ...S.tdNombre}}>
                     {art.nombre}
                     {art.grupo && <div style={S.grupoTag} title="Grupo: se suma con los otros modelos en Rotación">🔗 {art.grupo}</div>}
+                    {art.unificadoEn && <div style={S.unificadoTag}>⇢ Unificado en {art.unificadoEn}{nombreDe(art.unificadoEn) ? ` · ${nombreDe(art.unificadoEn)}` : ''}</div>}
                     {esAdmin && sinCosto(art) && <div style={S.avisoSinCosto}>⚠ Sin costo unitario cargado</div>}
                   </td>
                   <td style={S.td}>${Number(String(art.precioUnitario).replace(/[$\s.]/g,'').replace(',','.')||0).toLocaleString('es-AR')}</td>
                   {esAdmin && <td style={{...S.td, color:'var(--muted)'}}>${Number(String(art.costoUnitario).replace(/[$\s.]/g,'').replace(',','.')||0).toLocaleString('es-AR')}</td>}
                   <td style={{...S.td, textAlign:'center'}}>
-                    {loadingStock
+                    {art.unificadoEn ? <span style={{color:'var(--muted)', fontSize:12}} title="Su stock se suma al artículo en el que se unificó">→ {art.unificadoEn}</span> : loadingStock
                       ? <span style={{color:'var(--muted)', fontSize:12}}>...</span>
                       : <span style={{
                           fontFamily:'Barlow Condensed, sans-serif',
@@ -291,9 +323,9 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
       {/* Modal formulario */}
       {modalAbierto && (
         <ModalArticulo
-          inicial={form} editando={editando} empleado={empleado} articulos={articulos}
+          inicial={form} editando={editando} empleado={empleado} articulos={articulos} stockMap={stockMap}
           onCerrar={() => setModalAbierto(false)}
-          onGuardado={async () => { showToast(editando ? 'Artículo actualizado' : 'Artículo creado', 'success'); setModalAbierto(false); await cargar() }}
+          onGuardado={async (_, mensaje) => { showToast(mensaje || (editando ? 'Artículo actualizado' : 'Artículo creado'), 'success', mensaje ? 7000 : 3000); setModalAbierto(false); await cargar() }}
         />
       )}
     </div>
@@ -302,6 +334,7 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
 
 const S = {
   gruposBanner: { display:'flex', alignItems:'center', gap:12, margin:'10px 16px 0', padding:'10px 14px', background:'rgba(96,165,250,0.08)', border:'1.5px solid #60a5fa', borderRadius:10, fontFamily:'Barlow, sans-serif', fontSize:14, color:'var(--text)' },
+  unificadoTag: { fontFamily:'Barlow, sans-serif', fontSize:11, color:'#f59e0b', marginTop:2 },
   grupoTag: { fontFamily:'Barlow, sans-serif', fontSize:11, color:'#60a5fa', marginTop:2 },
   page: { display:'flex', flexDirection:'column', height:'100%', overflowY:'auto', position:'relative' },
   center: { display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', height:'100%', gap:12 },

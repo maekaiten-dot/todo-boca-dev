@@ -64,6 +64,19 @@ async function sheetsUpdate(range, values) {
   return res.json()
 }
 
+// Varias actualizaciones en un solo pedido: [{ range, values }]
+async function sheetsBatchUpdate(data) {
+  if (!data.length) return
+  const token = await getAccessToken()
+  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchUpdate`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data }),
+  })
+  if (!res.ok) throw new Error(`Sheets BATCH UPDATE error: ${res.status}`)
+  return res.json()
+}
+
 function getArgentinaDate() {
   const now = new Date()
   const locale = now.toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', hour12: false })
@@ -1005,7 +1018,7 @@ function msModificadoIngreso(modificado, id, fecha, hora) {
 }
 
 export async function getIngresos({ unificar = false } = {}) {
-  const [data] = await Promise.all([sheetsGet('INGRESOS!A2:L'), unificar ? asegurarAlias() : null])
+  const [data] = await Promise.all([sheetsGet('INGRESOS!A2:N'), unificar ? asegurarAlias() : null])
   const rows = data.values || []
   return rows.filter(r=>r[0]).map((r, idx) => ({
     rowNum:idx+2, idIngreso:r[0]||'', fecha:r[1]||'', hora:r[2]||'',
@@ -1013,6 +1026,7 @@ export async function getIngresos({ unificar = false } = {}) {
     costoUnitario:parsePrecio(r[6]), costoTotal:parsePrecio(r[7]),
     proveedor:r[8]||'', empleado:r[9]||'', anulado:r[10]==='TRUE'||r[10]===true,
     modificado: String(r[11] || '').replace(/^'/, ''), modificadoMs: msModificadoIngreso(r[11], r[0], r[1], r[2]),
+    compra: String(r[12] || '').trim(), comprobante: String(r[13] || '').replace(/^'/, '').trim(),
   }))
 }
 
@@ -1291,7 +1305,7 @@ function msModificadoPago(modificado, idPago) {
 }
 
 export async function getPagos() {
-  const data = await sheetsGet('PAGOS!A2:P')
+  const data = await sheetsGet('PAGOS!A2:R')
   const rows = data.values || []
   return rows.filter(r=>r[0]).map((r, idx) => ({
     rowNum:idx+2, idPago:r[0]||'', tipo:r[1]||'',
@@ -1303,10 +1317,82 @@ export async function getPagos() {
     descripcion:r[9]||'', proveedor:r[10]||'', montoPagado:parsePrecio(r[11]),
     pagado:r[12]==='TRUE'||r[12]===true, empleado:r[13]||'', anulado:r[14]==='TRUE'||r[14]===true,
     modificado: String(r[15] || '').replace(/^'/, ''), modificadoMs: msModificadoPago(r[15], r[0]),
+    compra: String(r[16] || '').trim(), comprobante: String(r[17] || '').replace(/^'/, '').trim(),
   }))
 }
 
-export async function registrarPago({ tipo, fechaIngreso, fechaPago, articuloId, articuloNombre, cantidad, costoUnitario, descripcion, proveedor, montoPagado, pagado, empleado }) {
+// ── Compras a proveedores ──────────────────────────────────────────────────────
+// PAGOS · Q: COMPRA, R: COMPROBANTE · INGRESOS · M: COMPRA, N: COMPROBANTE.
+// Todos los renglones (productos) de una misma compra llevan el mismo código, ej. C261022-01.
+// Las compras viejas no tienen código: se agrupan por proveedor y fecha de ingreso.
+let _columnasCompraOk = false
+async function asegurarColumnasCompra() {
+  if (_columnasCompraOk) return
+  try {
+    const [p, i] = await Promise.all([sheetsGet('PAGOS!Q1:R1'), sheetsGet('INGRESOS!M1:N1')])
+    const vp = (p.values || [])[0] || [], vi = (i.values || [])[0] || []
+    const pedidos = []
+    if (!vp[0] || !vp[1]) pedidos.push({ range: 'PAGOS!Q1:R1', values: [['COMPRA', 'COMPROBANTE']] })
+    if (!vi[0] || !vi[1]) pedidos.push({ range: 'INGRESOS!M1:N1', values: [['COMPRA', 'COMPROBANTE']] })
+    await sheetsBatchUpdate(pedidos)
+    _columnasCompraOk = true
+  } catch (e) { console.warn('No se pudieron crear las columnas de compra', e) }
+}
+export async function generarIdCompra() {
+  const dt = getArgentinaDate()
+  const prefix = `C${String(dt.raw.getFullYear()).slice(2)}${String(dt.raw.getMonth()+1).padStart(2,'0')}${String(dt.raw.getDate()).padStart(2,'0')}`
+  const usados = new Set(((await sheetsGet('PAGOS!Q2:Q')).values || []).map(r => String(r[0] || '').trim()).filter(c => c.startsWith(prefix)))
+  let n = usados.size + 1
+  while (usados.has(`${prefix}-${String(n).padStart(2, '0')}`)) n++
+  return `${prefix}-${String(n).padStart(2, '0')}`
+}
+// Clave de agrupación de un pago de mercadería: su código de compra, o proveedor + fecha si es viejo
+export const claveCompra = p => p.compra || `~${String(p.proveedor || '').trim().toLowerCase()}|${p.fechaIngreso || p.fechaPago || ''}`
+
+// Paga una compra entera (o una parte): reparte el monto entre los renglones según lo que le falta a
+// cada uno. Si el monto cubre todo, quedan todos pagados.
+export function repartirPagoCompra(renglones, monto) {
+  const falta = renglones.map(r => Math.max(0, (r.costoTotal || 0) - (r.montoPagado || 0)))
+  const totalFalta = falta.reduce((s, x) => s + x, 0)
+  const m = Math.round(Math.min(Math.max(0, monto), totalFalta))
+  let asignado = 0
+  const ultimoConSaldo = falta.reduce((u, f, k) => f > 0 ? k : u, -1)
+  return renglones.map((r, k) => {
+    const ultimo = k === ultimoConSaldo
+    // En pesos enteros: el último renglón con saldo se lleva el redondeo
+    const parte = totalFalta > 0 ? (ultimo ? Math.round(m - asignado) : Math.min(falta[k], Math.round(m * falta[k] / totalFalta))) : 0
+    asignado += parte
+    const nuevoPagado = Math.round((r.montoPagado || 0) + parte)
+    return { ...r, parte, montoPagado: nuevoPagado, pagado: falta[k] <= 0 || nuevoPagado >= (r.costoTotal || 0) - 0.5 }
+  })
+}
+export async function pagarCompra({ renglones, monto, fechaPago, empleado = '' }) {
+  await asegurarModificadoPagos()
+  const reparto = repartirPagoCompra(renglones, monto)
+  const mod = ahoraModificado()
+  const data = []
+  reparto.forEach(r => {
+    if (!(r.parte > 0) && r.pagado === renglones.find(x => x.rowNum === r.rowNum)?.pagado) return
+    data.push({ range: `PAGOS!D${r.rowNum}`, values: [[fechaPago ? `'${fechaPago}` : '']] })
+    data.push({ range: `PAGOS!L${r.rowNum}:M${r.rowNum}`, values: [[r.montoPagado, r.pagado ? 'TRUE' : 'FALSE']] })
+    data.push({ range: `PAGOS!P${r.rowNum}`, values: [[mod]] })
+  })
+  await sheetsBatchUpdate(data)
+  const total = reparto.reduce((s, r) => s + r.parte, 0)
+  await registrarLog({ accion:'COMPRA_PAGADA', detalle:`${renglones[0]?.compra || renglones[0]?.proveedor || ''} · $${Math.round(total).toLocaleString('es-AR')} en ${reparto.filter(r => r.parte > 0).length} renglón(es)${reparto.every(r => r.pagado) ? ' · completa' : ' · parcial'}`, idReferencia: renglones[0]?.compra || renglones[0]?.idPago || '', empleado, resultado:'OK' })
+  return reparto
+}
+// Cambia el número de comprobante de todos los renglones de una compra (PAGOS e INGRESOS)
+export async function actualizarComprobanteCompra(renglones, comprobante) {
+  await asegurarColumnasCompra()
+  const ids = new Set(renglones.map(r => `I${r.idPago.slice(1)}`))
+  const ing = (await sheetsGet('INGRESOS!A2:A')).values || []
+  const data = renglones.map(r => ({ range: `PAGOS!R${r.rowNum}`, values: [[comprobante ? `'${comprobante}` : '']] }))
+  ing.forEach((r, i) => { if (ids.has(r[0])) data.push({ range: `INGRESOS!N${i + 2}`, values: [[comprobante ? `'${comprobante}` : '']] }) })
+  await sheetsBatchUpdate(data)
+}
+
+export async function registrarPago({ tipo, fechaIngreso, fechaPago, articuloId, articuloNombre, cantidad, costoUnitario, descripcion, proveedor, montoPagado, pagado, empleado, compra = '', comprobante = '' }) {
   const dt = getArgentinaDate()
   const data = await sheetsGet('PAGOS!A2:A')
   const rows = data.values || []
@@ -1317,11 +1403,14 @@ export async function registrarPago({ tipo, fechaIngreso, fechaPago, articuloId,
   const cant = Number(cantidad)||0, cu = parsePrecio(costoUnitario), mp = parsePrecio(montoPagado)
   const costoTotal = cant*cu
   await asegurarModificadoPagos()
-  const row = [idPago,tipo||'GASTO',fechaIngreso?`'${fechaIngreso}`:'',fechaPago?`'${fechaPago}`:'',articuloId||'',articuloNombre||'',cant,cu,costoTotal,descripcion||'',proveedor||'',mp,pagado?'TRUE':'FALSE',empleado||'','FALSE',ahoraModificado()]
+  const esCompra = tipo === 'MERCADERÍA' && (compra || comprobante)
+  if (esCompra) await asegurarColumnasCompra()
+  const extra = esCompra ? [compra || '', comprobante ? `'${comprobante}` : ''] : []
+  const row = [idPago,tipo||'GASTO',fechaIngreso?`'${fechaIngreso}`:'',fechaPago?`'${fechaPago}`:'',articuloId||'',articuloNombre||'',cant,cu,costoTotal,descripcion||'',proveedor||'',mp,pagado?'TRUE':'FALSE',empleado||'','FALSE',ahoraModificado(),...extra]
   await sheetsAppend('PAGOS!A1', [row])
   if (tipo==='MERCADERÍA'&&fechaIngreso&&articuloId) {
     await asegurarModificadoIngresos()
-    const rowIngreso = [`I${idPago.slice(1)}`,`'${fechaIngreso}`,`'${dt.hora}`,articuloId,articuloNombre,cant,cu,costoTotal,proveedor||'',empleado||'',false,ahoraModificado()]
+    const rowIngreso = [`I${idPago.slice(1)}`,`'${fechaIngreso}`,`'${dt.hora}`,articuloId,articuloNombre,cant,cu,costoTotal,proveedor||'',empleado||'',false,ahoraModificado(),...extra]
     await sheetsAppend('INGRESOS!A1', [rowIngreso])
   }
   await registrarLog({ accion:'PAGO_REGISTRADO', detalle:`${tipo} · ${articuloNombre||descripcion} · $${montoPagado}`, idReferencia:idPago, empleado, resultado:'OK' })
@@ -1332,13 +1421,22 @@ export async function actualizarPago(rowNum, campos, empleado = '') {
   const cant = Number(campos.cantidad)||0, cu = parsePrecio(campos.costoUnitario), mp = parsePrecio(campos.montoPagado)
   const costoTotal = cant*cu
   await asegurarModificadoPagos()
-  const row = [campos.idPago,campos.tipo||'GASTO',campos.fechaIngreso?`'${campos.fechaIngreso}`:'',campos.fechaPago?`'${campos.fechaPago}`:'',campos.articuloId||'',campos.articuloNombre||'',cant,cu,costoTotal,campos.descripcion||'',campos.proveedor||'',mp,campos.pagado?'TRUE':'FALSE',campos.empleado||'',campos.anulado?'TRUE':'FALSE',ahoraModificado()]
-  await sheetsUpdate(`PAGOS!A${rowNum}:P${rowNum}`, [row])
+  const conCompra = campos.compra !== undefined && campos.tipo === 'MERCADERÍA'
+  if (conCompra && (campos.compra || campos.comprobante || campos.compraAnterior)) await asegurarColumnasCompra()
+  const extra = conCompra ? [campos.compra || '', campos.comprobante ? `'${campos.comprobante}` : ''] : []
+  const row = [campos.idPago,campos.tipo||'GASTO',campos.fechaIngreso?`'${campos.fechaIngreso}`:'',campos.fechaPago?`'${campos.fechaPago}`:'',campos.articuloId||'',campos.articuloNombre||'',cant,cu,costoTotal,campos.descripcion||'',campos.proveedor||'',mp,campos.pagado?'TRUE':'FALSE',campos.empleado||'',campos.anulado?'TRUE':'FALSE',ahoraModificado(),...extra]
+  await sheetsUpdate(`PAGOS!A${rowNum}:${extra.length ? 'R' : 'P'}${rowNum}`, [row])
+  // Si cambió la compra o el comprobante, el ingreso de ese renglón también
+  if (conCompra && !campos.crearIngreso && (campos.compra !== (campos.compraAnterior || '') || campos.comprobante !== (campos.comprobanteAnterior || ''))) {
+    const ing = (await sheetsGet('INGRESOS!A2:A')).values || []
+    const i = ing.findIndex(r => r[0] === `I${campos.idPago.slice(1)}`)
+    if (i >= 0) await sheetsUpdate(`INGRESOS!M${i + 2}:N${i + 2}`, [extra])
+  }
   if (campos.tipo==='MERCADERÍA'&&campos.fechaIngreso&&campos.articuloId&&campos.crearIngreso) {
     const costoTotalIng = costoTotal
     const hora = new Date().toLocaleString('es-AR',{timeZone:'America/Argentina/Buenos_Aires',hour12:false}).split(', ')[1]
     await asegurarModificadoIngresos()
-    const rowIngreso = [`I${campos.idPago.slice(1)}`,`'${campos.fechaIngreso}`,`'${hora}`,campos.articuloId,campos.articuloNombre,cant,cu,costoTotalIng,campos.proveedor||'',empleado||'',false,ahoraModificado()]
+    const rowIngreso = [`I${campos.idPago.slice(1)}`,`'${campos.fechaIngreso}`,`'${hora}`,campos.articuloId,campos.articuloNombre,cant,cu,costoTotalIng,campos.proveedor||'',empleado||'',false,ahoraModificado(),...extra]
     await sheetsAppend('INGRESOS!A1', [rowIngreso])
   }
   await registrarLog({ accion:'PAGO_ACTUALIZADO', detalle:`${campos.idPago} actualizado`, idReferencia:campos.idPago, empleado, resultado:'OK' })
@@ -1706,10 +1804,13 @@ export async function guardarMemoriaFacturas(entradas, quien = '') {
 
 // Carga todos los renglones de una factura como pagos de MERCADERÍA de una sola vez (una sola
 // escritura en PAGOS y otra en INGRESOS, con IDs seguidos). montoPagado de cada renglón ya viene repartido.
-export async function registrarPagosLote({ renglones, fechaIngreso, fechaPago, proveedor, descripcion = '', empleado = '' }) {
+export async function registrarPagosLote({ renglones, fechaIngreso, fechaPago, proveedor, descripcion = '', empleado = '', comprobante = '' }) {
   if (!renglones.length) return []
   await asegurarModificadoPagos()
   await asegurarModificadoIngresos()
+  await asegurarColumnasCompra()
+  const compra = await generarIdCompra()
+  const extra = [compra, comprobante ? `'${comprobante}` : '']
   const dt = getArgentinaDate()
   const data = await sheetsGet('PAGOS!A2:A')
   const prefix = `P${String(dt.raw.getFullYear()).slice(2)}${String(dt.raw.getMonth()+1).padStart(2,'0')}${String(dt.raw.getDate()).padStart(2,'0')}`
@@ -1719,13 +1820,13 @@ export async function registrarPagosLote({ renglones, fechaIngreso, fechaPago, p
   const mod = ahoraModificado()
   const filas = renglones.map((r, k) => {
     const cant = Number(r.cantidad) || 0, cu = Math.round((Number(r.costoUnitario) || 0) * 100) / 100
-    return [ids[k], 'MERCADERÍA', fechaIngreso ? `'${fechaIngreso}` : '', r.pagado || r.montoPagado > 0 ? (fechaPago ? `'${fechaPago}` : '') : '', r.articuloId, r.articuloNombre, cant, cu, Math.round(cant * cu * 100) / 100, descripcion, proveedor || '', Math.round((Number(r.montoPagado) || 0) * 100) / 100, r.pagado ? 'TRUE' : 'FALSE', empleado || '', 'FALSE', mod]
+    return [ids[k], 'MERCADERÍA', fechaIngreso ? `'${fechaIngreso}` : '', r.pagado || r.montoPagado > 0 ? (fechaPago ? `'${fechaPago}` : '') : '', r.articuloId, r.articuloNombre, cant, cu, Math.round(cant * cu * 100) / 100, descripcion, proveedor || '', Math.round((Number(r.montoPagado) || 0) * 100) / 100, r.pagado ? 'TRUE' : 'FALSE', empleado || '', 'FALSE', mod, ...extra]
   })
   await sheetsAppend('PAGOS!A1', filas)
   if (fechaIngreso) {
-    await sheetsAppend('INGRESOS!A1', filas.map(f => [`I${f[0].slice(1)}`, `'${fechaIngreso}`, `'${dt.hora}`, f[4], f[5], f[6], f[7], f[8], proveedor || '', empleado || '', false, mod]))
+    await sheetsAppend('INGRESOS!A1', filas.map(f => [`I${f[0].slice(1)}`, `'${fechaIngreso}`, `'${dt.hora}`, f[4], f[5], f[6], f[7], f[8], proveedor || '', empleado || '', false, mod, ...extra]))
   }
   const total = filas.reduce((s, f) => s + f[8], 0)
-  await registrarLog({ accion: 'FACTURA_ESCANEADA', detalle: `${proveedor} · ${descripcion} · ${filas.length} renglón(es) · $${Math.round(total).toLocaleString('es-AR')}`, idReferencia: ids[0], empleado, resultado: 'OK' })
+  await registrarLog({ accion: 'FACTURA_ESCANEADA', detalle: `${compra} · ${proveedor} · ${descripcion} · ${filas.length} renglón(es) · $${Math.round(total).toLocaleString('es-AR')}`, idReferencia: ids[0], empleado, resultado: 'OK' })
   return ids
 }

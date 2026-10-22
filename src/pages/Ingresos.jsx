@@ -38,6 +38,7 @@ export default function Ingresos() {
     { id: 'costoUnitario', label: 'Costo unit.', valor: i => i.costoUnitario || 0, num: true },
     { id: 'costoTotal', label: 'Costo total', valor: i => i.costoTotal || 0, num: true },
     { id: 'proveedor', label: 'Proveedor', valor: i => normalizr(i.proveedor || '') },
+    { id: 'compra', label: 'Compra', valor: i => i.compra || '' },
     { id: 'empleado', label: 'Empleado', valor: i => normalizr(i.empleado || '') },
     { id: 'modificado', label: 'Modificado', valor: i => i.modificadoMs || 0, num: true },
   ]
@@ -69,7 +70,9 @@ export default function Ingresos() {
     return normalizr(i.articuloNombre).includes(q) ||
       normalizr(i.articuloId).includes(q) ||
       normalizr(i.proveedor).includes(q) ||
-      normalizr(i.idIngreso).includes(q)
+      normalizr(i.idIngreso).includes(q) ||
+      normalizr(i.compra || '').includes(q) ||
+      normalizr(i.comprobante || '').includes(q)
   }).sort(comparar)
 
   if (loading) return <div style={S.center}><div style={S.loadingText}>Cargando ingresos...</div></div>
@@ -93,7 +96,7 @@ export default function Ingresos() {
 
       <div style={S.searchWrap}>
         <span style={S.searchIcon}>⌕</span>
-        <input style={S.searchInput} value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="Buscar por artículo, proveedor, ID..." />
+        <input style={S.searchInput} value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="Buscar por artículo, proveedor, ID, compra o comprobante..." />
         {busqueda && <button style={S.clearBtn} onClick={() => setBusqueda('')}>✕</button>}
       </div>
 
@@ -127,6 +130,7 @@ export default function Ingresos() {
                     <td style={S.td}>${(ing.costoUnitario||0).toLocaleString('es-AR')}</td>
                     <td style={{...S.td, color:'var(--accent)', fontWeight:700}}>${(ing.costoTotal||0).toLocaleString('es-AR')}</td>
                     <td style={{...S.td, color:'var(--muted)'}}>{ing.proveedor}</td>
+                    <td style={{...S.td, whiteSpace:'nowrap'}}>{ing.compra || <span style={{color:'var(--muted)'}}>—</span>}{ing.comprobante && <div style={{fontSize:11, color:'var(--muted)'}}>Nº {ing.comprobante}</div>}</td>
                     <td style={{...S.td, color:'var(--muted)'}}>{ing.empleado}</td>
                     <td style={{...S.td, color:'var(--muted)', whiteSpace:'nowrap', fontSize:12}} title={ing.modificado ? `Modificado ${ing.modificado}` : 'Fecha de carga'}>{fmtModif(ing)}</td>
                   </tr>

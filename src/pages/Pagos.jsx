@@ -1,6 +1,7 @@
 // src/pages/Pagos.jsx
 import { useState, useEffect } from 'react'
-import { getPagos, registrarPago, actualizarPago, anularPago, getArticulosAdmin, idCanonico } from '../api/sheets.js'
+import { getPagos, registrarPago, actualizarPago, anularPago, getArticulosAdmin, idCanonico, generarIdCompra, claveCompra } from '../api/sheets.js'
+import CompraModal, { armarCompras } from '../components/CompraModal.jsx'
 import BarcodeScanner from '../components/BarcodeScanner.jsx'
 import EscanearFactura from '../components/EscanearFactura.jsx'
 
@@ -32,6 +33,7 @@ const FORM_VACIO = {
   descripcion: '', proveedor: '',
   montoPagado: '0', pagado: false,
   empleado: '',
+  compraSel: 'NUEVA', comprobante: '',
 }
 
 // "$8.000", "8.000" o "8000" → 8000
@@ -74,6 +76,8 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
   const [anulando, setAnulando] = useState(false)
   const [scannerAbierto, setScannerAbierto] = useState(false)
   const [articulosMostrar, setArticulosMostrar] = useState(false)
+  const [vista, setVista] = useState('renglones') // renglones | compras
+  const [compraAbierta, setCompraAbierta] = useState(null) // clave de la compra
 
   useEffect(() => { cargar() }, [])
   useEffect(() => { setForm(f => ({...f, empleado})) }, [empleado])
@@ -110,6 +114,7 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
       descripcion: p.descripcion, proveedor: p.proveedor,
       montoPagado: String(p.montoPagado), pagado: p.pagado,
       empleado: p.empleado || empleado,
+      compraSel: p.compra || '', comprobante: p.comprobante || '',
     })
     setArtBusqueda('')
     setModalAbierto(true)
@@ -120,24 +125,32 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
     setArtBusqueda('')
   }
 
-  async function guardar() {
+  // otro: true → después de guardar deja el formulario listo para otro producto de la misma compra
+  async function guardar(otro = false) {
     if (form.tipo === 'MERCADERÍA' && !form.articuloId) { showToast('Seleccioná un artículo', 'error'); return }
     if (form.tipo === 'GASTO' && !form.descripcion.trim()) { showToast('Ingresá una descripción', 'error'); return }
     setSaving(true)
     try {
+      const esMerc = form.tipo === 'MERCADERÍA'
+      const compra = !esMerc ? '' : form.compraSel === 'NUEVA' ? await generarIdCompra() : form.compraSel
+      const comprobante = esMerc ? form.comprobante.trim() : ''
       if (editando) {
         const yaTeníaIngreso = !!editando.fechaIngreso
         const ahoraTenieIngreso = !!form.fechaIngreso
         await actualizarPago(editando.rowNum, {
-          ...form, idPago: editando.idPago, anulado: editando.anulado,
+          ...form, compra, comprobante, compraAnterior: editando.compra || '', comprobanteAnterior: editando.comprobante || '',
+          idPago: editando.idPago, anulado: editando.anulado,
           crearIngreso: !yaTeníaIngreso && ahoraTenieIngreso && form.tipo === 'MERCADERÍA',
         }, form.empleado)
         showToast('Pago actualizado', 'success')
       } else {
-        await registrarPago(form)
-        showToast('Pago registrado', 'success')
+        await registrarPago({ ...form, compra, comprobante })
+        showToast(otro ? `Guardado en ${compra}: cargá el siguiente producto` : `Pago registrado${compra ? ` · compra ${compra}` : ''}`, 'success')
       }
-      setModalAbierto(false)
+      if (otro && !editando) {
+        setForm(f => ({ ...FORM_VACIO, tipo: 'MERCADERÍA', empleado: f.empleado, proveedor: f.proveedor, fechaIngreso: f.fechaIngreso, fechaPago: f.fechaPago, compraSel: compra, comprobante: f.comprobante }))
+        setArtBusqueda('')
+      } else setModalAbierto(false)
       await cargar()
     } catch (e) {
       showToast('Error al guardar', 'error')
@@ -184,6 +197,7 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
   const fechaNum = f => { const [d, m, a] = String(f || '').split(' ')[0].split('/').map(Number); return d && m && a ? a * 10000 + m * 100 + d : 0 }
   const COLUMNAS = [
     { id: 'idPago', label: 'ID', valor: p => p.idPago },
+    { id: 'compra', label: 'Compra', valor: p => p.compra || '' },
     { id: 'tipo', label: 'Tipo', valor: p => p.tipo },
     { id: 'nombre', label: 'Descripción / Artículo', valor: p => normalizr(p.articuloNombre || p.descripcion) },
     { id: 'fechaIngreso', label: 'F. Ingreso', valor: p => fechaNum(p.fechaIngreso), num: true },
@@ -221,9 +235,37 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
       if (!busqueda.trim()) return true
       const q = normalizr(busqueda)
       return normalizr(p.articuloNombre).includes(q) || normalizr(p.descripcion).includes(q) ||
-        normalizr(p.proveedor).includes(q) || normalizr(p.idPago).includes(q)
+        normalizr(p.proveedor).includes(q) || normalizr(p.idPago).includes(q) ||
+        normalizr(p.compra || '').includes(q) || normalizr(p.comprobante || '').includes(q)
     })
     .sort(comparar)
+
+  // Compras (renglones de mercadería agrupados por número de compra, o proveedor + fecha si son viejos)
+  const compras = armarCompras(pagos, claveCompra)
+  const compraDe = clave => compras.find(c => c.clave === clave)
+  const comprasFiltradas = compras
+    .filter(c => {
+      if (filtroEstado === 'TODOS') return true
+      if (filtroEstado === 'PENDIENTE_PAGO') return c.saldo > 0
+      if (filtroEstado === 'COMPLETO') return c.saldo <= 0
+      return false
+    })
+    .filter(c => {
+      if (!busqueda.trim()) return true
+      const q = normalizr(busqueda)
+      return [c.compra, c.comprobante, c.proveedor, ...c.renglones.map(r => r.articuloNombre)].some(x => normalizr(x || '').includes(q))
+    })
+    .sort((a, b) => b.ultimaMs - a.ultimaMs)
+  // Compras recientes para sumar el pago que se está cargando (mismo proveedor si ya se escribió)
+  const fechaMs = f => { const [d, m, a] = String(f || '').split('/').map(Number); return d && m && a ? Date.UTC(a, m - 1, d) : 0 }
+  const comprasParaSumar = compras
+    .filter(c => c.compra && (Date.now() - Math.max(fechaMs(c.fechaIngreso), c.ultimaMs)) < 15 * 86400000)
+    .filter(c => !form.proveedor.trim() || normalizr(c.proveedor).includes(normalizr(form.proveedor.trim())) || c.compra === form.compraSel)
+    .sort((a, b) => b.ultimaMs - a.ultimaMs).slice(0, 6)
+  function elegirCompra(c) {
+    if (!c) { setForm(f => ({ ...f, compraSel: 'NUEVA' })); return }
+    setForm(f => ({ ...f, compraSel: c.compra, proveedor: f.proveedor || c.proveedor, fechaIngreso: f.fechaIngreso || c.fechaIngreso, comprobante: c.comprobante || f.comprobante }))
+  }
 
   // Últimos 10 artículos usados en pagos (por articuloId único, orden reciente)
   const ultimosUsados = (() => {
@@ -337,8 +379,42 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
         </div>
       </div>
 
+      <div style={S.vistaRow}>
+        {[['renglones', 'Renglones'], ['compras', `Compras (${compras.length})`]].map(([v, l]) => (
+          <button key={v} style={{...S.filtroTab, ...(vista === v ? S.filtroTabActive : {})}} onClick={() => setVista(v)} aria-pressed={vista === v}>{l}</button>
+        ))}
+      </div>
+
+      {vista === 'compras' && (
+        <div style={S.tableWrap}>
+          {comprasFiltradas.length === 0 ? <div style={S.emptyText}>Sin compras</div> : (
+            <table style={S.table}>
+              <thead><tr>
+                <th style={S.th}></th><th style={S.th}>Compra</th><th style={S.th}>Proveedor</th><th style={S.th}>F. Ingreso</th>
+                <th style={S.th}>Productos</th><th style={S.th}>Total</th><th style={S.th}>Pagado</th><th style={S.th}>Falta</th><th style={S.th}></th>
+              </tr></thead>
+              <tbody>
+                {comprasFiltradas.map(c => (
+                  <tr key={c.clave} style={S.tr} data-compra={c.compra || c.clave}>
+                    <td style={{...S.td, padding:'0 0 0 4px'}}><div style={{width:4, height:36, borderRadius:2, background: c.saldo > 0 ? '#f59e0b' : '#22c55e'}} /></td>
+                    <td style={{...S.td, ...S.tdId}}>{c.compra || <span style={{color:'var(--muted)'}}>sin número</span>}{c.comprobante && <div style={{fontSize:11, color:'var(--muted)'}}>Nº {c.comprobante}</div>}</td>
+                    <td style={S.td}>{c.proveedor || '—'}</td>
+                    <td style={S.td}>{c.fechaIngreso || '—'}</td>
+                    <td style={{...S.td, ...S.tdNombre}}>{c.renglones.length} · <span style={{color:'var(--muted)'}}>{c.renglones.slice(0, 3).map(r => r.articuloNombre).join(', ')}{c.renglones.length > 3 ? '…' : ''}</span></td>
+                    <td style={S.td}>${Math.round(c.total).toLocaleString('es-AR')}</td>
+                    <td style={{...S.td, color:'#22c55e'}}>${Math.round(c.pagado).toLocaleString('es-AR')}</td>
+                    <td style={{...S.td, fontWeight:700, color: c.saldo > 0 ? '#f59e0b' : 'var(--muted)'}}>{c.saldo > 0 ? `$${Math.round(c.saldo).toLocaleString('es-AR')}` : '✓'}</td>
+                    <td style={S.td}><button style={c.saldo > 0 ? S.pagarBtn : {...S.editBtn, color:'var(--text)', fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, padding:'5px 12px'}} onClick={() => setCompraAbierta(c.clave)}>{c.saldo > 0 ? 'Pagar' : 'Ver'}</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
       {/* Tabla */}
-      <div style={S.tableWrap}>
+      {vista === 'renglones' && <div style={S.tableWrap}>
         {pagosFiltrados.length === 0 ? (
           <div style={S.emptyText}>Sin registros</div>
         ) : (
@@ -347,6 +423,7 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
               <tr>
                 <th style={S.th}></th>
                 {thOrden('idPago')}
+                {thOrden('compra')}
                 {thOrden('tipo')}
                 {thOrden('nombre')}
                 {thOrden('fechaIngreso')}
@@ -371,6 +448,12 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
                       <div style={{width:4, height:36, borderRadius:2, background: cfg.color}} />
                     </td>
                     <td style={{...S.td, ...S.tdId}}>{p.idPago}</td>
+                    <td style={{...S.td, whiteSpace:'nowrap'}}>
+                      {p.tipo === 'MERCADERÍA' && !p.anulado
+                        ? <button style={S.compraLink} onClick={() => setCompraAbierta(claveCompra(p))} title="Ver la compra">{p.compra || 'ver compra'}</button>
+                        : <span style={{color:'var(--muted)'}}>—</span>}
+                      {p.comprobante && <div style={{fontSize:11, color:'var(--muted)'}}>Nº {p.comprobante}</div>}
+                    </td>
                     <td style={S.td}>
                       <span style={{...S.badge, background: cfg.bg, color: cfg.color}}>
                         {p.tipo === 'MERCADERÍA' ? 'MERC.' : 'GASTO'}
@@ -404,7 +487,13 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
             </tbody>
           </table>
         )}
-      </div>
+      </div>}
+
+      {compraAbierta && compraDe(compraAbierta) && (
+        <CompraModal compra={compraDe(compraAbierta)} empleado={empleadoFijo || empleado}
+          onCerrar={() => setCompraAbierta(null)}
+          onCambio={async msg => { showToast(msg, 'success'); setCompraAbierta(null); await cargar() }} />
+      )}
 
       {/* Modal */}
       {modalAbierto && (
@@ -556,6 +645,35 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
                 <input style={S.input} value={form.proveedor} onChange={e => setForm(f => ({...f, proveedor: e.target.value}))} placeholder="Nombre del proveedor..." />
               </div>
 
+              {/* Compra (solo MERCADERÍA): agrupa los productos que vinieron juntos */}
+              {form.tipo === 'MERCADERÍA' && (
+                <div style={S.fieldGroup}>
+                  <label style={S.label}>COMPRA</label>
+                  <div style={S.compraOpciones}>
+                    <button style={{...S.compraOpcion, ...(form.compraSel === 'NUEVA' ? S.compraOpcionActiva : {})}} onClick={() => elegirCompra(null)}>
+                      ➕ {editando ? 'Pasar a una compra nueva' : 'Compra nueva'}
+                    </button>
+                    {editando && !editando.compra && (
+                      <button style={{...S.compraOpcion, ...(form.compraSel === '' ? S.compraOpcionActiva : {})}} onClick={() => setForm(f => ({...f, compraSel: ''}))}>Sin número (como estaba)</button>
+                    )}
+                    {comprasParaSumar.map(c => (
+                      <button key={c.compra} style={{...S.compraOpcion, ...(form.compraSel === c.compra ? S.compraOpcionActiva : {})}} onClick={() => elegirCompra(c)}>
+                        <b>{c.compra}</b> · {c.proveedor || 'sin proveedor'} · {c.fechaIngreso || '—'}
+                        <span style={{color:'var(--muted)'}}> · {c.renglones.length} {c.renglones.length === 1 ? 'producto' : 'productos'} · ${Math.round(c.total).toLocaleString('es-AR')}</span>
+                      </button>
+                    ))}
+                    {editando?.compra && !comprasParaSumar.some(c => c.compra === editando.compra) && (
+                      <button style={{...S.compraOpcion, ...(form.compraSel === editando.compra ? S.compraOpcionActiva : {})}} onClick={() => setForm(f => ({...f, compraSel: editando.compra}))}><b>{editando.compra}</b> (la actual)</button>
+                    )}
+                  </div>
+                  <div style={{fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)'}}>
+                    {form.compraSel === 'NUEVA' ? 'Se crea un número de compra nuevo. Si este producto vino con otros ya cargados, elegí esa compra.' : form.compraSel ? `Se suma a la compra ${form.compraSel}.` : 'Queda agrupado por proveedor y fecha, como las compras viejas.'}
+                  </div>
+                  <label style={{...S.label, marginTop:6}}>Nº DE FACTURA O REMITO</label>
+                  <input style={S.input} value={form.comprobante} onChange={e => setForm(f => ({...f, comprobante: e.target.value}))} placeholder="Opcional (ej. 0003-00012345)" />
+                </div>
+              )}
+
               {/* Empleado */}
               <div style={S.fieldGroup}>
                 <label style={S.label}>EMPLEADO</label>
@@ -574,7 +692,12 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
 
             <div style={S.modalFooter}>
               <button style={S.cancelBtn} onClick={() => setModalAbierto(false)} disabled={saving}>Cancelar</button>
-              <button style={{...S.saveBtn, opacity: saving ? 0.6 : 1}} onClick={guardar} disabled={saving}>
+              {!editando && form.tipo === 'MERCADERÍA' && (
+                <button style={{...S.cancelBtn, color:'var(--accent)', borderColor:'var(--accent)', opacity: saving ? 0.6 : 1}} onClick={() => guardar(true)} disabled={saving} title="Guarda y deja listo para otro producto de la misma compra">
+                  Guardar y sumar otro
+                </button>
+              )}
+              <button style={{...S.saveBtn, opacity: saving ? 0.6 : 1}} onClick={() => guardar()} disabled={saving}>
                 {saving ? 'Guardando...' : 'Guardar'}
               </button>
             </div>
@@ -645,6 +768,12 @@ const S = {
   table: { width:'100%', borderCollapse:'collapse' },
   th: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:12, color:'var(--muted)', letterSpacing:1, textTransform:'uppercase', padding:'8px 10px', borderBottom:'2px solid var(--border)', textAlign:'left', background:'var(--surface)', position:'sticky', top:0, zIndex:1, whiteSpace:'nowrap' },
   thOrden: { cursor:'pointer', userSelect:'none' },
+  vistaRow: { display:'flex', gap:6, padding:'0 20px 8px' },
+  compraLink: { background:'none', border:'none', padding:0, color:'var(--accent)', fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:14, cursor:'pointer', textDecoration:'underline', textUnderlineOffset:2 },
+  pagarBtn: { background:'var(--accent)', border:'none', borderRadius:8, color:'#000', fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:14, padding:'6px 14px', cursor:'pointer' },
+  compraOpciones: { display:'flex', flexDirection:'column', gap:6 },
+  compraOpcion: { textAlign:'left', background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--text)', fontFamily:'Barlow, sans-serif', fontSize:14, padding:'9px 12px', cursor:'pointer' },
+  compraOpcionActiva: { border:'1.5px solid var(--accent)', background:'rgba(245,200,0,0.1)' },
   td: { fontFamily:'Barlow, sans-serif', fontSize:13, color:'var(--text)', padding:'8px 10px', borderBottom:'1px solid rgba(13,48,128,0.3)', verticalAlign:'middle' },
   tdId: { fontFamily:'Barlow Condensed, sans-serif', fontSize:12, color:'var(--muted)', whiteSpace:'nowrap' },
   tdNombre: { maxWidth:200 },
@@ -662,9 +791,9 @@ const S = {
   closeBtn: { background:'none', border:'none', color:'var(--muted)', fontSize:20, cursor:'pointer' },
   formScroll: { flex:1, overflowY:'auto', padding:'16px 24px', display:'flex', flexDirection:'column', gap:14 },
   fieldGroup: { display:'flex', flexDirection:'column', gap:6 },
-  fieldRow: { display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 },
+  fieldRow: { display:'grid', gridTemplateColumns:'minmax(0,1fr) minmax(0,1fr)', gap:12 },
   label: { fontFamily:'Barlow Condensed, sans-serif', fontSize:13, color:'var(--accent)', letterSpacing:1, fontWeight:700 },
-  input: { background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--text)', fontFamily:'Barlow, sans-serif', fontSize:16, padding:'10px 12px', outline:'none' },
+  input: { background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--text)', fontFamily:'Barlow, sans-serif', fontSize:16, padding:'10px 12px', outline:'none', minWidth:0, width:'100%', boxSizing:'border-box' },
   inputDate: { background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--text)', fontFamily:'Barlow, sans-serif', fontSize:16, padding:'10px 12px', outline:'none', colorScheme:'dark' },
   tipoBtns: { display:'flex', gap:8 },
   tipoBtn: { flex:1, padding:'10px', background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--muted)', fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:15, cursor:'pointer', letterSpacing:0.5 },
@@ -681,7 +810,7 @@ const S = {
   artDropdownFoto: { width:36, height:36, objectFit:'cover', borderRadius:5, flexShrink:0 },
   qtyWrap: { display:'flex', alignItems:'center', gap:8 },
   qtyBtn: { width:40, height:40, background:'var(--border)', border:'none', borderRadius:8, color:'var(--text)', fontSize:20, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:700, flexShrink:0 },
-  qtyInput: { flex:1, background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--text)', fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:20, padding:'8px 12px', outline:'none', textAlign:'center' },
+  qtyInput: { flex:1, background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--text)', fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:20, padding:'8px 12px', outline:'none', textAlign:'center', minWidth:0, width:'100%' },
   costoTotalWrap: { display:'flex', justifyContent:'space-between', alignItems:'center', background:'var(--surface2)', borderRadius:8, padding:'10px 14px', border:'1.5px solid var(--border)' },
   empBtns: { display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:6 },
   empBtn: { padding:'8px 6px', background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, cursor:'pointer', color:'var(--muted)', fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:14, letterSpacing:0.5, textAlign:'center' },

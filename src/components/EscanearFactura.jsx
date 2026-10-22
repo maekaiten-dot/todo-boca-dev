@@ -141,7 +141,7 @@ export default function EscanearFactura({ articulos = [], proveedores = [], empl
         } else { l.montoPagado = 0; l.pagado = false }
       })
       const descripcion = `Factura ${cab.proveedor}${cab.numero ? ' Nº ' + cab.numero : ''}${cab.fecha ? ' del ' + cab.fecha : ''}`
-      await registrarPagosLote({ renglones: lineas, fechaIngreso: pago.fechaIngreso, fechaPago: completo || pago.tipo === 'parcial' ? pago.fechaPago : '', proveedor: cab.proveedor.trim(), descripcion, empleado })
+      await registrarPagosLote({ renglones: lineas, fechaIngreso: pago.fechaIngreso, fechaPago: completo || pago.tipo === 'parcial' ? pago.fechaPago : '', proveedor: cab.proveedor.trim(), descripcion, empleado, comprobante: cab.numero.trim() })
       // Memoria: lo que no vino de la memoria (o cambió) se guarda para la próxima
       const nuevas = incl.filter(r => r.origen !== 'memoria').map(r => ({ proveedor: cab.proveedor.trim(), codigo: r.codigo || '', descripcion: r.descripcion || '', articuloId: r.articuloId }))
       await guardarMemoriaFacturas(nuevas, empleado).catch(e => console.error(e))

@@ -99,18 +99,25 @@ const parseArs = v => typeof v === 'number' ? v : Number(String(v ?? '0').replac
 function calcularRecupero(ventas, ingresos, articulos, hoy, agr = null) {
   const arts = Object.fromEntries(articulos.map(a => [a.id, a]))
   const claveDe = id => agr?.deArt[id] || id
-  const compras = {}
+  // Cada compra: los ingresos con el mismo código de COMPRA; los viejos sin código, los del mismo día.
+  // La última compra de cada artículo (o grupo) es la que tiene el ingreso más reciente; arranca el
+  // día de su primer ingreso (por si se cargó en dos días).
+  const porArt = {}
+  const horaNum = h => { const [a, b, c] = String(h || '').replace(/^'/, '').split(':').map(Number); return (a || 0) * 3600 + (b || 0) * 60 + (c || 0) }
   for (const i of ingresos) {
     if (i.anulado || !i.articuloId || !(i.cantidad > 0)) continue
     const dia = diaDesdeFecha(i.fecha)
     if (dia == null || dia > hoy) continue
     const k = claveDe(i.articuloId)
-    const c = compras[k]
-    if (c && dia < c.dia) continue
-    const costo = i.costoTotal || i.cantidad * (i.costoUnitario || parseArs(arts[i.articuloId]?.costoUnitario))
-    if (!c || dia > c.dia) compras[k] = { dia, cantidad: i.cantidad, costo, proveedor: i.proveedor || '' }
-    else { c.cantidad += i.cantidad; c.costo += costo; if (i.proveedor && !c.proveedor.includes(i.proveedor)) c.proveedor = c.proveedor ? `${c.proveedor}, ${i.proveedor}` : i.proveedor }
+    const kc = i.compra || `D${dia}`
+    const c = ((porArt[k] ||= {})[kc] ||= { dia, ultimo: -1, cantidad: 0, costo: 0, proveedor: '', compra: i.compra || '' })
+    c.dia = Math.min(c.dia, dia)
+    c.ultimo = Math.max(c.ultimo, dia * 86400 + horaNum(i.hora))
+    c.cantidad += i.cantidad
+    c.costo += i.costoTotal || i.cantidad * (i.costoUnitario || parseArs(arts[i.articuloId]?.costoUnitario))
+    if (i.proveedor && !c.proveedor.includes(i.proveedor)) c.proveedor = c.proveedor ? `${c.proveedor}, ${i.proveedor}` : i.proveedor
   }
+  const compras = Object.fromEntries(Object.entries(porArt).map(([k, cs]) => [k, Object.values(cs).sort((a, b) => b.ultimo - a.ultimo)[0]]))
   const porDia = {}
   for (const v of ventas) {
     const k = claveDe(v.articulo)
@@ -134,7 +141,7 @@ function calcularRecupero(ventas, ingresos, articulos, hoy, agr = null) {
     const ritmo = facturado / Math.max(1, transcurridos + 1) // $ por día desde la compra
     const faltan = recuperado ? 0 : (ritmo > 0 ? Math.ceil((c.costo - facturado) / ritmo) : null)
     return {
-      id, nombre: agr?.grupos[id]?.nombre || arts[id]?.nombre || id, esGrupo: !!agr?.grupos[id], nModelos: agr?.grupos[id]?.modelos.length || 1, compraDia: c.dia, compraCant: c.cantidad, compraCosto: c.costo, proveedor: c.proveedor,
+      id, compra: c.compra, nombre: agr?.grupos[id]?.nombre || arts[id]?.nombre || id, esGrupo: !!agr?.grupos[id], nModelos: agr?.grupos[id]?.modelos.length || 1, compraDia: c.dia, compraCant: c.cantidad, compraCosto: c.costo, proveedor: c.proveedor,
       facturado, unidades, pct: facturado / c.costo, recuperado,
       dias: recuperado ? diaRecupero - c.dia : transcurridos, faltan,
       diasTotal: recuperado ? diaRecupero - c.dia : (faltan != null ? transcurridos + faltan : null),
@@ -553,7 +560,7 @@ function FilaRecupero({ r, abierto, modelo, onClick }) {
   return (
     <tr onClick={onClick} style={{ ...(onClick ? { cursor: 'pointer' } : {}), ...(r.esGrupo ? S.trGrupo : {}) }} data-grupo={r.esGrupo ? r.nombre : undefined}>
       <NombreFila r={r} abierto={abierto} modelo={modelo} extra={r.proveedor ? ` · ${r.proveedor}` : ''} />
-      <td style={S.td}>{fechaDeDia(r.compraDia)}<div style={S.codigo}>{fmtN(r.compraCant)} u.</div></td>
+      <td style={S.td}>{fechaDeDia(r.compraDia)}<div style={S.codigo}>{fmtN(r.compraCant)} u.{r.compra ? ` · ${r.compra}` : ""}</div></td>
       <td style={S.td}>${fmtN(r.compraCosto)}</td>
       <td style={S.td}>${fmtN(r.facturado)}<div style={S.codigo}>{fmtN(r.unidades)} u. vendidas</div></td>
       <td style={S.td}>

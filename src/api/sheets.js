@@ -1417,6 +1417,19 @@ export async function registrarPago({ tipo, fechaIngreso, fechaPago, articuloId,
   return idPago
 }
 
+// Fila de INGRESOS que corresponde a un pago (mismo número, con I en vez de P). Si hubiera más de
+// una, la última. Devuelve { fila, r } o null.
+async function filaIngresoDePago(idPago) {
+  const id = `I${String(idPago).slice(1)}`
+  const rows = (await sheetsGet('INGRESOS!A2:N')).values || []
+  for (let k = rows.length - 1; k >= 0; k--) if (rows[k][0] === id) return { fila: k + 2, r: rows[k] }
+  return null
+}
+
+// Edita un pago y deja su ingreso (lo que suma al stock) igual que el pago:
+//  - mercadería con fecha de ingreso → el ingreso se actualiza (artículo, cantidad, costo, fecha,
+//    proveedor, compra) o se crea si no existía;
+//  - sin fecha de ingreso o pasado a GASTO → el ingreso, si existía, se anula.
 export async function actualizarPago(rowNum, campos, empleado = '') {
   const cant = Number(campos.cantidad)||0, cu = parsePrecio(campos.costoUnitario), mp = parsePrecio(campos.montoPagado)
   const costoTotal = cant*cu
@@ -1424,28 +1437,54 @@ export async function actualizarPago(rowNum, campos, empleado = '') {
   const conCompra = campos.compra !== undefined && campos.tipo === 'MERCADERÍA'
   if (conCompra && (campos.compra || campos.comprobante || campos.compraAnterior)) await asegurarColumnasCompra()
   const extra = conCompra ? [campos.compra || '', campos.comprobante ? `'${campos.comprobante}` : ''] : []
-  const row = [campos.idPago,campos.tipo||'GASTO',campos.fechaIngreso?`'${campos.fechaIngreso}`:'',campos.fechaPago?`'${campos.fechaPago}`:'',campos.articuloId||'',campos.articuloNombre||'',cant,cu,costoTotal,campos.descripcion||'',campos.proveedor||'',mp,campos.pagado?'TRUE':'FALSE',campos.empleado||'',campos.anulado?'TRUE':'FALSE',ahoraModificado(),...extra]
+  const mod = ahoraModificado()
+  const row = [campos.idPago,campos.tipo||'GASTO',campos.fechaIngreso?`'${campos.fechaIngreso}`:'',campos.fechaPago?`'${campos.fechaPago}`:'',campos.articuloId||'',campos.articuloNombre||'',cant,cu,costoTotal,campos.descripcion||'',campos.proveedor||'',mp,campos.pagado?'TRUE':'FALSE',campos.empleado||'',campos.anulado?'TRUE':'FALSE',mod,...extra]
   await sheetsUpdate(`PAGOS!A${rowNum}:${extra.length ? 'R' : 'P'}${rowNum}`, [row])
-  // Si cambió la compra o el comprobante, el ingreso de ese renglón también
-  if (conCompra && !campos.crearIngreso && (campos.compra !== (campos.compraAnterior || '') || campos.comprobante !== (campos.comprobanteAnterior || ''))) {
-    const ing = (await sheetsGet('INGRESOS!A2:A')).values || []
-    const i = ing.findIndex(r => r[0] === `I${campos.idPago.slice(1)}`)
-    if (i >= 0) await sheetsUpdate(`INGRESOS!M${i + 2}:N${i + 2}`, [extra])
-  }
-  if (campos.tipo==='MERCADERÍA'&&campos.fechaIngreso&&campos.articuloId&&campos.crearIngreso) {
-    const costoTotalIng = costoTotal
+
+  const debeTener = campos.tipo === 'MERCADERÍA' && !!campos.fechaIngreso && !!campos.articuloId && !campos.anulado
+  const existente = await filaIngresoDePago(campos.idPago)
+  let cambioIngreso = ''
+  if (existente) {
+    const r = existente.r
+    if (debeTener) {
+      await asegurarModificadoIngresos()
+      // Se conserva la hora original (es la que ordena el ingreso respecto de los conteos)
+      const nueva = [r[0], `'${campos.fechaIngreso}`, r[2] ? `'${String(r[2]).replace(/^'/, '')}` : '', campos.articuloId, campos.articuloNombre || '', cant, cu, costoTotal, campos.proveedor || '', r[9] || empleado || '', 'FALSE', mod, ...(extra.length ? extra : [r[12] || '', r[13] ? `'${String(r[13]).replace(/^'/, '')}` : ''])]
+      await sheetsUpdate(`INGRESOS!A${existente.fila}:N${existente.fila}`, [nueva])
+      const antes = `${r[3]}×${r[5]}`, ahora = `${campos.articuloId}×${cant}`
+      cambioIngreso = antes !== ahora || String(r[10]).toUpperCase() === 'TRUE' ? ` · ingreso ${String(r[10]).toUpperCase() === 'TRUE' ? 'reactivado' : 'corregido'} (${antes} → ${ahora})` : ''
+    } else if (String(r[10]).toUpperCase() !== 'TRUE') {
+      await asegurarModificadoIngresos()
+      await sheetsUpdate(`INGRESOS!K${existente.fila}:L${existente.fila}`, [['TRUE', mod]])
+      cambioIngreso = ` · ingreso ${r[0]} anulado (ya no suma al stock)`
+    }
+  } else if (debeTener) {
     const hora = new Date().toLocaleString('es-AR',{timeZone:'America/Argentina/Buenos_Aires',hour12:false}).split(', ')[1]
     await asegurarModificadoIngresos()
-    const rowIngreso = [`I${campos.idPago.slice(1)}`,`'${campos.fechaIngreso}`,`'${hora}`,campos.articuloId,campos.articuloNombre,cant,cu,costoTotalIng,campos.proveedor||'',empleado||'',false,ahoraModificado(),...extra]
+    const rowIngreso = [`I${campos.idPago.slice(1)}`,`'${campos.fechaIngreso}`,`'${hora}`,campos.articuloId,campos.articuloNombre,cant,cu,costoTotal,campos.proveedor||'',empleado||'',false,mod,...extra]
     await sheetsAppend('INGRESOS!A1', [rowIngreso])
+    cambioIngreso = ' · ingreso creado'
   }
-  await registrarLog({ accion:'PAGO_ACTUALIZADO', detalle:`${campos.idPago} actualizado`, idReferencia:campos.idPago, empleado, resultado:'OK' })
+  await registrarLog({ accion:'PAGO_ACTUALIZADO', detalle:`${campos.idPago} actualizado${cambioIngreso}`, idReferencia:campos.idPago, empleado, resultado:'OK' })
+  return cambioIngreso
 }
 
+// Anula un pago y también su ingreso, para que deje de sumar al stock
 export async function anularPago(rowNum, idPago, empleado = '') {
   await asegurarModificadoPagos()
-  await sheetsUpdate(`PAGOS!O${rowNum}:P${rowNum}`, [['TRUE', ahoraModificado()]])
-  await registrarLog({ accion:'PAGO_ANULADO', detalle:`Pago ${idPago} anulado`, idReferencia:idPago, empleado, resultado:'OK' })
+  const mod = ahoraModificado()
+  await sheetsUpdate(`PAGOS!O${rowNum}:P${rowNum}`, [['TRUE', mod]])
+  let detalle = ''
+  try {
+    const ing = await filaIngresoDePago(idPago)
+    if (ing && String(ing.r[10]).toUpperCase() !== 'TRUE') {
+      await asegurarModificadoIngresos()
+      await sheetsUpdate(`INGRESOS!K${ing.fila}:L${ing.fila}`, [['TRUE', mod]])
+      detalle = ` · ingreso ${ing.r[0]} anulado (${ing.r[5]}× ${ing.r[3]})`
+    }
+  } catch (e) { console.error('No se pudo anular el ingreso del pago', e); detalle = ' · ERROR al anular su ingreso' }
+  await registrarLog({ accion:'PAGO_ANULADO', detalle:`Pago ${idPago} anulado${detalle}`, idReferencia:idPago, empleado, resultado:'OK' })
+  return detalle
 }
 
 // ── Gastos Fijos ─────────────────────────────────────────────────────────────

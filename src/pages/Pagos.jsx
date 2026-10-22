@@ -1,6 +1,6 @@
 // src/pages/Pagos.jsx
 import { useState, useEffect } from 'react'
-import { getPagos, registrarPago, actualizarPago, anularPago, getArticulosAdmin, idCanonico, generarIdCompra, claveCompra } from '../api/sheets.js'
+import { getPagos, registrarPago, actualizarPago, anularPago, getArticulosAdmin, idCanonico, generarIdCompra, claveCompra, editarArticulo } from '../api/sheets.js'
 import CompraModal, { armarCompras } from '../components/CompraModal.jsx'
 import BarcodeScanner from '../components/BarcodeScanner.jsx'
 import EscanearFactura from '../components/EscanearFactura.jsx'
@@ -34,6 +34,7 @@ const FORM_VACIO = {
   montoPagado: '0', pagado: false,
   empleado: '',
   compraSel: 'NUEVA', comprobante: '',
+  actualizarCosto: true, precioNuevo: '', cambiarPrecio: false,
 }
 
 // "$8.000", "8.000" o "8000" → 8000
@@ -115,6 +116,7 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
       montoPagado: String(p.montoPagado), pagado: p.pagado,
       empleado: p.empleado || empleado,
       compraSel: p.compra || '', comprobante: p.comprobante || '',
+      actualizarCosto: true, precioNuevo: '', cambiarPrecio: false,
     })
     setArtBusqueda('')
     setModalAbierto(true)
@@ -134,18 +136,24 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
       const esMerc = form.tipo === 'MERCADERÍA'
       const compra = !esMerc ? '' : form.compraSel === 'NUEVA' ? await generarIdCompra() : form.compraSel
       const comprobante = esMerc ? form.comprobante.trim() : ''
+      // Costo y precio del artículo (si se pidió actualizarlos)
+      const cambiosArt = []
+      if (esMerc && artSel && (cambiaCosto && form.actualizarCosto || precioNuevoOk)) {
+        const nuevo = { ...artSel }
+        if (cambiaCosto && form.actualizarCosto) { nuevo.costoUnitario = String(cuForm); cambiosArt.push(`costo $${cuForm.toLocaleString('es-AR')}`) }
+        if (precioNuevoOk) { nuevo.precioUnitario = String(precioNuevoNum); cambiosArt.push(`precio $${precioNuevoNum.toLocaleString('es-AR')}`) }
+        await editarArticulo(artSel.rowNum, nuevo, form.empleado || empleado)
+      }
+      const notaArt = cambiosArt.length ? ` · artículo actualizado (${cambiosArt.join(', ')})` : ''
       if (editando) {
-        const yaTeníaIngreso = !!editando.fechaIngreso
-        const ahoraTenieIngreso = !!form.fechaIngreso
-        await actualizarPago(editando.rowNum, {
+        const notaIngreso = await actualizarPago(editando.rowNum, {
           ...form, compra, comprobante, compraAnterior: editando.compra || '', comprobanteAnterior: editando.comprobante || '',
           idPago: editando.idPago, anulado: editando.anulado,
-          crearIngreso: !yaTeníaIngreso && ahoraTenieIngreso && form.tipo === 'MERCADERÍA',
         }, form.empleado)
-        showToast('Pago actualizado', 'success')
+        showToast(`Pago actualizado${notaIngreso || ''}${notaArt}`, 'success', notaIngreso || notaArt ? 6000 : 3000)
       } else {
         await registrarPago({ ...form, compra, comprobante })
-        showToast(otro ? `Guardado en ${compra}: cargá el siguiente producto` : `Pago registrado${compra ? ` · compra ${compra}` : ''}`, 'success')
+        showToast(`${otro ? `Guardado en ${compra}: cargá el siguiente producto` : `Pago registrado${compra ? ` · compra ${compra}` : ''}`}${notaArt}`, 'success', notaArt ? 6000 : 3000)
       }
       if (otro && !editando) {
         setForm(f => ({ ...FORM_VACIO, tipo: 'MERCADERÍA', empleado: f.empleado, proveedor: f.proveedor, fechaIngreso: f.fechaIngreso, fechaPago: f.fechaPago, compraSel: compra, comprobante: f.comprobante }))
@@ -162,8 +170,8 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
   async function confirmarAnulacion() {
     setAnulando(true)
     try {
-      await anularPago(confirmAnular.rowNum, confirmAnular.idPago, empleado)
-      showToast('Pago anulado', 'success')
+      const nota = await anularPago(confirmAnular.rowNum, confirmAnular.idPago, empleado)
+      showToast(`Pago anulado${nota || ''}`, 'success', nota ? 6000 : 3000)
       setConfirmAnular(null)
       await cargar()
     } catch (e) {
@@ -184,9 +192,9 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
     return { ok: false, nombre: `No encontrado: ${codigo}` }
   }
 
-  function showToast(msg, type) {
+  function showToast(msg, type, ms = 3000) {
     setToast({ msg, type })
-    setTimeout(() => setToast(null), 3000)
+    setTimeout(() => setToast(null), ms)
   }
 
   const normalizr = str => str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -291,6 +299,15 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
     : []
 
   const costoTotal = (Number(form.cantidad) || 0) * parseMonto(form.costoUnitario)
+  // Costo y precio del artículo elegido, para ofrecer actualizarlos
+  const artSel = form.tipo === 'MERCADERÍA' && form.articuloId ? articulos.find(a => a.id === form.articuloId) : null
+  const cuForm = Math.round(parseMonto(form.costoUnitario) * 100) / 100
+  const cuArt = artSel ? parseMonto(artSel.costoUnitario) : 0
+  const precioArt = artSel ? parseMonto(artSel.precioUnitario) : 0
+  const cambiaCosto = !!artSel && cuForm > 0 && Math.abs(cuForm - cuArt) >= 1
+  const precioNuevoNum = Math.round(parseMonto(form.precioNuevo))
+  const precioNuevoOk = !!artSel && form.cambiarPrecio && precioNuevoNum > 0 && precioNuevoNum !== Math.round(precioArt)
+  const margen = (precio, costo) => precio > 0 && costo > 0 ? `${Math.round((precio - costo) / precio * 100)}%` : '–'
 
   // Totales resumen
   const totalPagado = pagos.filter(p => !p.anulado && p.pagado).reduce((s, p) => s + p.montoPagado, 0)
@@ -621,6 +638,29 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
                 </div>
               )}
 
+              {/* Costo y precio del artículo */}
+              {artSel && cuForm > 0 && (
+                <div style={S.artCostoBox} aria-label="Costo y precio del artículo">
+                  {cambiaCosto && (
+                    <label style={S.checkLabel}>
+                      <input type="checkbox" checked={form.actualizarCosto} onChange={e => setForm(f => ({...f, actualizarCosto: e.target.checked}))} />
+                      <span>Actualizar el costo del artículo: ${Math.round(cuArt).toLocaleString('es-AR')} → <b>${cuForm.toLocaleString('es-AR')}</b></span>
+                    </label>
+                  )}
+                  <div style={S.precioLinea}>
+                    <span>Precio de venta <b>${Math.round(precioArt).toLocaleString('es-AR')}</b> · margen {cambiaCosto ? <>{margen(precioArt, cuArt)} → <b style={{color: (precioArt - cuForm) / precioArt < (precioArt - cuArt) / precioArt ? '#f59e0b' : '#22c55e'}}>{margen(precioArt, cuForm)}</b></> : <b>{margen(precioArt, cuForm)}</b>}</span>
+                    {!form.cambiarPrecio && <button style={S.linkBtn} onClick={() => setForm(f => ({...f, cambiarPrecio: true, precioNuevo: String(Math.round(precioArt))}))}>Cambiar precio</button>}
+                  </div>
+                  {form.cambiarPrecio && (
+                    <div style={{display:'flex', alignItems:'center', gap:10, flexWrap:'wrap'}}>
+                      <input style={{...S.input, width:150, flex:'0 0 auto'}} inputMode="numeric" value={form.precioNuevo} onChange={e => setForm(f => ({...f, precioNuevo: e.target.value}))} aria-label="Nuevo precio de venta" />
+                      <span style={{fontFamily:'Barlow, sans-serif', fontSize:13, color:'var(--muted)'}}>margen con este precio: <b style={{color:'var(--text)'}}>{margen(precioNuevoNum, cuForm)}</b>{precioNuevoOk ? ' · se avisa a las tablets' : ''}</span>
+                      <button style={S.linkBtn} onClick={() => setForm(f => ({...f, cambiarPrecio: false, precioNuevo: ''}))}>No cambiar</button>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Monto pagado y pagado */}
               <div style={S.fieldRow}>
                 <div style={S.fieldGroup}>
@@ -739,7 +779,7 @@ const S = {
   loadingText: { fontFamily:'Barlow Condensed, sans-serif', fontSize:22, color:'var(--muted)' },
   errorText: { fontFamily:'Barlow, sans-serif', fontSize:16, color:'#ef4444', textAlign:'center' },
   retryBtn: { background:'var(--surface)', border:'1.5px solid var(--border)', borderRadius:10, color:'var(--text)', fontFamily:'Barlow, sans-serif', fontSize:15, padding:'10px 24px', cursor:'pointer' },
-  toast: { position:'fixed', top:16, left:'50%', transform:'translateX(-50%)', zIndex:400, padding:'12px 28px', borderRadius:10, fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:18, whiteSpace:'nowrap', boxShadow:'0 4px 20px rgba(0,0,0,0.5)' },
+  toast: { position:'fixed', top:16, left:'50%', transform:'translateX(-50%)', zIndex:400, padding:'12px 28px', borderRadius:10, fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:18, maxWidth:'92vw', width:'max-content', textAlign:'center', boxSizing:'border-box', boxShadow:'0 4px 20px rgba(0,0,0,0.5)' },
   toastSuccess: { background:'#22c55e', color:'#000' },
   toastError: { background:'#ef4444', color:'#fff' },
   header: { display:'flex', alignItems:'center', justifyContent:'space-between', padding:'16px 20px 12px', borderBottom:'2px solid var(--accent)', flexShrink:0 },
@@ -768,6 +808,10 @@ const S = {
   table: { width:'100%', borderCollapse:'collapse' },
   th: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:12, color:'var(--muted)', letterSpacing:1, textTransform:'uppercase', padding:'8px 10px', borderBottom:'2px solid var(--border)', textAlign:'left', background:'var(--surface)', position:'sticky', top:0, zIndex:1, whiteSpace:'nowrap' },
   thOrden: { cursor:'pointer', userSelect:'none' },
+  artCostoBox: { display:'flex', flexDirection:'column', gap:8, padding:'10px 12px', border:'1.5px dashed var(--border)', borderRadius:8 },
+  checkLabel: { display:'flex', alignItems:'center', gap:8, fontFamily:'Barlow, sans-serif', fontSize:14, color:'var(--text)', cursor:'pointer' },
+  precioLinea: { display:'flex', alignItems:'center', justifyContent:'space-between', gap:10, flexWrap:'wrap', fontFamily:'Barlow, sans-serif', fontSize:14, color:'var(--muted)' },
+  linkBtn: { background:'none', border:'none', padding:0, color:'var(--accent)', fontFamily:'Barlow, sans-serif', fontSize:13, cursor:'pointer', textDecoration:'underline' },
   vistaRow: { display:'flex', gap:6, padding:'0 20px 8px' },
   compraLink: { background:'none', border:'none', padding:0, color:'var(--accent)', fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:14, cursor:'pointer', textDecoration:'underline', textUnderlineOffset:2 },
   pagarBtn: { background:'var(--accent)', border:'none', borderRadius:8, color:'#000', fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:14, padding:'6px 14px', cursor:'pointer' },

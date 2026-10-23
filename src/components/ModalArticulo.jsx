@@ -29,6 +29,29 @@ async function subirFotoCloudinary(file) {
 // editando: el artículo que se edita (con rowNum) o null si es nuevo
 // onGuardado(form): después de guardar en la planilla
 // articulos: lista de artículos (para sugerir los grupos que ya existen)
+// Margen del artículo (como en Pagos): ganancia por unidad y % sobre el precio. Al editar, si cambia
+// el precio o el costo, muestra el margen anterior → el nuevo.
+const numArs = v => Number(String(v ?? '').replace(/[$\s.]/g, '').replace(',', '.')) || 0
+const pctMargen = (p, c) => p > 0 && c > 0 ? (p - c) / p : null
+function MargenArticulo({ precio, costo, precioAntes, costoAntes }) {
+  const p = numArs(precio), c = numArs(costo)
+  const m = pctMargen(p, c)
+  const mAntes = precioAntes != null ? pctMargen(numArs(precioAntes), numArs(costoAntes)) : null
+  const cambio = mAntes != null && m != null && Math.round(mAntes * 100) !== Math.round(m * 100)
+  const color = m == null ? 'var(--muted)' : m < 0 ? '#ef4444' : m < 0.3 ? '#f59e0b' : '#22c55e'
+  return (
+    <div style={S.margen} aria-label="Margen del artículo">
+      {m == null
+        ? <span>Margen: <b>–</b> {p > 0 && !(c > 0) ? '(falta el costo)' : !(p > 0) && c > 0 ? '(falta el precio)' : ''}</span>
+        : <span>
+            Margen {cambio && <>{Math.round(mAntes * 100)}% → </>}<b style={{ color }}>{Math.round(m * 100)}%</b>
+            <span style={{ color: 'var(--muted)' }}> · ganancia {p - c < 0 ? '-' : ''}${Math.abs(Math.round(p - c)).toLocaleString('es-AR')} por unidad</span>
+            {m < 0 && <b style={{ color: '#ef4444' }}> · el costo es mayor que el precio</b>}
+          </span>}
+    </div>
+  )
+}
+
 export default function ModalArticulo({ inicial, editando = null, empleado = '', onCerrar, onGuardado, aviso = '', articulos = [], stockMap = {} }) {
   const [ocupado, setOcupado] = useState(false)
   const [form, setForm] = useState({ ...FORM_ARTICULO_VACIO, ...inicial, grupo: inicial?.grupo || '' })
@@ -109,6 +132,8 @@ export default function ModalArticulo({ inicial, editando = null, empleado = '',
                     <input style={S.input} type="text" inputMode="numeric" value={form.costoUnitario} onChange={e => setForm(f => ({...f, costoUnitario: e.target.value}))} />
                   </div>
                 </div>
+
+                <MargenArticulo precio={form.precioUnitario} costo={form.costoUnitario} precioAntes={editando ? inicial?.precioUnitario : null} costoAntes={editando ? inicial?.costoUnitario : null} />
   
                 <div style={S.fieldRow}>
                   <div style={S.fieldGroup}>
@@ -254,8 +279,8 @@ const S = {
   formScroll: { flex:1, overflowY:'auto', padding:'16px 24px', display:'flex', flexDirection:'column', gap:14 },
   fieldGroup: { display:'flex', flexDirection:'column', gap:6 },
   label: { fontFamily:'Barlow Condensed, sans-serif', fontSize:13, color:'var(--accent)', letterSpacing:1, fontWeight:700 },
-  input: { background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--text)', fontFamily:'Barlow, sans-serif', fontSize:16, padding:'10px 12px', outline:'none' },
-  fieldRow: { display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 },
+  input: { background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--text)', fontFamily:'Barlow, sans-serif', fontSize:16, padding:'10px 12px', outline:'none', minWidth:0, width:'100%', boxSizing:'border-box' },
+  fieldRow: { display:'grid', gridTemplateColumns:'minmax(0,1fr) minmax(0,1fr)', gap:12 },
   dispBtns: { display:'flex', gap:8 },
   dispBtnOpt: { flex:1, padding:'10px', background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--muted)', fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:15, cursor:'pointer', letterSpacing:1 },
   dispBtnOptActive: { background:'rgba(245,200,0,0.12)', border:'1.5px solid var(--accent)', color:'var(--accent)' },
@@ -270,6 +295,7 @@ const S = {
   cancelBtn: { flex:1, padding:'13px', background:'none', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--muted)', fontFamily:'Barlow, sans-serif', fontSize:15, cursor:'pointer' },
   saveBtn: { flex:2, padding:'13px', background:'var(--accent)', border:'none', borderRadius:8, color:'#000', fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:17, cursor:'pointer', letterSpacing:1 },
   aviso: { fontFamily:'Barlow, sans-serif', fontSize:13, color:'var(--text)', background:'rgba(245,200,0,0.1)', border:'1px solid var(--accent)', borderRadius:8, padding:'8px 12px', marginBottom:10 },
+  margen: { fontFamily:'Barlow, sans-serif', fontSize:14, color:'var(--text)', padding:'8px 12px', background:'var(--surface2)', border:'1.5px dashed var(--border)', borderRadius:8, marginTop:-4 },
   ayuda: { fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)', lineHeight:1.35 },
   error: { fontFamily:'Barlow, sans-serif', fontSize:13, color:'#ef4444', marginBottom:8 },
 }

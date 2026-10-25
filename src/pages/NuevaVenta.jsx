@@ -207,7 +207,13 @@ function XXXLControl({ item, estado, onCambiar }) {
   )
 }
 
-export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistrada, usuarios: usuariosProp, stockMap = {}, empleadoFijo = null }) {
+export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistrada, usuarios: usuariosProp, stockMap = {}, empleadoFijo = null, esAdmin = false, cargadoPor = '' }) {
+  // Fecha de la venta (solo Admin): por defecto es "ahora". Se cambia a mano para cargar una venta de
+  // otro día, y después de guardarla vuelve sola a "ahora".
+  const [fechaOtra, setFechaOtra] = useState(null) // null | { dia: 'aaaa-mm-dd', hora: 'hh:mm' }
+  const hoyInput = () => { const [d, m, a] = new Date().toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' }).split('/'); return `${a}-${m.padStart(2, '0')}-${d.padStart(2, '0')}` }
+  const horaAhora = () => new Date().toLocaleTimeString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', hour12: false }).slice(0, 5)
+  const fechaOtraTexto = fechaOtra ? `${fechaOtra.dia.split('-').reverse().map((x, i) => i < 2 ? String(Number(x)) : x).join('/')} ${fechaOtra.hora}` : ''
   const [carrito, setCarrito] = useState([])
   const [busqueda, setBusqueda] = useState('')
   const [metodoPago, setMetodoPago] = useState('Efectivo Pesos')
@@ -432,8 +438,10 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
         notas,
         descuentoImanes: totales.descuentoImanes,
         descuentoPromo: totales.descuentoPromo,
+        ...(esAdmin && fechaOtra ? { fechaVenta: { fecha: fechaOtraTexto.split(' ')[0], hora: fechaOtra.hora }, cargadaPor: cargadoPor } : {}),
       })
-      showToast((modoCambio ? 'Cambio ' : 'Venta ') + idVenta + ' registrado ✓', 'success')
+      showToast((modoCambio ? 'Cambio ' : 'Venta ') + idVenta + ' registrado ✓' + (fechaOtra ? ` con fecha ${fechaOtraTexto}` : ''), 'success')
+      setFechaOtra(null)
       setModoCambio(false); setDevueltos([])
       setCarrito([])
       setSocio(false)
@@ -461,6 +469,11 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
       }
       if (e?.message === 'PAGOS_MONTO' || e?.message === 'PAGOS_INVALIDOS') {
         showToast('Revisá los montos de los 2 medios de pago y cerrá de nuevo.', 'error')
+        setSaving(false)
+        return
+      }
+      if (e?.message === 'FECHA_INVALIDA') {
+        showToast('La fecha de la venta no puede ser futura. Revisala y cerrá de nuevo.', 'error')
         setSaving(false)
         return
       }
@@ -569,7 +582,20 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
           <button style={{...S.cambioBtn, ...(modoCambio ? S.cambioBtnActivo : {})}} onClick={() => activarCambio(!modoCambio)} aria-pressed={modoCambio}>
             {modoCambio ? '✕ Salir de cambio' : '🔄 Cambio'}
           </button>
+          {esAdmin && (
+            <button style={{...S.cambioBtn, marginLeft: 0, ...(fechaOtra ? S.fechaBtnActivo : {})}} onClick={() => setFechaOtra(f => f ? null : { dia: hoyInput(), hora: horaAhora() })} aria-pressed={!!fechaOtra} title="Fecha de la venta (para cargar una venta de otro día)">
+              📅 {fechaOtra ? '✕ Volver a hoy' : 'Hoy'}
+            </button>
+          )}
         </div>
+        {esAdmin && fechaOtra && (
+          <div style={S.fechaRow} aria-label="Fecha de la venta">
+            <span style={S.destinoTxt}>📅 Fecha de la venta:</span>
+            <input type="date" style={S.fechaInput} value={fechaOtra.dia} max={hoyInput()} onChange={e => e.target.value && setFechaOtra(f => ({ ...f, dia: e.target.value }))} aria-label="Día de la venta" />
+            <input type="time" style={S.fechaInput} value={fechaOtra.hora} onChange={e => e.target.value && setFechaOtra(f => ({ ...f, hora: e.target.value }))} aria-label="Hora de la venta" />
+            <span style={{...S.destinoTxt, color:'var(--accent)'}}>Se guarda con esta fecha y queda anotado que la cargaste vos.</span>
+          </div>
+        )}
         {modoCambio && (
           <div style={S.destinoRow}>
             <span style={S.destinoTxt}>Lo que toques o escanees va a:</span>
@@ -906,6 +932,9 @@ const S = {
   metodoBtnIcon: { fontSize:20 },
   metodoBtnLabel: { fontFamily:'Barlow Condensed,sans-serif', fontWeight:700, fontSize:15, letterSpacing:0.5, textAlign:'center', lineHeight:1.2 },
   empleadoBtn: { padding:'8px 6px', background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, cursor:'pointer', color:'var(--muted)', fontFamily:'Barlow Condensed,sans-serif', fontWeight:700, fontSize:15, letterSpacing:0.5, textAlign:'center' },
+  fechaBtnActivo: { border:'1.5px solid var(--accent)', color:'var(--accent)', background:'rgba(245,200,0,0.12)' },
+  fechaRow: { display:'flex', flexWrap:'wrap', alignItems:'center', gap:8, padding:'8px 16px', background:'rgba(245,200,0,0.08)', borderBottom:'1.5px solid var(--accent)' },
+  fechaInput: { background:'var(--surface)', border:'1.5px solid var(--accent)', borderRadius:8, color:'var(--text)', fontFamily:'Barlow, sans-serif', fontSize:15, padding:'6px 8px', colorScheme:'dark' },
   cambioBtn: { marginLeft:'auto', padding:'4px 10px', background:'none', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--muted)', fontFamily:'Barlow Condensed,sans-serif', fontWeight:700, fontSize:14, cursor:'pointer', whiteSpace:'nowrap' },
   cambioBtnActivo: { borderColor:'#ef4444', color:'#ef4444' },
   destinoRow: { display:'flex', alignItems:'center', gap:6, padding:'8px 12px', borderBottom:'1px solid var(--border)', flexWrap:'wrap' },

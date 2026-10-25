@@ -349,10 +349,12 @@ export async function anularVenta(idVenta, empleado = '') {
   return requests.length
 }
 
-export async function generarIdVenta() {
+// fecha: 'd/m/aaaa' para una venta cargada con fecha de otro día (el código lleva ese día)
+export async function generarIdVenta(fecha = null) {
   const data = await sheetsGet('DETALLE DE VENTAS!A2:B')
   const rows = data.values || []
-  const { raw } = getArgentinaDate()
+  let { raw } = getArgentinaDate()
+  if (fecha) { const [d, m, a] = String(fecha).split('/').map(Number); raw = new Date(a, m - 1, d) }
   const prefix = `V${String(raw.getFullYear()).slice(2)}${String(raw.getMonth()+1).padStart(2,'0')}${String(raw.getDate()).padStart(2,'0')}`
   const idsHoy = new Set(rows.map(r => r[1]).filter(id => id?.startsWith(prefix)))
   let finalSeq = idsHoy.size + 1
@@ -551,7 +553,9 @@ export function calcularRedondeoSocio({ montoActual, metodoPago, socio }) {
   return { aplica: true, redondeo: montoActual - total, antesRedondeo: montoActual, total }
 }
 
-export async function registrarVenta({ items, devueltos = [], metodoPago, pagos = null, descCarrito = 0, empleado = '', notas = '', descuentoImanes = 0, descuentoPromo = 0, socio = false, descuentoXXXLEsperado = 0, totalEsperado = null, posnet = '' }) {
+// fechaVenta: { fecha: 'd/m/aaaa', hora: 'hh:mm' } para cargar una venta de otro día (solo Admin).
+// Queda la constancia en EDICIONES: quién la cargó y cuándo.
+export async function registrarVenta({ items, devueltos = [], metodoPago, pagos = null, descCarrito = 0, empleado = '', notas = '', descuentoImanes = 0, descuentoPromo = 0, socio = false, descuentoXXXLEsperado = 0, totalEsperado = null, posnet = '', fechaVenta = null, cargadaPor = '' }) {
   // Pago con 2 medios: [{ metodo, monto }, { metodo }]. El segundo se lleva el resto del total.
   const dividido = Array.isArray(pagos) && pagos.length === 2
   if (dividido) {
@@ -577,8 +581,19 @@ export async function registrarVenta({ items, devueltos = [], metodoPago, pagos 
   if (socio) await asegurarColumna(COL_DTO_SOCIO, 'DTO SOCIO')
   const posnetVenta = usaPosnet(metodoPago) && POSNETS.includes(posnet) ? posnet : ''
   if (posnetVenta) await asegurarColumna(COL_POSNET, 'POSNET')
-  const dt = getArgentinaDate()
-  const idVenta = await generarIdVenta()
+  const ahora = getArgentinaDate()
+  let dt = ahora, constancia = ''
+  if (fechaVenta?.fecha) {
+    const [d, m, a] = fechaVenta.fecha.split('/').map(Number)
+    const [hh, mm] = String(fechaVenta.hora || '12:00').split(':').map(Number)
+    const msVenta = Date.UTC(a, m - 1, d, (hh || 0) + 3, mm || 0)
+    if (!(a && m && d) || msVenta > Date.now() + 60000) throw new Error('FECHA_INVALIDA')
+    const meses = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre']
+    dt = { fecha: `${d}/${m}/${a}`, hora: `${String(hh || 0).padStart(2, '0')}:${String(mm || 0).padStart(2, '0')}:00`, mes: meses[m - 1], anio: a, raw: new Date(a, m - 1, d) }
+    constancia = `${ahora.fecha} ${ahora.hora} ${cargadaPor || empleado || 'Admin'}: cargada después, con fecha ${dt.fecha} ${dt.hora.slice(0, 5)}`
+    await asegurarColumna(COL_EDICIONES, 'EDICIONES')
+  }
+  const idVenta = await generarIdVenta(dt.fecha !== ahora.fecha ? dt.fecha : null)
   const dtosPorItem = calcularDescuentosImanesItems(items)
   const existentes = await sheetsGet('DETALLE DE VENTAS!A:A')
   const allRows = existentes.values || []
@@ -662,7 +677,7 @@ export async function registrarVenta({ items, devueltos = [], metodoPago, pagos 
   }
 
   // 3) Filas para la planilla. Columnas extra: AE socio · AF 2x1 XXXL · AG (vacía) · AH redondeo · AI posnet · AJ (corrección) · AK pagos
-  const ultimaExtra = dividido ? 6 : posnetVenta ? 4 : conRedondeo ? 3 : conXXXL ? 1 : socio ? 0 : -1
+  const ultimaExtra = constancia ? 7 : dividido ? 6 : posnetVenta ? 4 : conRedondeo ? 3 : conXXXL ? 1 : socio ? 0 : -1
   const rows = lineas.map(l => {
     const { item, idx, precioTotal, descuentoItem, dto } = l
     const idDetalle = `${idVenta}-${String(idx+1).padStart(2,'0')}`
@@ -676,6 +691,7 @@ export async function registrarVenta({ items, devueltos = [], metodoPago, pagos 
       posnetVenta,
       '',
       textoPagosVenta,
+      constancia,
     ]
     return [
       idDetalle, idVenta, `'${dt.fecha}`, `'${dt.hora}`, dt.mes, dt.anio,
@@ -695,7 +711,7 @@ export async function registrarVenta({ items, devueltos = [], metodoPago, pagos 
   devs.forEach((d, k) => {
     const cant = -Math.abs(d.cantidad)
     const total = Math.round(cant * d.precioUnitario), costo = Math.round(cant * (d.costoUnitario || 0))
-    const extras = ['', '', '', '', posnetVenta, '', textoPagosVenta]
+    const extras = ['', '', '', '', posnetVenta, '', textoPagosVenta, constancia]
     rows.push([
       `${idVenta}-${String(lineas.length + k + 1).padStart(2,'0')}`, idVenta, `'${dt.fecha}`, `'${dt.hora}`, dt.mes, dt.anio,
       d.articulo || d.id, d.nombre, d.foto || '',
@@ -710,7 +726,7 @@ export async function registrarVenta({ items, devueltos = [], metodoPago, pagos 
       ...extras.slice(0, ultimaExtra + 1),
     ])
   })
-  const ultimaCol = ['AD', COL_DTO_SOCIO, COL_DTO_XXXL, COL_DTO_EFECTIVO, COL_REDONDEO, COL_POSNET, COL_CORRECCION_POSNET, COL_PAGOS][ultimaExtra + 1]
+  const ultimaCol = ['AD', COL_DTO_SOCIO, COL_DTO_XXXL, COL_DTO_EFECTIVO, COL_REDONDEO, COL_POSNET, COL_CORRECCION_POSNET, COL_PAGOS, COL_EDICIONES][ultimaExtra + 1]
 
   await Promise.all(rows.map((row, idx) =>
     sheetsUpdate(`DETALLE DE VENTAS!A${nextRow+idx}:${ultimaCol}${nextRow+idx}`, [row])
@@ -721,7 +737,7 @@ export async function registrarVenta({ items, devueltos = [], metodoPago, pagos 
   const totalDtoAlfajores = items.reduce((s, item) => s + calcularDescuentoAlfajorItem(item, items), 0)
   await registrarLog({
     accion:'VENTA_REGISTRADA',
-    detalle:`${devs.length ? `CAMBIO · devuelve ${devs.map(d => `${d.cantidad}× ${d.id}`).join(', ')} · ` : ''}${items.length} producto(s) · ${textoPagosVenta || metodoPago}${posnetVenta?` · POSNET ${posnetVenta}`:''}${socio?' · SOCIO':''}${conRedondeo?` · REDONDEO $${Math.round(redondeoCalc.redondeo)}`:''}${conXXXL?` · 2x1 XXXL $${Math.round(promoXXXL.descuento)} (${promoXXXL.unidadesEnPromo}u)`:''}${descCarrito>0?` · DTO ${descCarrito}%`:''}${totalDtoImanes>0?` · DTO imanes $${totalDtoImanes}`:''}${descuentoPromo>0?` · DTO promos $${Math.round(descuentoPromo)}`:''}${totalDtoAlfajores>0?` · DTO alfajores $${Math.round(totalDtoAlfajores)}`:''} · Total $${Math.round(totalVenta).toLocaleString('es-AR')}`,
+    detalle:`${constancia ? `CON FECHA ${dt.fecha} ${dt.hora.slice(0, 5)} (cargada por ${cargadaPor || empleado}) · ` : ''}${devs.length ? `CAMBIO · devuelve ${devs.map(d => `${d.cantidad}× ${d.id}`).join(', ')} · ` : ''}${items.length} producto(s) · ${textoPagosVenta || metodoPago}${posnetVenta?` · POSNET ${posnetVenta}`:''}${socio?' · SOCIO':''}${conRedondeo?` · REDONDEO $${Math.round(redondeoCalc.redondeo)}`:''}${conXXXL?` · 2x1 XXXL $${Math.round(promoXXXL.descuento)} (${promoXXXL.unidadesEnPromo}u)`:''}${descCarrito>0?` · DTO ${descCarrito}%`:''}${totalDtoImanes>0?` · DTO imanes $${totalDtoImanes}`:''}${descuentoPromo>0?` · DTO promos $${Math.round(descuentoPromo)}`:''}${totalDtoAlfajores>0?` · DTO alfajores $${Math.round(totalDtoAlfajores)}`:''} · Total $${Math.round(totalVenta).toLocaleString('es-AR')}`,
     idReferencia:idVenta, empleado, resultado:'OK',
   })
   return idVenta

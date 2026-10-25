@@ -407,7 +407,7 @@ export default function App() {
 
         <div style={S.content}>
           <div style={tabStyle('venta')}>
-            <NuevaVenta articulos={articulos} loadingArticulos={loadingArticulos} usuarios={usuarios} stockMap={stockMap} empleadoFijo={esAdmin ? empleadoActual : null} onVentaRegistrada={() => setRefreshKey(k => k + 1)} />
+            <NuevaVenta articulos={articulos} loadingArticulos={loadingArticulos} usuarios={usuarios} stockMap={stockMap} empleadoFijo={esAdmin ? empleadoActual : null} esAdmin={esAdmin} cargadoPor={empleadoActual} onVentaRegistrada={() => setRefreshKey(k => k + 1)} />
           </div>
           {tabsVisitadas.has('hoy') && (
             <div style={tabStyle('hoy')}><VentasDelDia refreshKey={refreshKey} puedeAnular={true} usuarios={usuarios} perfilNombre={empleadoActual} esAdmin={esAdmin} articulos={articulos} /></div>

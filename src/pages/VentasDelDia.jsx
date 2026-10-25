@@ -22,7 +22,7 @@ const iconos = m => metodosDe(m).map(x => METODO_ICONS[x] || '💰').join('') ||
 // "Efectivo Pesos $20.000 + Tarjeta de Débito $15.000" (montos de toda la venta)
 const textoPagos = pagos => pagos.map(p => `${p.metodo} $${Math.round(p.monto).toLocaleString('es-AR')}`).join(' + ')
 
-export default function VentasDelDia({ refreshKey, usuarios = [], perfilNombre = '', esAdmin = false }) {
+export default function VentasDelDia({ refreshKey, usuarios = [], perfilNombre = '', esAdmin = false, articulos = [] }) {
   const [ventas, setVentas] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -266,7 +266,7 @@ export default function VentasDelDia({ refreshKey, usuarios = [], perfilNombre =
                       <td colSpan={5} style={S.ventaHeaderId}>
                         {v.anulado && <span style={S.badge_anulada}>ANULADA</span>}
                         {tieneParcial && <span style={S.badge_parcial}>PARCIAL</span>}
-                        <span>{v.idVenta}</span>{v.items.some(i => i.cantidad < 0) && <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 800, color: '#f59e0b', border: '1px solid #f59e0b', borderRadius: 4, padding: '0 5px' }}>🔄 CAMBIO</span>}
+                        <span>{v.idVenta}</span>{v.items.some(i => i.ediciones) && <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 800, color: '#60a5fa', border: '1px solid #60a5fa', borderRadius: 4, padding: '0 5px' }} title="Editada después de cerrar">✎ EDITADA</span>}{v.items.some(i => i.cantidad < 0) && <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 800, color: '#f59e0b', border: '1px solid #f59e0b', borderRadius: 4, padding: '0 5px' }}>🔄 CAMBIO</span>}
                       </td>
                       <td colSpan={2} style={S.ventaHeaderTotal}>
                         {v.anulado ? (
@@ -374,10 +374,12 @@ export default function VentasDelDia({ refreshKey, usuarios = [], perfilNombre =
       {ventaSeleccionada && (
         <DetalleVentaModal
           venta={ventaSeleccionada}
+          esAdmin={esAdmin} articulos={articulos} usuarios={usuarios} editor={perfilNombre}
           onClose={() => setVentaSeleccionada(null)}
-          onActualizar={async () => {
+          onActualizar={async msg => {
             await cargar()
             setVentaSeleccionada(null)
+            if (msg) showToast(msg, 'success')
           }}
         />
       )}

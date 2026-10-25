@@ -410,13 +410,13 @@ export default function App() {
             <NuevaVenta articulos={articulos} loadingArticulos={loadingArticulos} usuarios={usuarios} stockMap={stockMap} empleadoFijo={esAdmin ? empleadoActual : null} onVentaRegistrada={() => setRefreshKey(k => k + 1)} />
           </div>
           {tabsVisitadas.has('hoy') && (
-            <div style={tabStyle('hoy')}><VentasDelDia refreshKey={refreshKey} puedeAnular={true} usuarios={usuarios} perfilNombre={empleadoActual} esAdmin={esAdmin} /></div>
+            <div style={tabStyle('hoy')}><VentasDelDia refreshKey={refreshKey} puedeAnular={true} usuarios={usuarios} perfilNombre={empleadoActual} esAdmin={esAdmin} articulos={articulos} /></div>
           )}
           {tabsVisitadas.has('caja') && (
             <div style={tabStyle('caja')}><GastosCaja usuarios={usuarios} perfilNombre={empleadoActual} onRegistrado={() => setRefreshKey(k => k + 1)} /></div>
           )}
           {esAdmin && tabsVisitadas.has('log') && (
-            <div style={tabStyle('log')}><LogVentas /></div>
+            <div style={tabStyle('log')}><LogVentas esAdmin={esAdmin} articulos={articulos} usuarios={usuarios} perfilNombre={empleadoActual} /></div>
           )}
           {esAdmin && tabsVisitadas.has('stats') && (
             <div style={tabStyle('stats')}><Estadisticas esAdmin={esAdmin} usuarios={usuarios} perfilNombre={empleadoActual} /></div>

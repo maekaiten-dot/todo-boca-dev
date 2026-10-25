@@ -1,11 +1,15 @@
 // src/components/DetalleVentaModal.jsx
 import { useState } from 'react'
 import { anularItemVenta, registrarLog, metodosDe, repartoPago } from '../api/sheets.js'
+import EditarVentaModal from './EditarVentaModal.jsx'
 
 const m$ = n => (n < 0 ? '−$' : '$') + Math.abs(Math.round(n || 0)).toLocaleString('es-AR')  // monto con signo (los cambios tienen renglones en negativo)
 
-export default function DetalleVentaModal({ venta, onClose, onActualizar }) {
+export default function DetalleVentaModal({ venta, onClose, onActualizar, esAdmin = false, articulos = [], usuarios = [], editor = '' }) {
   const [confirmItem, setConfirmItem] = useState(null)
+  const [editando, setEditando] = useState(false)
+  // Historial de ediciones (columna EDICIONES): "fecha hora Quién: qué cambió | …"
+  const ediciones = String(venta.items.find(i => i.ediciones)?.ediciones || '').split(' | ').filter(Boolean)
   const [anulando, setAnulando] = useState(false)
   const [toast, setToast] = useState(null)
 
@@ -76,6 +80,15 @@ export default function DetalleVentaModal({ venta, onClose, onActualizar }) {
           <button style={S.closeBtn} onClick={onClose}>✕</button>
         </div>
 
+        {esAdmin && !venta.anulado && (
+          <button style={S.editarBtn} onClick={() => setEditando(true)}>✏️ Editar venta</button>
+        )}
+        {ediciones.length > 0 && (
+          <div style={S.edicionesBox} aria-label="Ediciones de la venta">
+            <div style={S.edicionesTitulo}>✎ EDITADA {ediciones.length === 1 ? 'UNA VEZ' : `${ediciones.length} VECES`}</div>
+            {ediciones.map((e, k) => <div key={k} style={S.edicionLinea}>{e}</div>)}
+          </div>
+        )}
         {venta.anulado && <div style={S.anuladoBanner}>⚠ VENTA COMPLETAMENTE ANULADA</div>}
         {tieneParcial && <div style={S.parcialBanner}>⚠ Venta con productos anulados</div>}
 
@@ -137,6 +150,12 @@ export default function DetalleVentaModal({ venta, onClose, onActualizar }) {
         </div>
       </div>
 
+      {editando && (<div onClick={e => e.stopPropagation()}>
+        <EditarVentaModal venta={venta} articulos={articulos} usuarios={usuarios} editor={editor}
+          onCerrar={() => setEditando(false)}
+          onGuardado={async msg => { setEditando(false); showToast(msg, 'success'); await onActualizar(msg) }} />
+      </div>)}
+
       {/* Confirm anular item */}
       {confirmItem && (
         <div style={S.confirmOverlay} onClick={() => !anulando && setConfirmItem(null)}>
@@ -160,6 +179,10 @@ export default function DetalleVentaModal({ venta, onClose, onActualizar }) {
 }
 
 const S = {
+  editarBtn: { margin:'0 20px 10px', padding:'10px', background:'rgba(245,200,0,0.1)', border:'1.5px solid var(--accent)', borderRadius:10, color:'var(--accent)', fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:16, letterSpacing:1, cursor:'pointer' },
+  edicionesBox: { margin:'0 20px 10px', padding:'8px 12px', border:'1.5px dashed #60a5fa', borderRadius:10, display:'flex', flexDirection:'column', gap:4 },
+  edicionesTitulo: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:13, color:'#60a5fa', letterSpacing:1 },
+  edicionLinea: { fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--text)', lineHeight:1.4 },
   overlay: { position:'fixed', inset:0, background:'rgba(0,0,10,0.85)', display:'flex', alignItems:'flex-end', justifyContent:'center', zIndex:300, backdropFilter:'blur(6px)' },
   modal: { background:'var(--surface)', borderRadius:'20px 20px 0 0', width:'100%', maxWidth:700, maxHeight:'85vh', display:'flex', flexDirection:'column', overflow:'hidden', position:'relative', animation:'slideUp 0.25s ease' },
   toast: { position:'absolute', top:12, left:'50%', transform:'translateX(-50%)', zIndex:10, padding:'8px 20px', borderRadius:8, fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:15, whiteSpace:'nowrap' },

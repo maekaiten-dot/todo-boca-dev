@@ -20,7 +20,7 @@ function hace12Meses() {
   return `${h.getUTCFullYear() - 1}-${String(h.getUTCMonth() + 1).padStart(2, '0')}-${String(h.getUTCDate()).padStart(2, '0')}`
 }
 
-export default function LogVentas() {
+export default function LogVentas({ esAdmin = false, articulos = [], usuarios = [], perfilNombre = '' }) {
   const [ventas, setVentas] = useState([])
   const [rango, setRango] = useState('12m') // '12m' | 'todo'
   const [diasVisibles, setDiasVisibles] = useState(DIAS_POR_TANDA)
@@ -249,6 +249,7 @@ export default function LogVentas() {
       {ventaSeleccionada && (
         <DetalleVentaModal
           venta={ventaSeleccionada}
+          esAdmin={esAdmin} articulos={articulos} usuarios={usuarios} editor={perfilNombre}
           onClose={() => setVentaSeleccionada(null)}
           onActualizar={async () => {
             await cargar()

@@ -303,11 +303,12 @@ function mapRow(r) {
     posnet: r[34] || '',
     correccionPosnet: r[35] || '',
     pagos: parsePagos(r[36]),
+    ediciones: r[37] || '',
   }
 }
 
 export async function getVentasHoy() {
-  const data = await sheetsGet('DETALLE DE VENTAS!A2:AK')
+  const data = await sheetsGet('DETALLE DE VENTAS!A2:AL')
   const rows = data.values || []
   const { fecha } = getArgentinaDate()
   return rows.filter(r => r[2]===fecha).map(mapRow)
@@ -317,7 +318,7 @@ export async function getVentasHoy() {
 // (para estadísticas y rotación). El listado de ventas usa el código original.
 export async function getHistoricoVentas({ unificar = false } = {}) {
   // Hasta AK para incluir el POSNET (amarillo/blanco) y su corrección manual
-  const [data] = await Promise.all([sheetsGet('DETALLE DE VENTAS!A2:AK'), unificar ? asegurarAlias() : null])
+  const [data] = await Promise.all([sheetsGet('DETALLE DE VENTAS!A2:AL'), unificar ? asegurarAlias() : null])
   const rows = data.values || []
   const ventas = rows.filter(r => r[0]).map(mapRow)
   if (unificar) ventas.forEach(v => { const c = idCanonico(v.articulo); if (c !== v.articulo) { v.articuloOriginal = v.articulo; v.articulo = c } })
@@ -333,7 +334,7 @@ export async function getVentasDesde(desde) {
   // la primera fila con fecha dentro del período (aunque haya alguna fila fuera de orden)
   const idx = fechas.findIndex(r => clave(r[0]) >= desde)
   if (idx < 0) return []
-  const data = await sheetsGet(`DETALLE DE VENTAS!A${idx + 2}:AK`)
+  const data = await sheetsGet(`DETALLE DE VENTAS!A${idx + 2}:AL`)
   return (data.values || []).filter(r => r[0] && clave(r[2]) >= desde).map(mapRow)
 }
 
@@ -401,7 +402,7 @@ export const MOTIVOS_CORRECCION_POSNET = ['Se cobró con el otro posnet', 'El po
 export async function corregirPosnetVenta({ idVenta, posnetNuevo, motivo, detalle = '', quien = '' }) {
   if (!POSNETS.includes(posnetNuevo)) throw new Error('POSNET_INVALIDO')
   if (!motivo || (motivo === 'Otro' && !detalle.trim())) throw new Error('FALTA_MOTIVO')
-  const data = await sheetsGet('DETALLE DE VENTAS!A2:AK')
+  const data = await sheetsGet('DETALLE DE VENTAS!A2:AL')
   const rows = data.values || []
   const filas = []
   rows.forEach((r, i) => { if (r[1] === idVenta) filas.push({ fila: i + 2, metodo: r[15] || '', posnet: r[34] || '', nota: r[35] || '' }) })
@@ -724,6 +725,110 @@ export async function registrarVenta({ items, devueltos = [], metodoPago, pagos 
     idReferencia:idVenta, empleado, resultado:'OK',
   })
   return idVenta
+}
+
+// ── Editar una venta ya cerrada (solo Admin) ─────────────────────────────────────
+// DETALLE DE VENTAS · AL: EDICIONES — quién editó, cuándo y qué cambió, en todas las filas de la venta
+// ("25/10/2026 11:30 Adrián: agregó 1× TB01150 $8.000; método Efectivo Pesos → QR"). Las ediciones
+// se suman separadas por " | ". Lo quitado se marca ANULADO (no se borra). El stock lo toma solo.
+const COL_EDICIONES = 'AL'
+const fmtPesos = n => '$' + Math.round(n || 0).toLocaleString('es-AR')
+// lineas: [{ idDetalle (si ya existía), articulo, nombre, foto, cantidad, precioUnitario, precioTotalFinal, costoUnitario, quitar }]
+// pagos: null (un medio) o [{ metodo, monto }, { metodo, monto }]
+export async function editarVenta({ venta, lineas, metodoPago, pagos = null, posnet = '', notas = '', vendedor = '', editor = '' }) {
+  const items = venta.items || []
+  const activos = items.filter(i => !i.anulado)
+  const dividido = Array.isArray(pagos) && pagos.length === 2
+  if (dividido) {
+    if (!pagos[0].metodo || !pagos[1].metodo || pagos[0].metodo === pagos[1].metodo) throw new Error('PAGOS_INVALIDOS')
+    metodoPago = pagos.map(p => p.metodo).join(SEP_METODOS)
+  }
+  const quedan = lineas.filter(l => !l.quitar)
+  if (!quedan.length) throw new Error('VENTA_VACIA')
+  const total = quedan.reduce((sum, l) => sum + Math.round(Number(l.precioTotalFinal) || 0), 0)
+  let textoPagosVenta = ''
+  if (dividido) {
+    const m1 = Math.round(Number(pagos[0].monto) || 0)
+    if (!(m1 > 0 && m1 < total)) throw new Error('PAGOS_MONTO')
+    textoPagosVenta = textoPagos([{ metodo: pagos[0].metodo, monto: m1 }, { metodo: pagos[1].metodo, monto: total - m1 }])
+  }
+  const posnetVenta = usaPosnet(metodoPago) && POSNETS.includes(posnet) ? posnet : ''
+
+  // Qué cambió (para dejar constancia)
+  const cambios = []
+  const porId = Object.fromEntries(items.map(i => [i.idDetalle, i]))
+  for (const l of lineas) {
+    const a = l.idDetalle ? porId[l.idDetalle] : null
+    if (!a) { if (!l.quitar) cambios.push(`agregó ${l.cantidad}× ${l.articulo} ${l.nombre} ${fmtPesos(l.precioTotalFinal)}`); continue }
+    if (l.quitar) { cambios.push(`quitó ${a.cantidad}× ${a.articulo} ${fmtPesos(a.precioTotalFinal || a.precioTotal)}`); continue }
+    const d = []
+    if (a.articulo !== l.articulo) d.push(`artículo ${a.articulo} → ${l.articulo}`)
+    if (Number(a.cantidad) !== Number(l.cantidad)) d.push(`cantidad ${a.cantidad} → ${l.cantidad}`)
+    if (Math.round(a.precioUnitario) !== Math.round(l.precioUnitario)) d.push(`precio ${fmtPesos(a.precioUnitario)} → ${fmtPesos(l.precioUnitario)}`)
+    if (Math.round(a.precioTotalFinal || a.precioTotal) !== Math.round(l.precioTotalFinal)) d.push(`total ${fmtPesos(a.precioTotalFinal || a.precioTotal)} → ${fmtPesos(l.precioTotalFinal)}`)
+    if (d.length) cambios.push(`${l.articulo}: ${d.join(', ')}`)
+  }
+  const ref = activos[0] || items[0] || {}
+  if ((ref.metodoPago || '') !== metodoPago) cambios.push(`método ${ref.metodoPago || '—'} → ${metodoPago}`)
+  else if (dividido && textoPagos(ref.pagos || []) !== textoPagosVenta) cambios.push(`reparto ${textoPagos(ref.pagos || [])} → ${textoPagosVenta}`)
+  if ((ref.posnet || '') !== posnetVenta) cambios.push(`posnet ${ref.posnet || '—'} → ${posnetVenta || '—'}`)
+  if ((ref.notas || '') !== notas) cambios.push(`notas "${ref.notas || ''}" → "${notas}"`)
+  if ((ref.empleado || '') !== vendedor) cambios.push(`vendedor ${ref.empleado || '—'} → ${vendedor || '—'}`)
+  if (!cambios.length) return ''
+
+  const dt = getArgentinaDate()
+  const registro = `${dt.fecha} ${dt.hora} ${editor || 'Admin'}: ${cambios.join('; ')}`
+  const ediciones = [items.find(i => i.ediciones)?.ediciones, registro].filter(Boolean).join(' | ')
+
+  await asegurarColumna(COL_POSNET, 'POSNET')
+  await asegurarColumna(COL_PAGOS, 'PAGOS')
+  await asegurarColumna(COL_EDICIONES, 'EDICIONES')
+  const colA = (await sheetsGet('DETALLE DE VENTAS!A:A')).values || []
+  const filaDe = {}
+  let lastDataRow = 1
+  colA.forEach((r, i) => { const v = String(r[0] || '').trim(); if (v) { lastDataRow = i + 1; filaDe[v] = i + 1 } })
+  const data = []
+  // Filas existentes de la venta
+  for (const it of items) {
+    const fila = filaDe[it.idDetalle]
+    if (!fila) throw new Error('La planilla cambió: recargá y probá de nuevo')
+    const l = lineas.find(x => x.idDetalle === it.idDetalle)
+    // Las filas anuladas o quitadas también llevan el medio de pago, posnet y vendedor nuevos (así la
+    // venta se muestra igual en todos lados), pero siguen anuladas
+    if (it.anulado || !l || l.quitar) {
+      if (l?.quitar) data.push({ range: `DETALLE DE VENTAS!U${fila}`, values: [['TRUE']] })
+      data.push({ range: `DETALLE DE VENTAS!O${fila}:P${fila}`, values: [[vendedor, metodoPago]] })
+      data.push({ range: `DETALLE DE VENTAS!${COL_POSNET}${fila}`, values: [[posnetVenta]] })
+      data.push({ range: `DETALLE DE VENTAS!${COL_PAGOS}${fila}:${COL_EDICIONES}${fila}`, values: [[textoPagosVenta, ediciones]] })
+      continue
+    }
+    const cant = Number(l.cantidad) || 0, pu = Math.round(Number(l.precioUnitario) || 0), fin = Math.round(Number(l.precioTotalFinal) || 0)
+    const cu = Number(l.costoUnitario) || 0, costo = Math.round(cant * cu)
+    data.push({ range: `DETALLE DE VENTAS!G${fila}:P${fila}`, values: [[l.articulo, l.nombre, l.foto || '', cant, pu, cant * pu, cu, costo, vendedor, metodoPago]] })
+    data.push({ range: `DETALLE DE VENTAS!S${fila}:T${fila}`, values: [[fin, notas]] })
+    data.push({ range: `DETALLE DE VENTAS!V${fila}`, values: [[fin - costo]] })
+    data.push({ range: `DETALLE DE VENTAS!${COL_POSNET}${fila}`, values: [[posnetVenta]] })
+    data.push({ range: `DETALLE DE VENTAS!${COL_PAGOS}${fila}:${COL_EDICIONES}${fila}`, values: [[textoPagosVenta, ediciones]] })
+  }
+  // Renglones nuevos: misma fecha y hora que la venta, con el número de renglón siguiente
+  let n = Math.max(0, ...items.map(i => Number(String(i.idDetalle || '').split('-').pop()) || 0))
+  let fila = lastDataRow
+  const fecha = String(ref.fecha || items[0]?.fecha || '').replace(/^'/, ''), hora = String(ref.hora || items[0]?.hora || '').replace(/^'/, '')
+  for (const l of lineas.filter(x => !x.idDetalle && !x.quitar)) {
+    n++; fila++
+    const cant = Number(l.cantidad) || 0, pu = Math.round(Number(l.precioUnitario) || 0), fin = Math.round(Number(l.precioTotalFinal) || 0)
+    const cu = Number(l.costoUnitario) || 0, costo = Math.round(cant * cu)
+    data.push({ range: `DETALLE DE VENTAS!A${fila}:${COL_EDICIONES}${fila}`, values: [[
+      `${venta.idVenta}-${String(n).padStart(2, '0')}`, venta.idVenta, `'${fecha}`, `'${hora}`, ref.mes || items[0]?.mes || '', ref.anio || items[0]?.anio || '',
+      l.articulo, l.nombre, l.foto || '', cant, pu, cant * pu, cu, costo, vendedor, metodoPago,
+      '', '', fin, notas, false, fin - costo,
+      0, 0, 0, 0, 0, '', '', '',
+      '', '', '', '', posnetVenta, '', textoPagosVenta, ediciones,
+    ]] })
+  }
+  await sheetsBatchUpdate(data)
+  await registrarLog({ accion: 'VENTA_EDITADA', detalle: `${venta.idVenta} · ${registro} · Total ${fmtPesos(total)}`, idReferencia: venta.idVenta, empleado: editor, resultado: 'OK' })
+  return registro
 }
 
 export async function anularItemVenta(idDetalle, todosLosItems, empleado = '') {

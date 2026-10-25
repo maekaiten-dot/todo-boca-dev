@@ -130,22 +130,29 @@ function calcularRecupero(ventas, ingresos, articulos, hoy, agr = null) {
     d.r += v.precioTotalFinal || v.precioTotal || 0
     d.u += v.cantidad || 0
   }
+  // El recupero se mide solo con las unidades de esa compra: si entraron 10, cuentan las primeras 10
+  // vendidas desde ese día (lo que se venda de más viene de stock anterior o de compras sin cargar).
   return Object.entries(compras).filter(([, c]) => c.costo > 0).map(([id, c]) => {
-    let facturado = 0, unidades = 0, diaRecupero = null
+    let facturado = 0, unidades = 0, factCompra = 0, uCompra = 0, diaRecupero = null, diaAgotada = null
     for (const [dia, d] of Object.entries(porDia[id] || {}).sort((a, b) => a[0] - b[0])) {
       facturado += d.r; unidades += d.u
-      if (diaRecupero == null && facturado >= c.costo) diaRecupero = Number(dia)
+      const toma = Math.max(0, Math.min(d.u, c.cantidad - uCompra))
+      if (toma > 0 && d.u > 0) { factCompra += d.r * toma / d.u; uCompra += toma }
+      if (diaRecupero == null && factCompra >= c.costo - 0.5) diaRecupero = Number(dia)
+      if (diaAgotada == null && uCompra >= c.cantidad) diaAgotada = Number(dia)
     }
     const transcurridos = hoy - c.dia
     const recuperado = diaRecupero != null
-    const ritmo = facturado / Math.max(1, transcurridos + 1) // $ por día desde la compra
-    const faltan = recuperado ? 0 : (ritmo > 0 ? Math.ceil((c.costo - facturado) / ritmo) : null)
+    const agotadaSinCubrir = !recuperado && diaAgotada != null // vendió todas las unidades y no llegó al costo
+    const ritmo = factCompra / Math.max(1, transcurridos + 1) // $ por día desde la compra
+    const faltan = recuperado || agotadaSinCubrir ? (recuperado ? 0 : null) : (ritmo > 0 ? Math.ceil((c.costo - factCompra) / ritmo) : null)
     return {
       id, compra: c.compra, nombre: agr?.grupos[id]?.nombre || arts[id]?.nombre || id, esGrupo: !!agr?.grupos[id], nModelos: agr?.grupos[id]?.modelos.length || 1, compraDia: c.dia, compraCant: c.cantidad, compraCosto: c.costo, proveedor: c.proveedor,
-      facturado, unidades, pct: facturado / c.costo, recuperado,
-      dias: recuperado ? diaRecupero - c.dia : transcurridos, faltan,
+      facturado, unidades, factCompra, uCompra, pct: Math.min(1, factCompra / c.costo), veces: facturado / c.costo, recuperado, agotadaSinCubrir,
+      excedente: unidades > c.cantidad ? unidades - c.cantidad : 0,
+      dias: recuperado ? diaRecupero - c.dia : agotadaSinCubrir ? diaAgotada - c.dia : transcurridos, faltan,
       diasTotal: recuperado ? diaRecupero - c.dia : (faltan != null ? transcurridos + faltan : null),
-      porRecuperar: recuperado ? 0 : c.costo - facturado,
+      porRecuperar: recuperado || agotadaSinCubrir ? 0 : c.costo - factCompra,
     }
   })
 }
@@ -305,11 +312,12 @@ export default function Rotacion({ articulos = [], stockMap = {} }) {
   const recResumen = useMemo(() => {
     const rec = recupero.filter(r => r.recuperado).map(r => r.dias).sort((a, b) => a - b)
     const curso = recupero.filter(r => !r.recuperado)
-    return { nRec: rec.length, mediana: rec.length ? rec[Math.floor((rec.length - 1) / 2)] : null, nCurso: curso.length, porRecuperar: curso.reduce((s, r) => s + r.porRecuperar, 0), sinVentas: curso.filter(r => r.facturado <= 0).length }
+    return { nRec: rec.length, mediana: rec.length ? rec[Math.floor((rec.length - 1) / 2)] : null, nCurso: curso.length, porRecuperar: curso.reduce((s, r) => s + r.porRecuperar, 0), sinVentas: curso.filter(r => r.facturado <= 0).length, nRevisar: recupero.filter(r => r.excedente > 0 || r.agotadaSinCubrir).length }
   }, [recupero])
   const recVisibles = useMemo(() => {
     const q = normalizar(recBusqueda.trim())
-    const f = recupero.filter(r => (recFiltro === 'todos' || (recFiltro === 'rec' ? r.recuperado : !r.recuperado)) && (!q || normalizar(textoBusqueda(r)).includes(q)))
+    const pasa = r => recFiltro === 'todos' || (recFiltro === 'revisar' ? r.excedente > 0 || r.agotadaSinCubrir : recFiltro === 'rec' ? r.recuperado : !r.recuperado)
+    const f = recupero.filter(r => pasa(r) && (!q || normalizar(textoBusqueda(r)).includes(q)))
     const val = r => { const v = r[recOrden.k]; return v == null ? Infinity : v } // sin ventas = lo peor
     return f.sort((a, b) => { const A = val(a), B = val(b); return (typeof A === 'string' ? A.localeCompare(B) : (A - B || 0)) * recOrden.dir })
   }, [recupero, recFiltro, recOrden, recBusqueda, agr, nombresArt])
@@ -445,15 +453,17 @@ export default function Rotacion({ articulos = [], stockMap = {} }) {
         <div style={S.statCard}><div style={S.statValue}>{recResumen.mediana == null ? '–' : `${fmtN(recResumen.mediana)} días`}</div><div style={S.statLabel}>Tarda en recuperarse una compra (mediana de {fmtN(recResumen.nRec)} ya recuperadas)</div></div>
         <div style={S.statCard}><div style={S.statValue}>{fmtM(recResumen.porRecuperar)}</div><div style={S.statLabel}>Falta recuperar de {fmtN(recResumen.nCurso)} compras en curso</div></div>
         <div style={S.statCard}><div style={{ ...S.statValue, color: recResumen.sinVentas ? '#ef4444' : 'var(--accent)' }}>{fmtN(recResumen.sinVentas)}</div><div style={S.statLabel}>Compras sin ninguna venta desde que entraron</div></div>
+        <div style={S.statCard}><div style={{ ...S.statValue, color: recResumen.nRevisar ? '#f59e0b' : 'var(--accent)' }}>{fmtN(recResumen.nRevisar)}</div><div style={S.statLabel}>Para revisar: vendieron más de lo que entró (falta cargar compras o había stock) o no cubrieron el costo</div></div>
       </div>
       <div style={S.chartCard}>
         <div style={S.nota}>
-          Para cada artículo se toma su última compra (lo que entró por Ingresos ese día) y se suma lo que se vendió de ese artículo desde ese día.
-          "Recuperado en" son los días que tardaron las ventas en llegar al costo total de la compra. Si todavía no llegó, se estima cuánto falta al ritmo que viene vendiendo desde la compra.
+          Para cada artículo se toma su última compra (lo que entró por Ingresos) y se suman las ventas de esas unidades: si entraron 10, cuentan las primeras 10 vendidas desde ese día.
+          "Recuperado en" son los días que tardaron esas ventas en llegar al costo total de la compra; el % llega como máximo a 100. Si todavía no llegó, se estima cuánto falta al ritmo que viene vendiendo.
+          En naranja, los que vendieron más unidades de las que entraron: había stock de antes o falta cargar compras más nuevas.
           {porGrupo && ' En un grupo, la última compra es el último día que entró cualquiera de sus modelos (se suman todos los que entraron ese día) y se cuentan las ventas de todos los modelos. Abriendo el grupo se ve cada modelo con su propia última compra.'}
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginBottom: 8 }}>
-          <Segmento opciones={[{ v: 'curso', label: `En curso (${recResumen.nCurso})` }, { v: 'rec', label: `Recuperadas (${recResumen.nRec})` }, { v: 'todos', label: 'Todas' }]} valor={recFiltro} onChange={v => { setRecFiltro(v); setRecMostrar(30) }} />
+          <Segmento opciones={[{ v: 'curso', label: `En curso (${recResumen.nCurso})` }, { v: 'rec', label: `Recuperadas (${recResumen.nRec})` }, { v: 'revisar', label: `Para revisar (${recResumen.nRevisar})` }, { v: 'todos', label: 'Todas' }]} valor={recFiltro} onChange={v => { setRecFiltro(v); setRecMostrar(30) }} />
           <input style={{ ...S.search, marginBottom: 0 }} type="search" placeholder="Buscar artículo o código…" value={recBusqueda} onChange={e => { setRecBusqueda(e.target.value); setRecMostrar(30) }} />
         </div>
         <div style={S.tableWrap}>
@@ -562,16 +572,20 @@ function FilaRecupero({ r, abierto, modelo, onClick }) {
       <NombreFila r={r} abierto={abierto} modelo={modelo} extra={r.proveedor ? ` · ${r.proveedor}` : ''} />
       <td style={S.td}>{fechaDeDia(r.compraDia)}<div style={S.codigo}>{fmtN(r.compraCant)} u.{r.compra ? ` · ${r.compra}` : ""}</div></td>
       <td style={S.td}>${fmtN(r.compraCosto)}</td>
-      <td style={S.td}>${fmtN(r.facturado)}<div style={S.codigo}>{fmtN(r.unidades)} u. vendidas</div></td>
+      <td style={S.td}>${fmtN(r.facturado)}
+        <div style={S.codigo}>{fmtN(r.unidades)} u. vendidas</div>
+        {r.excedente > 0 && <div style={S.revisar} title="Las ventas de más vienen de stock anterior o de compras que no están cargadas en Pagos/Ingresos">⚠ {fmtN(r.unidades)} u. de una compra de {fmtN(r.compraCant)}</div>}
+      </td>
       <td style={S.td}>
-        <div style={S.recBarra}><div style={{ ...S.recBarraFill, width: `${Math.min(100, r.pct * 100)}%`, background: r.recuperado ? '#22c55e' : r.pct > 0 ? 'var(--accent)' : '#ef4444' }} /></div>
-        <div style={S.codigo}>{Math.round(r.pct * 100)}%</div>
+        <div style={S.recBarra}><div style={{ ...S.recBarraFill, width: `${Math.min(100, r.pct * 100)}%`, background: r.recuperado ? '#22c55e' : r.agotadaSinCubrir ? '#ef4444' : r.pct > 0 ? 'var(--accent)' : '#ef4444' }} /></div>
+        <div style={S.codigo}>{Math.round(r.pct * 100)}%{r.veces >= 1.05 ? ` · vendido ${r.veces.toLocaleString('es-AR', { maximumFractionDigits: 1 })}× el costo` : ''}</div>
       </td>
       <td style={{ ...S.td, ...(r.recuperado ? { color: '#22c55e', fontWeight: 700 } : {}) }}>
         {r.recuperado ? (r.dias === 0 ? 'el mismo día' : `en ${fmtN(r.dias)} ${r.dias === 1 ? 'día' : 'días'}`)
+          : r.agotadaSinCubrir ? <span style={{ color: '#ef4444' }}>no cubrió el costo</span>
           : r.faltan == null ? <span style={{ color: '#ef4444' }}>sin ventas</span>
           : r.diasTotal > 365 ? 'más de 1 año' : `≈ ${fmtN(r.diasTotal)} días`}
-        <div style={S.codigo}>{r.recuperado ? 'recuperado' : `lleva ${fmtN(r.dias)} ${r.dias === 1 ? 'día' : 'días'}${r.faltan != null && r.diasTotal <= 365 ? ` · faltan ≈ ${fmtN(r.faltan)}` : ''}`}</div>
+        <div style={S.codigo}>{r.recuperado ? 'recuperado' : r.agotadaSinCubrir ? `vendió las ${fmtN(r.compraCant)} u. y juntó $${fmtN(r.factCompra)} (¿descuentos, o costo o precio mal cargado?)` : `lleva ${fmtN(r.dias)} ${r.dias === 1 ? 'día' : 'días'}${r.faltan != null && r.diasTotal <= 365 ? ` · faltan ≈ ${fmtN(r.faltan)}` : ''}`}</div>
       </td>
     </tr>
   )
@@ -655,6 +669,7 @@ const S = {
   chipBaja: { background: 'rgba(106,140,204,0.15)', color: 'var(--muted)' },
   chipEstable: { border: '1px solid var(--border)', color: 'var(--muted)' },
   chipNuevo: { background: 'rgba(245,200,0,0.15)', color: 'var(--accent)' },
+  revisar: { fontSize: 11, color: '#f59e0b', marginTop: 2, fontWeight: 600 },
   recBarra: { width: 90, height: 8, background: 'var(--surface2)', borderRadius: 4, overflow: 'hidden', marginLeft: 'auto' },
   recBarraFill: { height: '100%', borderRadius: 4 },
   trGrupo: { background: 'rgba(96,165,250,0.06)' },

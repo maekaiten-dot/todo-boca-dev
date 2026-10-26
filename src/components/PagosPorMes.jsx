@@ -59,7 +59,7 @@ export default function PagosPorMes({ pagos }) {
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
             <XAxis dataKey="label" tick={{ fontFamily: 'Barlow Condensed, sans-serif', fontSize: 11, fill: '#6a8ccc' }} tickLine={false} axisLine={false} interval={0} />
             <YAxis tickFormatter={fmtM} tick={{ fontFamily: 'Barlow Condensed, sans-serif', fontSize: 11, fill: '#6a8ccc' }} tickLine={false} axisLine={false} width={44} />
-            <Tooltip formatter={v => fmt$(v)} contentStyle={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, fontFamily: 'Barlow, sans-serif' }} labelStyle={{ color: 'var(--text)' }} />
+            <Tooltip cursor={{ fill: 'rgba(245,200,0,0.06)' }} formatter={v => fmt$(v)} contentStyle={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, fontFamily: 'Barlow, sans-serif' }} labelStyle={{ color: 'var(--text)' }} />
             <Legend wrapperStyle={{ fontFamily: 'Barlow, sans-serif', fontSize: 12 }} />
             <Bar dataKey="Comprado" fill="#f5c800" radius={[4, 4, 0, 0]} maxBarSize={28} />
             <Bar dataKey="Pagado" fill="#22c55e" radius={[4, 4, 0, 0]} maxBarSize={28} />

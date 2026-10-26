@@ -2,10 +2,10 @@
 // Detalle de una compra a un proveedor (todos sus renglones) y pago de la compra entera o de una
 // parte: el monto se reparte entre los renglones según lo que le falta a cada uno.
 import { useState } from 'react'
+import { parseMonto } from '../lib/montos.js'
 import { pagarCompra, repartirPagoCompra, actualizarComprobanteCompra } from '../api/sheets.js'
 
 const fmt$ = n => '$' + Math.round(n || 0).toLocaleString('es-AR')
-const parseMonto = v => Number(String(v ?? '').replace(/[$\s.]/g, '').replace(',', '.')) || 0
 const hoy = () => new Date().toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' })
 const aInput = d => { const [dd, mm, aa] = String(d || '').split('/'); return dd && mm && aa ? `${aa}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}` : '' }
 const deInput = v => { const [a, m, d] = String(v || '').split('-'); return a ? `${Number(d)}/${Number(m)}/${a}` : '' }

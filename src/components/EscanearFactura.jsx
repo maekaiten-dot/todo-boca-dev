@@ -4,6 +4,7 @@
 // renglón (con memoria por proveedor), cantidades, costos; los que no existen se crean con la ventana de
 // artículo nuevo → 4) se elige pagado / pendiente / pago parcial y se cargan todos los pagos juntos.
 import { useState, useRef, useMemo } from 'react'
+import { parseMonto as parseArs } from '../lib/montos.js'
 import { getMemoriaFacturas, guardarMemoriaFacturas, registrarPagosLote, editarArticulo } from '../api/sheets.js'
 import { buscarArticulo, revisarTotal, normalizar, similitud, PROVEEDORES, leerQrArca, fechaDe, detectarProveedor } from '../lib/facturas.js'
 import ModalArticulo from './ModalArticulo.jsx'
@@ -11,7 +12,6 @@ import BarcodeScanner from './BarcodeScanner.jsx'
 
 const fmt$ = n => (n == null || Number.isNaN(n)) ? '—' : '$' + (Math.round(n * 100) / 100).toLocaleString('es-AR', { maximumFractionDigits: 2 })
 const num = s => { const t = String(s ?? '').trim().replace(/\$/g, '').replace(/\s/g, ''); if (!t) return null; const n = Number(/,\d{1,2}$/.test(t) ? t.replace(/\./g, '').replace(',', '.') : t.replace(/,/g, '')); return Number.isFinite(n) ? n : null }
-const parseArs = v => Number(String(v ?? '0').replace(/[$\s]/g, '').replace(/\./g, '').replace(',', '.')) || 0
 const hoyDDMM = () => new Date().toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' })
 const aInput = d => { const [a, b, c] = String(d || '').split('/'); return a && b && c ? `${c}-${b.padStart(2, '0')}-${a.padStart(2, '0')}` : '' }
 const deInput = v => { const [y, m, d] = String(v || '').split('-'); return y && m && d ? `${Number(d)}/${Number(m)}/${y}` : '' }

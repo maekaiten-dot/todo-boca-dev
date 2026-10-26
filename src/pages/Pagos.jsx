@@ -1,7 +1,9 @@
 // src/pages/Pagos.jsx
 import { useState, useEffect } from 'react'
+import { parseMonto } from '../lib/montos.js'
 import { getPagos, registrarPago, actualizarPago, anularPago, getArticulosAdmin, idCanonico, generarIdCompra, claveCompra, editarArticulo } from '../api/sheets.js'
 import CompraModal, { armarCompras } from '../components/CompraModal.jsx'
+import PagosPorMes from '../components/PagosPorMes.jsx'
 import BarcodeScanner from '../components/BarcodeScanner.jsx'
 import EscanearFactura from '../components/EscanearFactura.jsx'
 
@@ -38,7 +40,6 @@ const FORM_VACIO = {
 }
 
 // "$8.000", "8.000" o "8000" → 8000
-const parseMonto = v => Number(String(v ?? '').replace(/[$\s.]/g, '').replace(',', '.')) || 0
 
 function hoy() {
   return new Date().toLocaleDateString('es-AR', { timeZone:'America/Argentina/Buenos_Aires' })
@@ -397,10 +398,12 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
       </div>
 
       <div style={S.vistaRow}>
-        {[['renglones', 'Renglones'], ['compras', `Compras (${compras.length})`]].map(([v, l]) => (
+        {[['renglones', 'Renglones'], ['compras', `Compras (${compras.length})`], ['meses', '📅 Por mes']].map(([v, l]) => (
           <button key={v} style={{...S.filtroTab, ...(vista === v ? S.filtroTabActive : {})}} onClick={() => setVista(v)} aria-pressed={vista === v}>{l}</button>
         ))}
       </div>
+
+      {vista === 'meses' && <PagosPorMes pagos={pagos} />}
 
       {vista === 'compras' && (
         <div style={S.tableWrap}>

@@ -1,5 +1,6 @@
 // src/pages/Estadisticas.jsx
 import { useState, useEffect, useMemo, Fragment } from 'react'
+import { parseMonto as parseMontoAR } from '../lib/montos.js'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LabelList } from 'recharts'
 import { getHistoricoVentas, montoConMetodo, repartoPago, usaPosnet } from '../api/sheets.js'
 import CorregirPosnetModal from '../components/CorregirPosnetModal.jsx'
@@ -36,7 +37,7 @@ function getUltimos35Dias() {
 
 function parsePrecio(v) {
   if (!v && v !== 0) return 0
-  return Number(String(v).replace(/[$\s.]/g, '').replace(',', '.')) || 0
+  return parseMontoAR(v)
 }
 
 // monto (opcional): cuánto de la fila se suma (por ej. solo la parte con tarjeta o QR)

@@ -1,5 +1,6 @@
 // src/pages/Articulos.jsx
 import { useState, useEffect, useRef } from 'react'
+import { parseMonto as numArs } from '../lib/montos.js'
 import ModalArticulo from '../components/ModalArticulo.jsx'
 import DesgloseStock from '../components/DesgloseStock.jsx'
 import { GRUPOS_INICIALES } from '../lib/gruposIniciales.js'
@@ -147,13 +148,12 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
   }
 
   // Sin costo = costo vacío o en $0 (solo se marca para administradores)
-  const sinCosto = a => (Number(String(a.costoUnitario ?? '').replace(/[$\s.]/g,'').replace(',','.')) || 0) <= 0
+  const sinCosto = a => numArs(a.costoUnitario) <= 0
   const [soloSinCosto, setSoloSinCosto] = useState(false)
 
   const nombreDe = id => articulos.find(a => a.id === id)?.nombre || ''
   const normalizr = str => str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
   // Orden: por defecto, el de la planilla. Tocar el título de una columna ordena por ella; de nuevo, invierte.
-  const numArs = v => Number(String(v ?? '').replace(/[$\s.]/g,'').replace(',','.')) || 0
   const COLS = {
     id: { label: 'SKU', valor: a => a.id, texto: true },
     nombre: { label: 'Nombre', valor: a => a.nombre, texto: true },
@@ -289,8 +289,8 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
                     {art.unificadoEn && <div style={S.unificadoTag}>⇢ Unificado en {art.unificadoEn}{nombreDe(art.unificadoEn) ? ` · ${nombreDe(art.unificadoEn)}` : ''}</div>}
                     {esAdmin && sinCosto(art) && <div style={S.avisoSinCosto}>⚠ Sin costo unitario cargado</div>}
                   </td>
-                  <td style={S.td}>${Number(String(art.precioUnitario).replace(/[$\s.]/g,'').replace(',','.')||0).toLocaleString('es-AR')}</td>
-                  {esAdmin && <td style={{...S.td, color:'var(--muted)'}}>${Number(String(art.costoUnitario).replace(/[$\s.]/g,'').replace(',','.')||0).toLocaleString('es-AR')}</td>}
+                  <td style={S.td}>${numArs(art.precioUnitario).toLocaleString('es-AR')}</td>
+                  {esAdmin && <td style={{...S.td, color:'var(--muted)'}}>${numArs(art.costoUnitario).toLocaleString('es-AR')}</td>}
                   <td style={{...S.td, textAlign:'center'}}>
                     {art.unificadoEn ? <span style={{color:'var(--muted)', fontSize:12}} title="Su stock se suma al artículo en el que se unificó">→ {art.unificadoEn}</span> : loadingStock
                       ? <span style={{color:'var(--muted)', fontSize:12}}>...</span>

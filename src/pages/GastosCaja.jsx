@@ -2,6 +2,7 @@
 // Registro de movimientos de efectivo de la caja (gastos del día, cambios por transferencia, etc.).
 // Visible para todos los usuarios. Se guarda en la hoja GASTOS CAJA.
 import { useState, useEffect } from 'react'
+import { parseMonto } from '../lib/montos.js'
 import { getGastosCajaHoy, registrarGastoCaja, anularGastoCaja } from '../api/sheets.js'
 
 export const CATEGORIAS_CAJA = {
@@ -20,7 +21,6 @@ export const CATEGORIAS_CAJA = {
 
 const fmt$ = n => '$' + Math.round(n).toLocaleString('es-AR')
 // "12.500" o "12500" o "12500,50" → 12500.5
-const parseMonto = v => Number(String(v || '').replace(/[$\s.]/g, '').replace(',', '.')) || 0
 
 export default function GastosCaja({ usuarios = [], perfilNombre = '', onRegistrado }) {
   const empleados = usuarios.filter(u => u.nombre !== 'Tablet')

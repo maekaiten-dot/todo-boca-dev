@@ -2,6 +2,7 @@
 // Rotación de artículos: más vendidos en 30/60/90/365 días, ritmo semanal y
 // reposición sugerida según el stock calculado. Solo para Admin (lo controla App.jsx).
 import { useState, useEffect, useMemo } from 'react'
+import { parseMonto as parseArs } from '../lib/montos.js'
 import { getHistoricoVentas, getIngresos } from '../api/sheets.js'
 
 const VENTANAS = [30, 60, 90, 365]
@@ -93,7 +94,6 @@ function calcularRotacion(ventas, articulos, agr = null) {
 // se suman como una sola compra) y acumula lo facturado de ese artículo desde ese día. Cuando lo
 // facturado alcanza el costo total de la compra, esa es la cantidad de días que tardó en recuperarse.
 // Si todavía no llegó, estima cuánto falta al ritmo que viene vendiendo desde la compra.
-const parseArs = v => typeof v === 'number' ? v : Number(String(v ?? '0').replace(/[$\s]/g, '').replace(/\./g, '').replace(',', '.')) || 0
 // Por grupo: la última compra es el último día en que entró cualquier modelo del grupo (se suman
 // todos los modelos que entraron ese día) y se cuentan las ventas de todos los modelos.
 function calcularRecupero(ventas, ingresos, articulos, hoy, agr = null) {

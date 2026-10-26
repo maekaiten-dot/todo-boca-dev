@@ -6,6 +6,7 @@
 // corridos —incluida cada venta nueva— superan el tope de la K. Eso se controla todo el tiempo, no solo
 // en la recategorización: por eso el límite de cada mes es el tope K menos los 11 meses anteriores.
 import { useState, useEffect, useMemo } from 'react'
+import { parseMonto as parsePrecio } from '../lib/montos.js'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
 import { getMonotributoManual, montoConMetodo } from '../api/sheets.js'
 
@@ -21,7 +22,6 @@ const POSNETS = [
   { id: 'blanco', nombre: 'Posnet blanco', color: '#e8eefc' },
 ]
 
-const parsePrecio = v => (!v && v !== 0) ? 0 : Number(String(v).replace(/[$\s.]/g, '').replace(',', '.')) || 0
 const esTarjetaOQR = m => ['tarjeta', 'tarjeta de credito', 'tarjeta de debito', 'qr'].includes(String(m || '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''))
 const fmtM = n => `$${(n / 1e6).toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} M`
 const fmt$ = n => '$' + Math.round(n).toLocaleString('es-AR')

@@ -1,4 +1,5 @@
 // src/api/sheets.js
+import { parseMonto } from '../lib/montos.js'
 const SHEET_ID = import.meta.env.VITE_SHEET_ID
 const CLIENT_EMAIL = import.meta.env.VITE_GOOGLE_CLIENT_EMAIL
 const PRIVATE_KEY = import.meta.env.VITE_GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n')
@@ -86,10 +87,8 @@ function getArgentinaDate() {
   return { fecha: fechaPart, hora: horaPart, mes: meses[parseInt(mes) - 1], anio: parseInt(anio), raw: now }
 }
 
-function parsePrecio(v) {
-  if (!v && v !== 0) return 0
-  return Number(String(v).replace(/[$\s.]/g, '').replace(',', '.')) || 0
-}
+// "59999.94" (punto decimal, como quedan algunas celdas guardadas como texto) no es 5.999.994
+function parsePrecio(v) { return parseMonto(v) }
 
 // ── Imanes ───────────────────────────────────────────────────────────────────
 const IMANES_A = new Set(['TB00049','TB00050','TB00051','TB00052','TB00053','TB00054','TB00055','TB00056','TB00058','TB00359','TB01011','TB01043','TB01044','TB01089','TB01090','TB01127'])
@@ -263,7 +262,7 @@ export async function getArticulos() {
   const iGrupo = headers.findIndex(h => h === 'GRUPO')
   armarAlias(rows)
   const idx = (found, fallback) => found >= 0 ? found : fallback
-  const parseNum = v => Number(String(v||'0').replace(/[$\s]/g,'').replace(/\./g,'').replace(',','.')) || 0
+  const parseNum = v => parseMonto(v)
   return rows.slice(1)
     .filter(r => r[idx(iId,0)])
     .map(r => ({
@@ -1034,7 +1033,8 @@ export async function cargarGruposIniciales(mapa, empleado = '') {
 }
 
 const filaArticulo = art => {
-  const row = [art.id,art.nombre,art.stockInicial||'0',art.info||'',art.disponibilidad||'ACTIVO',art.foto||'',art.precioUnitario||'0',art.costoUnitario||'0',art.cantidadReponer||'0',art.stockCierre||'0',art.stockActual||'0']
+  // Precio y costo se guardan como número (si se escribió "3333.33" no tiene que quedar 333333)
+  const row = [art.id,art.nombre,art.stockInicial||'0',art.info||'',art.disponibilidad||'ACTIVO',art.foto||'',parseMonto(art.precioUnitario),parseMonto(art.costoUnitario),art.cantidadReponer||'0',art.stockCierre||'0',art.stockActual||'0']
   if (art.grupo !== undefined) row.push(String(art.grupo || '').trim())
   return row
 }
@@ -1067,7 +1067,7 @@ const DISP_ACTIVA = d => { const x = String(d ?? '').toUpperCase().trim(); retur
 function marcarArticuloVisto(art, activo = DISP_ACTIVA(art.disponibilidad)) {
   const v = leerArticulosVistos()
   if (!v || !art?.id) return
-  const p = Number(String(art.precioUnitario || '0').replace(/[$\s]/g, '').replace(/\./g, '').replace(',', '.')) || 0
+  const p = parseMonto(art.precioUnitario || '0')
   const anterior = v.activos[art.id] || v.inactivos[art.id] || {}
   const dato = { p: art.precioUnitario != null ? p : anterior.p || 0, n: art.nombre || anterior.n || '' }
   delete v.activos[art.id]; delete v.inactivos[art.id]

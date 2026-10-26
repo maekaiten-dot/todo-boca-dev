@@ -2,11 +2,11 @@
 // Editar una venta ya cerrada (solo Admin): artículos (agregar, quitar, cambiar), cantidades, precios,
 // totales, medio de pago (uno o dos), posnet, notas y vendedor. Queda constancia de quién y qué cambió.
 import { useState, useMemo } from 'react'
+import { parseMonto as num } from '../lib/montos.js'
 import { editarVenta, POSNETS, usaPosnet, metodosDe, SEP_METODOS } from '../api/sheets.js'
 
 const METODOS = ['Efectivo Pesos', 'Efectivo Dólares', 'Efectivo Reales', 'Efectivo Euros', 'Tarjeta de Crédito', 'Tarjeta de Débito', 'QR', 'Transferencia', 'Pix']
 const fmt$ = n => (n < 0 ? '−$' : '$') + Math.abs(Math.round(n || 0)).toLocaleString('es-AR')
-const num = v => typeof v === 'number' ? v : Number(String(v ?? '').replace(/[$\s.]/g, '').replace(',', '.')) || 0
 const normalizar = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
 
 function BuscarArticulo({ articulos, onElegir, placeholder, autoFocus }) {

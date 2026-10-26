@@ -2,6 +2,7 @@
 // Ventana de artículo nuevo / editar artículo. La usan la pantalla Arts. y el escaneo de facturas
 // (que la abre con el nombre y el costo leídos de la factura ya completos).
 import { useState, useEffect, useRef } from 'react'
+import { parseMonto as numArs } from '../lib/montos.js'
 import { generarIdArticulo, agregarArticulo, editarArticulo } from '../api/sheets.js'
 import HerramientasArticulo from './HerramientasArticulo.jsx'
 
@@ -31,7 +32,6 @@ async function subirFotoCloudinary(file) {
 // articulos: lista de artículos (para sugerir los grupos que ya existen)
 // Margen del artículo (como en Pagos): ganancia por unidad y % sobre el precio. Al editar, si cambia
 // el precio o el costo, muestra el margen anterior → el nuevo.
-const numArs = v => Number(String(v ?? '').replace(/[$\s.]/g, '').replace(',', '.')) || 0
 const pctMargen = (p, c) => p > 0 && c > 0 ? (p - c) / p : null
 function MargenArticulo({ precio, costo, precioAntes, costoAntes }) {
   const p = numArs(precio), c = numArs(costo)

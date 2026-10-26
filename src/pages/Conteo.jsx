@@ -284,9 +284,10 @@ export default function Conteo({ articulos = [], usuarios = [], perfilNombre = '
     ...(verAdmin ? [{ id: 'dif', label: 'Diferencias' }, { id: 'avisos', label: `Anotaciones${avisos.filter(a => a.estado !== 'RESUELTO').length ? ` (${avisos.filter(a => a.estado !== 'RESUELTO').length})` : ''}` }] : []),
   ]
 
-  const bajaResultados = bajaBusqueda.trim()
-    ? articulos.filter(a => normalizar(a.nombre).includes(normalizar(bajaBusqueda)) || normalizar(a.id).includes(normalizar(bajaBusqueda)) || (idCanonico(bajaBusqueda) === a.id && idCanonico(bajaBusqueda) !== bajaBusqueda.trim())).slice(0, 12)
-    : []
+  // Sin búsqueda se ven todos los artículos (por nombre); escribiendo se filtran
+  const bajaResultados = (bajaBusqueda.trim()
+    ? articulos.filter(a => normalizar(a.nombre).includes(normalizar(bajaBusqueda)) || normalizar(a.id).includes(normalizar(bajaBusqueda)) || (idCanonico(bajaBusqueda) === a.id && idCanonico(bajaBusqueda) !== bajaBusqueda.trim()))
+    : [...articulos]).sort((x, y) => String(x.nombre).localeCompare(String(y.nombre), 'es'))
 
   function escanearBaja(codigo) {
     const c = idCanonico(String(codigo || '').trim())
@@ -389,8 +390,9 @@ export default function Conteo({ articulos = [], usuarios = [], perfilNombre = '
                         <span>QR</span>
                       </button>
                     </div>
-                    {bajaBusqueda.trim() && (
+                    {(
                       <div style={S.resLista}>
+                        <div style={S.muted}>{bajaBusqueda.trim() ? `${bajaResultados.length} ${bajaResultados.length === 1 ? 'artículo' : 'artículos'}` : `Todos los artículos (${bajaResultados.length}) · escribí para filtrar`}</div>
                         {bajaResultados.length === 0 && <div style={S.muted}>No se encontró ningún artículo.</div>}
                         {bajaResultados.map(a => (
                           <button key={a.id} style={S.resBtn} onClick={() => setBajaArt(a)}>

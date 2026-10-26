@@ -1,6 +1,7 @@
 // src/pages/Articulos.jsx
 import { useState, useEffect, useRef } from 'react'
 import ModalArticulo from '../components/ModalArticulo.jsx'
+import DesgloseStock from '../components/DesgloseStock.jsx'
 import { GRUPOS_INICIALES } from '../lib/gruposIniciales.js'
 import { cargarGruposIniciales, getArticulosAdmin, generarIdArticulo, agregarArticulo, editarArticulo, toggleDisponibilidad, calcularStockTodos } from '../api/sheets.js'
 
@@ -33,6 +34,7 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
   const [error, setError] = useState(null)
   const [busqueda, setBusqueda] = useState('')
   const [orden, setOrden] = useState({ col: null, dir: 'asc' })
+  const [desglose, setDesglose] = useState(null) // artículo cuyo stock se está explicando
   const [cargandoGrupos, setCargandoGrupos] = useState(false)
   const [filtroDisp, setFiltroDisp] = useState('TODOS')
   const [modalAbierto, setModalAbierto] = useState(false)
@@ -298,7 +300,9 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
                           fontSize:16,
                           color: (stockMap[art.id] ?? 0) <= 0 ? '#ef4444' : (stockMap[art.id] ?? 0) <= 3 ? '#f59e0b' : '#22c55e'
                         }}>
-                          {stockMap[art.id] ?? '—'}
+                          {esAdmin && stockMap[art.id] != null
+                            ? <button style={S.stockBtn} onClick={() => setDesglose(art)} title="¿De dónde sale este número?">{stockMap[art.id]} <span style={{fontSize:11, opacity:0.7}}>ⓘ</span></button>
+                            : stockMap[art.id] ?? '—'}
                         </span>
                     }
                     {!loadingStock && stockContado[art.id] === false && <div style={{fontFamily:'Barlow, sans-serif', fontSize:11, color:'var(--muted)'}} title="Todavía no se contó: el número no es confiable">sin contar</div>}
@@ -320,6 +324,8 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
         {articulosFiltrados.length === 0 && <div style={S.emptyText}>Sin resultados</div>}
       </div>
 
+      {desglose && <DesgloseStock art={desglose} onCerrar={() => setDesglose(null)} />}
+
       {/* Modal formulario */}
       {modalAbierto && (
         <ModalArticulo
@@ -334,6 +340,7 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
 
 const S = {
   gruposBanner: { display:'flex', alignItems:'center', gap:12, margin:'10px 16px 0', padding:'10px 14px', background:'rgba(96,165,250,0.08)', border:'1.5px solid #60a5fa', borderRadius:10, fontFamily:'Barlow, sans-serif', fontSize:14, color:'var(--text)' },
+  stockBtn: { background:'none', border:'none', padding:0, color:'inherit', font:'inherit', cursor:'pointer', textDecoration:'underline dotted', textUnderlineOffset:3 },
   unificadoTag: { fontFamily:'Barlow, sans-serif', fontSize:11, color:'#f59e0b', marginTop:2 },
   grupoTag: { fontFamily:'Barlow, sans-serif', fontSize:11, color:'#60a5fa', marginTop:2 },
   page: { display:'flex', flexDirection:'column', height:'100%', overflowY:'auto', position:'relative' },

@@ -1281,6 +1281,56 @@ function calcularStockCrudo(articulos, { ventas, ingresos, movimientos }) {
   return out
 }
 
+// Desglose del stock de un artículo: de dónde sale el número (para "¿De dónde sale este número?").
+// Punto de partida: el último conteo (o el stock inicial); después, cada ingreso, venta, cambio y baja
+// posteriores. Si tiene artículos unificados, suma lo de ellos como en el cálculo normal.
+export async function desgloseStock(art) {
+  await asegurarAlias()
+  const [dv, di, movs] = await Promise.all([sheetsGet('DETALLE DE VENTAS!A2:U'), sheetsGet('INGRESOS!A2:K'), getMovimientosRows()])
+  const id = art.id
+  const conteos = movs.filter(m => !m.anulado && m.tipo === 'CONTEO' && m.articuloId === id).sort((a, b) => a.ms - b.ms)
+  const conteo = conteos[conteos.length - 1] || null
+  const desde = conteo ? conteo.ms : -Infinity
+  const eventos = []
+  ;(dv.values || []).forEach(r => {
+    if (!r[0] || r[6] !== id || r[20] === 'TRUE') return
+    const ms = fechaHoraAMsAR(r[2], r[3]); if (!(ms > desde)) return
+    const cant = Number(r[9]) || 0
+    eventos.push({ tipo: cant < 0 ? 'DEVOLUCION' : 'VENTA', ms, fecha: String(r[2]).replace(/^'/, ''), hora: String(r[3]).replace(/^'/, ''), cant: -cant, ref: r[1], quien: r[14] || '' })
+  })
+  ;(di.values || []).forEach(r => {
+    if (!r[0] || r[3] !== id || String(r[10]).toUpperCase() === 'TRUE') return
+    const ms = fechaHoraAMsAR(r[1], r[2]); if (!(ms > desde)) return
+    eventos.push({ tipo: 'INGRESO', ms, fecha: String(r[1]).replace(/^'/, ''), hora: String(r[2]).replace(/^'/, ''), cant: Number(r[5]) || 0, ref: r[0], quien: r[9] || '', detalle: r[8] || '' })
+  })
+  movs.forEach(m => {
+    if (m.anulado || m.tipo !== 'BAJA' || m.articuloId !== id || !(m.ms > desde)) return
+    eventos.push({ tipo: 'BAJA', ms: m.ms, fecha: m.fecha, hora: m.hora, cant: -m.cantidad, ref: m.id, quien: m.empleado, detalle: m.motivo })
+  })
+  eventos.sort((a, b) => a.ms - b.ms)
+  const base = conteo ? conteo.cantidad : Number(art.stockInicial) || 0
+  let saldo = base
+  eventos.forEach(e => { saldo += e.cant; e.saldo = saldo })
+  // Unificados: suman su stock hasta que se cuenta el que queda (después de unificar)
+  const unificados = []
+  const viejos = unificadosEn(id)
+  if (viejos.length) {
+    const full = await getDatosStock()
+    const msUnif = Math.max(...viejos.map(k => _alias[k].ms || 0))
+    if (!(conteo && conteo.ms > msUnif)) {
+      viejos.forEach(v => {
+        const st = calcularStockDesdeDatos([{ id: v, stockInicial: _alias[v].stockInicial }], full)[v]?.stock || 0
+        unificados.push({ id: v, stock: st }); saldo += st
+      })
+    }
+  }
+  return {
+    base: conteo ? { tipo: 'CONTEO', cant: conteo.cantidad, fecha: conteo.fecha, hora: conteo.hora, quien: conteo.empleado, notas: conteo.notas } : { tipo: 'INICIAL', cant: base },
+    eventos, unificados, total: saldo,
+    conteosAnteriores: conteos.length - (conteo ? 1 : 0),
+  }
+}
+
 // Clase A/B/C por facturación de los últimos 90 días
 export function calcularClasesABC(articulos, ventas, ahoraMs = Date.now()) {
   const desde = ahoraMs - 90 * 86400000

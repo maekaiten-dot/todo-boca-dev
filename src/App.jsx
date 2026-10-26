@@ -266,6 +266,14 @@ export default function App() {
     document.addEventListener('visibilitychange', alVolver)
     return () => { clearInterval(id); document.removeEventListener('visibilitychange', alVolver) }
   }, [])
+  // Stock: se recalcula cada 3 minutos y al volver a la app (antes se calculaba solo al abrirla, y
+  // durante el día quedaba un número viejo)
+  useEffect(() => {
+    const recalc = () => { if (document.visibilityState === 'visible' && articulosRef.current.length) recalcularStock(articulosRef.current) }
+    const id = setInterval(recalc, 3 * 60 * 1000)
+    document.addEventListener('visibilitychange', recalc)
+    return () => { clearInterval(id); document.removeEventListener('visibilitychange', recalc) }
+  }, [])
   // Al elegir perfil (o cambiarlo) se revisa enseguida
   useEffect(() => { if (perfilGuardado && articulosRef.current.length) detectarCambiosPrecio(articulosRef.current) }, [perfilGuardado])
   useEffect(() => {
@@ -407,7 +415,7 @@ export default function App() {
 
         <div style={S.content}>
           <div style={tabStyle('venta')}>
-            <NuevaVenta articulos={articulos} loadingArticulos={loadingArticulos} usuarios={usuarios} stockMap={stockMap} empleadoFijo={esAdmin ? empleadoActual : null} esAdmin={esAdmin} cargadoPor={empleadoActual} onVentaRegistrada={() => setRefreshKey(k => k + 1)} />
+            <NuevaVenta articulos={articulos} loadingArticulos={loadingArticulos} usuarios={usuarios} stockMap={stockMap} empleadoFijo={esAdmin ? empleadoActual : null} esAdmin={esAdmin} cargadoPor={empleadoActual} onVentaRegistrada={() => { setRefreshKey(k => k + 1); recalcularStock(articulosRef.current) }} />
           </div>
           {tabsVisitadas.has('hoy') && (
             <div style={tabStyle('hoy')}><VentasDelDia refreshKey={refreshKey} puedeAnular={true} usuarios={usuarios} perfilNombre={empleadoActual} esAdmin={esAdmin} articulos={articulos} /></div>

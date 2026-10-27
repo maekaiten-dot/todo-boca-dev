@@ -315,6 +315,9 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
     : []
 
   const costoTotal = (Number(form.cantidad) || 0) * parseMonto(form.costoUnitario)
+  // Gasto asociado a una compra (flete…): "Importe" es lo que cuesta, "Monto pagado" lo que ya se pagó
+  const gastoDeCompra = form.tipo === 'GASTO' && !!form.compraSel && form.compraSel !== 'NUEVA'
+  const montoTotalForm = form.tipo === 'MERCADERÍA' ? costoTotal : gastoDeCompra ? parseMonto(form.costoUnitario) : 0
   // Costo y precio del artículo elegido, para ofrecer actualizarlos
   const artSel = form.tipo === 'MERCADERÍA' && form.articuloId ? articulos.find(a => a.id === form.articuloId) : null
   const cuForm = Math.round(parseMonto(form.costoUnitario) * 100) / 100
@@ -680,30 +683,6 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
                 </div>
               )}
 
-              {/* Monto pagado y pagado */}
-              <div style={S.fieldRow}>
-                <div style={S.fieldGroup}>
-                  <label style={S.label}>MONTO PAGADO</label>
-                  <input style={S.input} type="text" inputMode="numeric" value={form.montoPagado} onChange={e => setForm(f => ({...f, montoPagado: e.target.value}))} />
-                  {form.tipo === 'MERCADERÍA' && costoTotal > 0 && (
-                    <button style={S.hoyBtn} onClick={() => setForm(f => ({...f, montoPagado: String(costoTotal)}))}>= Costo total</button>
-                  )}
-                </div>
-                <div style={S.fieldGroup}>
-                  <label style={S.label}>¿PAGADO?</label>
-                  <div style={S.tipoBtns}>
-                    <button style={{...S.tipoBtn, ...(form.pagado ? S.tipoBtnActive : {})}} onClick={() => setForm(f => ({...f, pagado: true}))}>✓ Sí</button>
-                    <button style={{...S.tipoBtn, ...(!form.pagado ? S.tipoBtnActive : {})}} onClick={() => setForm(f => ({...f, pagado: false}))}>✗ No</button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Proveedor */}
-              <div style={S.fieldGroup}>
-                <label style={S.label}>PROVEEDOR</label>
-                <input style={S.input} value={form.proveedor} onChange={e => setForm(f => ({...f, proveedor: e.target.value}))} placeholder="Nombre del proveedor..." />
-              </div>
-
               {/* Gasto de una compra (flete, envío…): suma al total de esa compra */}
               {form.tipo === 'GASTO' && (
                 <div style={S.fieldGroup}>
@@ -720,10 +699,37 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
                   {form.compraSel && (<>
                     <label style={{...S.label, marginTop:6}}>IMPORTE DEL GASTO *</label>
                     <input style={S.input} inputMode="numeric" value={form.costoUnitario} onChange={e => setForm(f => ({...f, costoUnitario: e.target.value, cantidad: '1'}))} placeholder="Ej: 15000" aria-label="Importe del gasto" />
-                    <div style={{fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)'}}>Se suma al total de la compra {form.compraSel}: se paga junto con ella y cuenta en lo comprado del mes. Si ya lo pagaste, poné el monto pagado arriba.</div>
+                    <div style={{fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)'}}>Es lo que cuesta el flete o gasto. Se suma al total de la compra {form.compraSel} y cuenta en lo comprado del mes. Si ya lo pagaste, tocá "= Importe (ya lo pagué)" en Monto pagado; si no, dejalo en 0 y se paga después con la compra.</div>
                   </>)}
                 </div>
               )}
+
+              {/* Monto pagado y pagado */}
+              <div style={S.fieldRow}>
+                <div style={S.fieldGroup}>
+                  <label style={S.label}>MONTO PAGADO {gastoDeCompra && <span style={{fontWeight:400}}>(lo que ya pagaste)</span>}</label>
+                  <input style={S.input} type="text" inputMode="numeric" value={form.montoPagado} onChange={e => setForm(f => ({...f, montoPagado: e.target.value}))} />
+                  {form.tipo === 'MERCADERÍA' && costoTotal > 0 && (
+                    <button style={S.hoyBtn} onClick={() => setForm(f => ({...f, montoPagado: String(costoTotal)}))}>= Costo total</button>
+                  )}
+                  {gastoDeCompra && parseMonto(form.costoUnitario) > 0 && (
+                    <button style={S.hoyBtn} onClick={() => setForm(f => ({...f, montoPagado: String(parseMonto(f.costoUnitario)), pagado: true}))}>= Importe (ya lo pagué)</button>
+                  )}
+                </div>
+                <div style={S.fieldGroup}>
+                  <label style={S.label}>¿PAGADO?</label>
+                  <div style={S.tipoBtns}>
+                    <button style={{...S.tipoBtn, ...(form.pagado ? S.tipoBtnActive : {})}} onClick={() => setForm(f => ({...f, pagado: true, montoPagado: parseMonto(f.montoPagado) > 0 ? f.montoPagado : String(montoTotalForm || f.montoPagado)}))}>✓ Sí</button>
+                    <button style={{...S.tipoBtn, ...(!form.pagado ? S.tipoBtnActive : {})}} onClick={() => setForm(f => ({...f, pagado: false}))}>✗ No</button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Proveedor */}
+              <div style={S.fieldGroup}>
+                <label style={S.label}>PROVEEDOR</label>
+                <input style={S.input} value={form.proveedor} onChange={e => setForm(f => ({...f, proveedor: e.target.value}))} placeholder="Nombre del proveedor..." />
+              </div>
 
               {/* Compra (solo MERCADERÍA): agrupa los productos que vinieron juntos */}
               {form.tipo === 'MERCADERÍA' && (

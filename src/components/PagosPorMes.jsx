@@ -14,19 +14,22 @@ const fmtM = n => n >= 1e6 ? `${(n / 1e6).toLocaleString('es-AR', { maximumFract
 
 export function resumirPorMes(pagos) {
   const m = {}
-  const mes = k => (m[k] ||= { mes: k, comprado: 0, pagadoMerc: 0, falta: 0, gastos: 0, unidades: 0, renglones: 0, prov: {}, arts: {} })
+  const mes = k => (m[k] ||= { mes: k, comprado: 0, pagadoMerc: 0, falta: 0, gastos: 0, fletes: 0, unidades: 0, renglones: 0, prov: {}, arts: {} })
   for (const p of pagos) {
     if (p.anulado) continue
-    if (p.tipo === 'MERCADERÍA') {
-      const kc = mesDe(p.fechaIngreso) || mesDe(p.fechaPago)
+    // Los gastos asociados a una compra (flete…) son parte del costo de comprar mercadería
+    if (p.tipo === 'MERCADERÍA' || p.compra) {
+      const kc = (p.tipo === 'MERCADERÍA' ? mesDe(p.fechaIngreso) : null) || mesDe(p.fechaPago) || mesDe(p.fechaIngreso)
       if (kc) {
         const x = mes(kc)
-        x.comprado += p.costoTotal || 0; x.unidades += p.cantidad || 0; x.renglones++
+        x.comprado += p.costoTotal || 0; if (p.tipo === 'MERCADERÍA') x.unidades += p.cantidad || 0; else x.fletes += p.costoTotal || 0; x.renglones++
         x.falta += Math.max(0, (p.costoTotal || 0) - (p.montoPagado || 0))
         const pv = (x.prov[(p.proveedor || 'Sin proveedor').trim()] ||= { comprado: 0, pagado: 0, falta: 0 })
         pv.comprado += p.costoTotal || 0; pv.falta += Math.max(0, (p.costoTotal || 0) - (p.montoPagado || 0))
-        const ar = (x.arts[p.articuloId || p.articuloNombre] ||= { nombre: p.articuloNombre || p.articuloId, unidades: 0, total: 0 })
-        ar.unidades += p.cantidad || 0; ar.total += p.costoTotal || 0
+        if (p.tipo === 'MERCADERÍA') {
+          const ar = (x.arts[p.articuloId || p.articuloNombre] ||= { nombre: p.articuloNombre || p.articuloId, unidades: 0, total: 0 })
+          ar.unidades += p.cantidad || 0; ar.total += p.costoTotal || 0
+        }
       }
       const kp = mesDe(p.fechaPago)
       if (kp && p.montoPagado > 0) {
@@ -49,9 +52,9 @@ export default function PagosPorMes({ pagos }) {
   return (
     <div style={S.wrap}>
       <div style={S.nota}>
-        <b>Comprado</b>: la mercadería para vender que entró ese mes (por fecha de ingreso), esté pagada o no.
+        <b>Comprado</b>: la mercadería para vender que entró ese mes (por fecha de ingreso), esté pagada o no, más los gastos sumados a esas compras (flete, envío).
         {' '}<b>Pagado</b>: lo que se les pagó a los proveedores ese mes (por fecha de pago), sea de compras de ese mes o de antes.
-        {' '}<b>Falta pagar</b>: lo que todavía se debe de las compras de ese mes. <b>Otros gastos</b>: los pagos que no son mercadería.
+        {' '}<b>Falta pagar</b>: lo que todavía se debe de las compras de ese mes. <b>Otros gastos</b>: los pagos que no son mercadería ni gastos de una compra.
       </div>
       <div style={{ width: '100%', height: 240 }}>
         <ResponsiveContainer width="100%" height="100%">
@@ -79,7 +82,7 @@ export default function PagosPorMes({ pagos }) {
               return [
                 <tr key={x.mes} style={{ cursor: 'pointer', ...(ab ? { background: 'rgba(245,200,0,0.06)' } : {}) }} onClick={() => setAbierto(ab ? null : x.mes)} data-mes={x.mes}>
                   <td style={{ ...S.td, textAlign: 'left', textTransform: 'capitalize' }}><span style={{ color: '#60a5fa' }}>{ab ? '▾ ' : '▸ '}</span>{nombreMes(x.mes)}</td>
-                  <td style={{ ...S.td, fontWeight: 700, color: 'var(--accent)' }}>{fmt$(x.comprado)}</td>
+                  <td style={{ ...S.td, fontWeight: 700, color: 'var(--accent)' }}>{fmt$(x.comprado)}{x.fletes > 0 && <div style={{ fontSize: 11, fontWeight: 400, color: 'var(--muted)' }}>incluye {fmt$(x.fletes)} de fletes/gastos</div>}</td>
                   <td style={{ ...S.td, color: '#22c55e' }}>{fmt$(x.pagadoMerc)}</td>
                   <td style={{ ...S.td, color: x.falta > 0 ? '#f59e0b' : 'var(--muted)' }}>{x.falta > 0 ? fmt$(x.falta) : '✓'}</td>
                   <td style={{ ...S.td, color: 'var(--muted)' }}>{fmt$(x.gastos)}</td>

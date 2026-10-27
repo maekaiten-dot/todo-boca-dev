@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import { parseMonto } from '../lib/montos.js'
 import { getPagos, registrarPago, actualizarPago, anularPago, getArticulosAdmin, idCanonico, generarIdCompra, claveCompra, editarArticulo } from '../api/sheets.js'
-import CompraModal, { armarCompras } from '../components/CompraModal.jsx'
+import CompraModal, { armarCompras, textoRenglones } from '../components/CompraModal.jsx'
 import PagosPorMes from '../components/PagosPorMes.jsx'
 import BarcodeScanner from '../components/BarcodeScanner.jsx'
 import EscanearFactura from '../components/EscanearFactura.jsx'
@@ -106,6 +106,14 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
     setModalAbierto(true)
   }
 
+  // Nuevo gasto (flete, envío…) asociado a una compra
+  function abrirGastoDeCompra(c) {
+    setForm({ ...FORM_VACIO, tipo: 'GASTO', empleado, fechaPago: hoy(), descripcion: 'Flete', compraSel: c.compra, comprobante: c.comprobante || '', costoUnitario: '', cantidad: '1' })
+    setEditando(null)
+    setArtBusqueda('')
+    setModalAbierto(true)
+  }
+
   function abrirEditar(p) {
     setEditando(p)
     setForm({
@@ -135,8 +143,11 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
     setSaving(true)
     try {
       const esMerc = form.tipo === 'MERCADERÍA'
-      const compra = !esMerc ? '' : form.compraSel === 'NUEVA' ? await generarIdCompra() : form.compraSel
-      const comprobante = esMerc ? form.comprobante.trim() : ''
+      // Un gasto puede ir asociado a una compra ya cargada (flete, envío): suma al total de esa compra
+      const compra = !esMerc ? (form.compraSel && form.compraSel !== 'NUEVA' ? form.compraSel : '') : form.compraSel === 'NUEVA' ? await generarIdCompra() : form.compraSel
+      if (!esMerc && compra && !(parseMonto(form.costoUnitario) > 0)) { showToast('Poné el importe del gasto', 'error'); setSaving(false); return }
+      const comprobante = esMerc || compra ? form.comprobante.trim() : ''
+      const datosGasto = !esMerc ? (compra ? { cantidad: '1' } : { cantidad: '0', costoUnitario: '0' }) : {}
       // Costo y precio del artículo (si se pidió actualizarlos)
       const cambiosArt = []
       if (esMerc && artSel && (cambiaCosto && form.actualizarCosto || precioNuevoOk)) {
@@ -148,12 +159,12 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
       const notaArt = cambiosArt.length ? ` · artículo actualizado (${cambiosArt.join(', ')})` : ''
       if (editando) {
         const notaIngreso = await actualizarPago(editando.rowNum, {
-          ...form, compra, comprobante, compraAnterior: editando.compra || '', comprobanteAnterior: editando.comprobante || '',
+          ...form, ...datosGasto, compra, comprobante, compraAnterior: editando.compra || '', comprobanteAnterior: editando.comprobante || '',
           idPago: editando.idPago, anulado: editando.anulado,
         }, form.empleado)
         showToast(`Pago actualizado${notaIngreso || ''}${notaArt}`, 'success', notaIngreso || notaArt ? 6000 : 3000)
       } else {
-        await registrarPago({ ...form, compra, comprobante })
+        await registrarPago({ ...form, ...datosGasto, compra, comprobante })
         showToast(`${otro ? `Guardado en ${compra}: cargá el siguiente producto` : `Pago registrado${compra ? ` · compra ${compra}` : ''}`}${notaArt}`, 'success', notaArt ? 6000 : 3000)
       }
       if (otro && !editando) {
@@ -271,6 +282,10 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
     .filter(c => c.compra && (Date.now() - Math.max(fechaMs(c.fechaIngreso), c.ultimaMs)) < 15 * 86400000)
     .filter(c => !form.proveedor.trim() || normalizr(c.proveedor).includes(normalizr(form.proveedor.trim())) || c.compra === form.compraSel)
     .sort((a, b) => b.ultimaMs - a.ultimaMs).slice(0, 6)
+  // Para un gasto (el flete suele ser de otro proveedor): las compras recientes de cualquier proveedor
+  const comprasRecientes = compras
+    .filter(c => c.compra && ((Date.now() - Math.max(fechaMs(c.fechaIngreso), c.ultimaMs)) < 30 * 86400000 || c.compra === form.compraSel))
+    .sort((a, b) => b.ultimaMs - a.ultimaMs).slice(0, 8)
   function elegirCompra(c) {
     if (!c) { setForm(f => ({ ...f, compraSel: 'NUEVA' })); return }
     setForm(f => ({ ...f, compraSel: c.compra, proveedor: f.proveedor || c.proveedor, fechaIngreso: f.fechaIngreso || c.fechaIngreso, comprobante: c.comprobante || f.comprobante }))
@@ -420,7 +435,7 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
                     <td style={{...S.td, ...S.tdId}}>{c.compra || <span style={{color:'var(--muted)'}}>sin número</span>}{c.comprobante && <div style={{fontSize:11, color:'var(--muted)'}}>Nº {c.comprobante}</div>}</td>
                     <td style={S.td}>{c.proveedor || '—'}</td>
                     <td style={S.td}>{c.fechaIngreso || '—'}</td>
-                    <td style={{...S.td, ...S.tdNombre}}>{c.renglones.length} · <span style={{color:'var(--muted)'}}>{c.renglones.slice(0, 3).map(r => r.articuloNombre).join(', ')}{c.renglones.length > 3 ? '…' : ''}</span></td>
+                    <td style={{...S.td, ...S.tdNombre}}>{textoRenglones(c)} · <span style={{color:'var(--muted)'}}>{c.renglones.slice(0, 3).map(r => r.articuloNombre || r.descripcion).join(', ')}{c.renglones.length > 3 ? '…' : ''}</span></td>
                     <td style={S.td}>${Math.round(c.total).toLocaleString('es-AR')}</td>
                     <td style={{...S.td, color:'#22c55e'}}>${Math.round(c.pagado).toLocaleString('es-AR')}</td>
                     <td style={{...S.td, fontWeight:700, color: c.saldo > 0 ? '#f59e0b' : 'var(--muted)'}}>{c.saldo > 0 ? `$${Math.round(c.saldo).toLocaleString('es-AR')}` : '✓'}</td>
@@ -469,7 +484,7 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
                     </td>
                     <td style={{...S.td, ...S.tdId}}>{p.idPago}</td>
                     <td style={{...S.td, whiteSpace:'nowrap'}}>
-                      {p.tipo === 'MERCADERÍA' && !p.anulado
+                      {(p.tipo === 'MERCADERÍA' || p.compra) && !p.anulado
                         ? <button style={S.compraLink} onClick={() => setCompraAbierta(claveCompra(p))} title="Ver la compra">{p.compra || 'ver compra'}</button>
                         : <span style={{color:'var(--muted)'}}>—</span>}
                       {p.comprobante && <div style={{fontSize:11, color:'var(--muted)'}}>Nº {p.comprobante}</div>}
@@ -512,7 +527,8 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
       {compraAbierta && compraDe(compraAbierta) && (
         <CompraModal compra={compraDe(compraAbierta)} empleado={empleadoFijo || empleado}
           onCerrar={() => setCompraAbierta(null)}
-          onCambio={async msg => { showToast(msg, 'success'); setCompraAbierta(null); await cargar() }} />
+          onCambio={async msg => { showToast(msg, 'success'); setCompraAbierta(null); await cargar() }}
+          onSumarGasto={c => { setCompraAbierta(null); abrirGastoDeCompra(c) }} />
       )}
 
       {/* Modal */}
@@ -531,7 +547,7 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
                 <label style={S.label}>TIPO</label>
                 <div style={S.tipoBtns}>
                   {['MERCADERÍA', 'GASTO'].map(t => (
-                    <button key={t} style={{...S.tipoBtn, ...(form.tipo===t ? S.tipoBtnActive : {})}} onClick={() => setForm(f => ({...f, tipo:t}))}>
+                    <button key={t} style={{...S.tipoBtn, ...(form.tipo===t ? S.tipoBtnActive : {})}} onClick={() => setForm(f => ({...f, tipo:t, compraSel: t === 'GASTO' ? (f.compraSel === 'NUEVA' ? '' : f.compraSel) : (f.compraSel || (editando ? '' : 'NUEVA'))}))}>
                       {t === 'MERCADERÍA' ? '📦 Mercadería' : '💸 Gasto'}
                     </button>
                   ))}
@@ -688,6 +704,27 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
                 <input style={S.input} value={form.proveedor} onChange={e => setForm(f => ({...f, proveedor: e.target.value}))} placeholder="Nombre del proveedor..." />
               </div>
 
+              {/* Gasto de una compra (flete, envío…): suma al total de esa compra */}
+              {form.tipo === 'GASTO' && (
+                <div style={S.fieldGroup}>
+                  <label style={S.label}>¿ES PARTE DE UNA COMPRA?</label>
+                  <div style={S.compraOpciones}>
+                    <button style={{...S.compraOpcion, ...(!form.compraSel ? S.compraOpcionActiva : {})}} onClick={() => setForm(f => ({...f, compraSel: ''}))}>No, es un gasto suelto</button>
+                    {comprasRecientes.map(c => (
+                      <button key={c.compra} style={{...S.compraOpcion, ...(form.compraSel === c.compra ? S.compraOpcionActiva : {})}} onClick={() => setForm(f => ({...f, compraSel: c.compra, comprobante: c.comprobante || f.comprobante, cantidad: '1'}))}>
+                        <b>{c.compra}</b> · {c.proveedor || 'sin proveedor'} · {c.fechaIngreso || '—'}
+                        <span style={{color:'var(--muted)'}}> · {textoRenglones(c)} · ${Math.round(c.total).toLocaleString('es-AR')}</span>
+                      </button>
+                    ))}
+                  </div>
+                  {form.compraSel && (<>
+                    <label style={{...S.label, marginTop:6}}>IMPORTE DEL GASTO *</label>
+                    <input style={S.input} inputMode="numeric" value={form.costoUnitario} onChange={e => setForm(f => ({...f, costoUnitario: e.target.value, cantidad: '1'}))} placeholder="Ej: 15000" aria-label="Importe del gasto" />
+                    <div style={{fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)'}}>Se suma al total de la compra {form.compraSel}: se paga junto con ella y cuenta en lo comprado del mes. Si ya lo pagaste, poné el monto pagado arriba.</div>
+                  </>)}
+                </div>
+              )}
+
               {/* Compra (solo MERCADERÍA): agrupa los productos que vinieron juntos */}
               {form.tipo === 'MERCADERÍA' && (
                 <div style={S.fieldGroup}>
@@ -702,7 +739,7 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
                     {comprasParaSumar.map(c => (
                       <button key={c.compra} style={{...S.compraOpcion, ...(form.compraSel === c.compra ? S.compraOpcionActiva : {})}} onClick={() => elegirCompra(c)}>
                         <b>{c.compra}</b> · {c.proveedor || 'sin proveedor'} · {c.fechaIngreso || '—'}
-                        <span style={{color:'var(--muted)'}}> · {c.renglones.length} {c.renglones.length === 1 ? 'producto' : 'productos'} · ${Math.round(c.total).toLocaleString('es-AR')}</span>
+                        <span style={{color:'var(--muted)'}}> · {textoRenglones(c)} · ${Math.round(c.total).toLocaleString('es-AR')}</span>
                       </button>
                     ))}
                     {editando?.compra && !comprasParaSumar.some(c => c.compra === editando.compra) && (

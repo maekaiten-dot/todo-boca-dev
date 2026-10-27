@@ -14,9 +14,12 @@ const deInput = v => { const [a, m, d] = String(v || '').split('-'); return a ? 
 export function armarCompras(pagos, claveCompra) {
   const m = new Map()
   for (const p of pagos) {
-    if (p.anulado || p.tipo !== 'MERCADERÍA') continue
+    // Mercadería, y gastos asociados a una compra (flete, embalaje…)
+    if (p.anulado || (p.tipo !== 'MERCADERÍA' && !p.compra)) continue
     const k = claveCompra(p)
-    const c = m.get(k) || { clave: k, compra: p.compra || '', comprobante: '', proveedor: p.proveedor || '', fechaIngreso: p.fechaIngreso || '', renglones: [], total: 0, pagado: 0, ultimaMs: 0 }
+    const merc = p.tipo === 'MERCADERÍA'
+    const c = m.get(k) || { clave: k, compra: p.compra || '', comprobante: '', proveedor: merc ? p.proveedor || '' : '', fechaIngreso: merc ? p.fechaIngreso || '' : '', renglones: [], productos: 0, gastos: 0, total: 0, pagado: 0, ultimaMs: 0 }
+    if (merc) { c.productos++; if (!c.proveedor) c.proveedor = p.proveedor || ''; if (!c.fechaIngreso) c.fechaIngreso = p.fechaIngreso || '' } else c.gastos++
     c.renglones.push(p)
     c.total += p.costoTotal || 0
     c.pagado += p.montoPagado || 0
@@ -24,10 +27,13 @@ export function armarCompras(pagos, claveCompra) {
     c.ultimaMs = Math.max(c.ultimaMs, p.modificadoMs || 0)
     m.set(k, c)
   }
-  return [...m.values()].map(c => ({ ...c, saldo: Math.max(0, c.renglones.reduce((s, r) => s + Math.max(0, (r.costoTotal || 0) - (r.montoPagado || 0)), 0)), todoPagado: c.renglones.every(r => r.pagado) }))
+  return [...m.values()].map(c => ({ ...c, proveedor: c.proveedor || c.renglones[0]?.proveedor || '', fechaIngreso: c.fechaIngreso || c.renglones[0]?.fechaPago || '', saldo: Math.max(0, c.renglones.reduce((s, r) => s + Math.max(0, (r.costoTotal || 0) - (r.montoPagado || 0)), 0)), todoPagado: c.renglones.every(r => r.pagado) }))
 }
 
-export default function CompraModal({ compra, empleado = '', onCerrar, onCambio }) {
+// Texto corto: "3 productos + 1 gasto"
+export const textoRenglones = c => `${c.productos} ${c.productos === 1 ? 'producto' : 'productos'}${c.gastos ? ` + ${c.gastos} ${c.gastos === 1 ? 'gasto' : 'gastos'}` : ''}`
+
+export default function CompraModal({ compra, empleado = '', onCerrar, onCambio, onSumarGasto }) {
   const [monto, setMonto] = useState(String(Math.round(compra.saldo)))
   const [fecha, setFecha] = useState(hoy())
   const [comprobante, setComprobante] = useState(compra.comprobante || '')
@@ -65,7 +71,7 @@ export default function CompraModal({ compra, empleado = '', onCerrar, onCambio 
         </div>
         <div style={S.cuerpo}>
           <div style={S.resumen}>
-            <div><div style={S.num}>{fmt$(compra.total)}</div><div style={S.lbl}>Total ({compra.renglones.length} {compra.renglones.length === 1 ? 'renglón' : 'renglones'})</div></div>
+            <div><div style={S.num}>{fmt$(compra.total)}</div><div style={S.lbl}>Total ({textoRenglones(compra)})</div></div>
             <div><div style={{ ...S.num, color: '#22c55e' }}>{fmt$(compra.pagado)}</div><div style={S.lbl}>Pagado</div></div>
             <div><div style={{ ...S.num, color: compra.saldo > 0 ? '#f59e0b' : '#22c55e' }}>{fmt$(compra.saldo)}</div><div style={S.lbl}>Falta pagar</div></div>
           </div>
@@ -75,7 +81,7 @@ export default function CompraModal({ compra, empleado = '', onCerrar, onCambio 
             <tbody>
               {reparto.map(r => (
                 <tr key={r.rowNum} data-renglon-compra={r.idPago}>
-                  <td style={{ ...S.td, textAlign: 'left', whiteSpace: 'normal' }}>{r.articuloNombre || r.descripcion}<div style={S.chico}>{r.idPago}</div></td>
+                  <td style={{ ...S.td, textAlign: 'left', whiteSpace: 'normal' }}>{r.tipo === 'GASTO' && <span style={S.gastoTag}>GASTO</span>}{r.articuloNombre || r.descripcion}<div style={S.chico}>{r.idPago}{r.tipo === 'GASTO' && r.proveedor ? ` · ${r.proveedor}` : ''}</div></td>
                   <td style={S.td}>{r.cantidad}</td>
                   <td style={S.td}>{fmt$(r.costoTotal)}</td>
                   <td style={{ ...S.td, color: compra.renglones.find(x => x.rowNum === r.rowNum)?.pagado ? '#22c55e' : 'var(--text)' }}>{fmt$(compra.renglones.find(x => x.rowNum === r.rowNum)?.montoPagado)}</td>
@@ -84,6 +90,10 @@ export default function CompraModal({ compra, empleado = '', onCerrar, onCambio 
               ))}
             </tbody>
           </table>
+
+          {compra.compra && onSumarGasto && (
+            <button style={{ ...S.btnSec, alignSelf: 'flex-start' }} onClick={() => onSumarGasto(compra)}>🚚 Sumar un gasto a esta compra (flete, envío…)</button>
+          )}
 
           {compra.saldo > 0 ? (
             <div style={S.caja}>
@@ -136,5 +146,6 @@ const S = {
   label: { display: 'block', fontFamily: 'Barlow Condensed, sans-serif', fontSize: 12, color: 'var(--accent)', letterSpacing: 1, fontWeight: 700, marginBottom: 4 },
   input: { width: '100%', boxSizing: 'border-box', background: 'var(--surface)', border: '1.5px solid var(--border)', borderRadius: 8, color: 'var(--text)', fontFamily: 'Barlow, sans-serif', fontSize: 15, padding: '9px 12px', outline: 'none', colorScheme: 'dark' },
   btn: { flex: 2, padding: '12px', background: 'var(--accent)', border: 'none', borderRadius: 8, color: '#000', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 15, letterSpacing: 1, cursor: 'pointer' },
+  gastoTag: { display: 'inline-block', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 11, color: '#a78bfa', border: '1px solid #a78bfa', borderRadius: 4, padding: '0 5px', marginRight: 6 },
   btnSec: { flex: 1, padding: '10px 12px', background: 'var(--surface)', border: '1.5px solid var(--border)', borderRadius: 8, color: 'var(--text)', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 15, cursor: 'pointer' },
 }

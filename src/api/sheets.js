@@ -1574,7 +1574,8 @@ export async function registrarPago({ tipo, fechaIngreso, fechaPago, articuloId,
   const cant = Number(cantidad)||0, cu = parsePrecio(costoUnitario), mp = parsePrecio(montoPagado)
   const costoTotal = cant*cu
   await asegurarModificadoPagos()
-  const esCompra = tipo === 'MERCADERÍA' && (compra || comprobante)
+  // Mercadería con compra o comprobante, o un gasto (flete…) asociado a una compra
+  const esCompra = !!compra || (tipo === 'MERCADERÍA' && !!comprobante)
   if (esCompra) await asegurarColumnasCompra()
   const extra = esCompra ? [compra || '', comprobante ? `'${comprobante}` : ''] : []
   const row = [idPago,tipo||'GASTO',fechaIngreso?`'${fechaIngreso}`:'',fechaPago?`'${fechaPago}`:'',articuloId||'',articuloNombre||'',cant,cu,costoTotal,descripcion||'',proveedor||'',mp,pagado?'TRUE':'FALSE',empleado||'','FALSE',ahoraModificado(),...extra]
@@ -1605,7 +1606,7 @@ export async function actualizarPago(rowNum, campos, empleado = '') {
   const cant = Number(campos.cantidad)||0, cu = parsePrecio(campos.costoUnitario), mp = parsePrecio(campos.montoPagado)
   const costoTotal = cant*cu
   await asegurarModificadoPagos()
-  const conCompra = campos.compra !== undefined && campos.tipo === 'MERCADERÍA'
+  const conCompra = campos.compra !== undefined && (campos.tipo === 'MERCADERÍA' || !!campos.compra || !!campos.compraAnterior)
   if (conCompra && (campos.compra || campos.comprobante || campos.compraAnterior)) await asegurarColumnasCompra()
   const extra = conCompra ? [campos.compra || '', campos.comprobante ? `'${campos.comprobante}` : ''] : []
   const mod = ahoraModificado()

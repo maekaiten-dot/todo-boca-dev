@@ -4,7 +4,7 @@ import { parseMonto as numArs } from '../lib/montos.js'
 import ModalArticulo from '../components/ModalArticulo.jsx'
 import DesgloseStock from '../components/DesgloseStock.jsx'
 import { GRUPOS_INICIALES } from '../lib/gruposIniciales.js'
-import { cargarGruposIniciales, getArticulosAdmin, generarIdArticulo, agregarArticulo, editarArticulo, toggleDisponibilidad, calcularStockTodos } from '../api/sheets.js'
+import { cargarGruposIniciales, getArticulosAdmin, generarIdArticulo, agregarArticulo, editarArticulo, calcularStockTodos } from '../api/sheets.js'
 
 const CLOUDINARY_CLOUD = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
 const CLOUDINARY_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET
@@ -129,16 +129,6 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
       showToast('Error al guardar', 'error')
     } finally {
       setSaving(false)
-    }
-  }
-
-  async function handleToggle(art) {
-    const nueva = art.disponibilidad?.toUpperCase() === 'ACTIVO' ? 'INACTIVO' : 'ACTIVO'
-    try {
-      await toggleDisponibilidad(art.rowNum, art.id, nueva, empleado, art)
-      setArticulos(prev => prev.map(a => a.rowNum === art.rowNum ? { ...a, disponibilidad: nueva } : a))
-    } catch (e) {
-      showToast('Error al cambiar disponibilidad', 'error')
     }
   }
 
@@ -308,10 +298,8 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
                     {!loadingStock && stockContado[art.id] === false && <div style={{fontFamily:'Barlow, sans-serif', fontSize:11, color:'var(--muted)'}} title="Todavía no se contó: el número no es confiable">sin contar</div>}
                   </td>
                   <td style={S.td}>
-                    {esAdmin
-                      ? <button style={{...S.toggleBtn, ...(activo ? S.toggleActivo : S.toggleInactivo)}} onClick={() => handleToggle(art)}>{activo ? 'ACTIVO' : 'INACTIVO'}</button>
-                      : <span style={{...S.toggleBtn, ...(activo ? S.toggleActivo : S.toggleInactivo)}}>{activo ? 'ACTIVO' : 'INACTIVO'}</span>
-                    }
+                    {/* Solo se muestra: el estado se cambia desde ✏️ Editar (así no se toca por error) */}
+                    <span style={{...S.toggleBtn, ...(activo ? S.toggleActivo : S.toggleInactivo), cursor:'default'}}>{activo ? 'ACTIVO' : 'INACTIVO'}</span>
                   </td>
                   {esAdmin && <td style={S.td}>
                     <button style={S.editBtn} onClick={() => abrirEditar(art)}>✏️</button>

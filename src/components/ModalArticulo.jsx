@@ -135,17 +135,7 @@ export default function ModalArticulo({ inicial, editando = null, empleado = '',
 
                 <MargenArticulo precio={form.precioUnitario} costo={form.costoUnitario} precioAntes={editando ? inicial?.precioUnitario : null} costoAntes={editando ? inicial?.costoUnitario : null} />
   
-                <div style={S.fieldRow}>
-                  <div style={S.fieldGroup}>
-                    <label style={S.label}>STOCK INICIAL</label>
-                    <input style={S.input} type="text" inputMode="numeric" value={form.stockInicial} onChange={e => setForm(f => ({...f, stockInicial: e.target.value}))} />
-                  </div>
-                  <div style={S.fieldGroup}>
-                    <label style={S.label}>CANT. A REPONER</label>
-                    <input style={S.input} type="text" inputMode="numeric" value={form.cantidadReponer} onChange={e => setForm(f => ({...f, cantidadReponer: e.target.value}))} />
-                  </div>
-                </div>
-  
+                {/* STOCK INICIAL y CANT. A REPONER venían de la app anterior: ya no se muestran (se guardan sin cambios) */}
                 <div style={S.fieldGroup}>
                   <label style={S.label}>DISPONIBILIDAD</label>
                   <div style={S.dispBtns}>
@@ -285,8 +275,8 @@ const S = {
   dispBtnOpt: { flex:1, padding:'10px', background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--muted)', fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:15, cursor:'pointer', letterSpacing:1 },
   dispBtnOptActive: { background:'rgba(245,200,0,0.12)', border:'1.5px solid var(--accent)', color:'var(--accent)' },
   textarea: { background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--text)', fontFamily:'Barlow, sans-serif', fontSize:15, padding:'10px 12px', outline:'none', resize:'vertical' },
-  fotoPreviewWrap: { width:'100%', height:160, borderRadius:10, overflow:'hidden', background:'var(--surface2)', border:'1.5px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'center' },
-  fotoPreviewImg: { width:'100%', height:'100%', objectFit:'cover' },
+  fotoPreviewWrap: { width:'100%', height:220, borderRadius:10, overflow:'hidden', background:'var(--surface2)', border:'1.5px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'center' },
+  fotoPreviewImg: { width:'100%', height:'100%', objectFit:'contain' },
   fotoPreviewVacio: { display:'flex', alignItems:'center', justifyContent:'center', width:'100%', height:'100%' },
   fotoBtns: { display:'flex', gap:8, marginTop:6 },
   fotoBtn: { flex:1, padding:'10px', background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--text)', fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:15, cursor:'pointer', letterSpacing:0.5 },

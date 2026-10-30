@@ -1,23 +1,43 @@
 // src/App.jsx
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, lazy, Suspense } from 'react'
 import NuevaVenta from './pages/NuevaVenta.jsx'
 import VentasDelDia from './pages/VentasDelDia.jsx'
-import LogVentas from './pages/LogVentas.jsx'
-import Estadisticas from './pages/Estadisticas.jsx'
-import Articulos from './pages/Articulos.jsx'
-import Ingresos from './pages/Ingresos.jsx'
-import Pagos from './pages/Pagos.jsx'
-import GastosFijos from './pages/GastosFijos.jsx'
-import Rotacion from './pages/Rotacion.jsx'
-import GastosCaja from './pages/GastosCaja.jsx'
-import Tutoriales from './pages/Tutoriales.jsx'
-import Conteo from './pages/Conteo.jsx'
-import Fichadas from './pages/Fichadas.jsx'
-import Asistencia from './pages/Asistencia.jsx'
-import Administracion from './pages/Administracion.jsx'
 import FicharTablet from './components/FicharTablet.jsx'
 import AvisoPrecios, { totalCambios, resumenCambios } from './components/AvisoPrecios.jsx'
 import { getAlias, getArticulos, getUsuarios, registrarLog, calcularStockTodos, leerArticulosVistos, guardarArticulosVistos, getTutoriales, leerTutorialesVistos, guardarTutorialesVistos } from './api/sheets.js'
+// Las solapas que no son Vender ni Hoy se bajan aparte (la app abre más rápido). Unos segundos
+// después de abrir se precargan en segundo plano, así al tocarlas ya están.
+const CARGAS = {
+  LogVentas: () => import('./pages/LogVentas.jsx'),
+  Estadisticas: () => import('./pages/Estadisticas.jsx'),
+  Articulos: () => import('./pages/Articulos.jsx'),
+  Ingresos: () => import('./pages/Ingresos.jsx'),
+  Pagos: () => import('./pages/Pagos.jsx'),
+  GastosFijos: () => import('./pages/GastosFijos.jsx'),
+  Rotacion: () => import('./pages/Rotacion.jsx'),
+  GastosCaja: () => import('./pages/GastosCaja.jsx'),
+  Tutoriales: () => import('./pages/Tutoriales.jsx'),
+  Conteo: () => import('./pages/Conteo.jsx'),
+  Fichadas: () => import('./pages/Fichadas.jsx'),
+  Asistencia: () => import('./pages/Asistencia.jsx'),
+  Administracion: () => import('./pages/Administracion.jsx'),
+}
+const LogVentas = lazy(CARGAS.LogVentas)
+const Estadisticas = lazy(CARGAS.Estadisticas)
+const Articulos = lazy(CARGAS.Articulos)
+const Ingresos = lazy(CARGAS.Ingresos)
+const Pagos = lazy(CARGAS.Pagos)
+const GastosFijos = lazy(CARGAS.GastosFijos)
+const Rotacion = lazy(CARGAS.Rotacion)
+const GastosCaja = lazy(CARGAS.GastosCaja)
+const Tutoriales = lazy(CARGAS.Tutoriales)
+const Conteo = lazy(CARGAS.Conteo)
+const Fichadas = lazy(CARGAS.Fichadas)
+const Asistencia = lazy(CARGAS.Asistencia)
+const Administracion = lazy(CARGAS.Administracion)
+const precargarSolapas = () => Object.values(CARGAS).forEach(f => f().catch(() => {}))
+const CargandoSolapa = () => <div style={{ padding: 24, fontFamily: 'Barlow, sans-serif', color: 'var(--muted)' }}>Cargando…</div>
+
 
 // Aviso de cambios en artículos (precios, productos nuevos, activados / desactivados): cada dispositivo
 // guarda los artículos que ya vio y la app vuelve a leer ARTICULOS cada INTERVALO_PRECIOS (y al volver
@@ -269,10 +289,15 @@ export default function App() {
   // Stock: se recalcula cada 3 minutos y al volver a la app (antes se calculaba solo al abrirla, y
   // durante el día quedaba un número viejo)
   useEffect(() => {
-    const recalc = () => { if (document.visibilityState === 'visible' && articulosRef.current.length) recalcularStock(articulosRef.current) }
+    let ultimo = Date.now()
+    const recalc = () => {
+      if (document.visibilityState !== 'visible' || !articulosRef.current.length || Date.now() - ultimo < 60 * 1000) return
+      ultimo = Date.now(); recalcularStock(articulosRef.current)
+    }
     const id = setInterval(recalc, 3 * 60 * 1000)
+    const pre = setTimeout(precargarSolapas, 5000)
     document.addEventListener('visibilitychange', recalc)
-    return () => { clearInterval(id); document.removeEventListener('visibilitychange', recalc) }
+    return () => { clearInterval(id); clearTimeout(pre); document.removeEventListener('visibilitychange', recalc) }
   }, [])
   // Al elegir perfil (o cambiarlo) se revisa enseguida
   useEffect(() => { if (perfilGuardado && articulosRef.current.length) detectarCambiosPrecio(articulosRef.current) }, [perfilGuardado])
@@ -421,43 +446,43 @@ export default function App() {
             <div style={tabStyle('hoy')}><VentasDelDia refreshKey={refreshKey} puedeAnular={true} usuarios={usuarios} perfilNombre={empleadoActual} esAdmin={esAdmin} articulos={articulos} /></div>
           )}
           {tabsVisitadas.has('caja') && (
-            <div style={tabStyle('caja')}><GastosCaja usuarios={usuarios} perfilNombre={empleadoActual} onRegistrado={() => setRefreshKey(k => k + 1)} /></div>
+            <div style={tabStyle('caja')}><Suspense fallback={<CargandoSolapa />}><GastosCaja usuarios={usuarios} perfilNombre={empleadoActual} onRegistrado={() => setRefreshKey(k => k + 1)} /></Suspense></div>
           )}
           {esAdmin && tabsVisitadas.has('log') && (
-            <div style={tabStyle('log')}><LogVentas esAdmin={esAdmin} articulos={articulos} usuarios={usuarios} perfilNombre={empleadoActual} /></div>
+            <div style={tabStyle('log')}><Suspense fallback={<CargandoSolapa />}><LogVentas esAdmin={esAdmin} articulos={articulos} usuarios={usuarios} perfilNombre={empleadoActual} /></Suspense></div>
           )}
           {esAdmin && tabsVisitadas.has('stats') && (
-            <div style={tabStyle('stats')}><Estadisticas esAdmin={esAdmin} usuarios={usuarios} perfilNombre={empleadoActual} /></div>
+            <div style={tabStyle('stats')}><Suspense fallback={<CargandoSolapa />}><Estadisticas esAdmin={esAdmin} usuarios={usuarios} perfilNombre={empleadoActual} /></Suspense></div>
           )}
           {tabsVisitadas.has('arts') && (
-            <div style={tabStyle('arts')}><Articulos empleado={empleadoActual} esAdmin={esAdmin} /></div>
+            <div style={tabStyle('arts')}><Suspense fallback={<CargandoSolapa />}><Articulos empleado={empleadoActual} esAdmin={esAdmin} /></Suspense></div>
           )}
           {tabsVisitadas.has('conteo') && (
-            <div style={tabStyle('conteo')}><Conteo articulos={articulos} usuarios={usuarios} perfilNombre={empleadoActual} esAdmin={esAdmin} onActualizado={() => recalcularStock()} /></div>
+            <div style={tabStyle('conteo')}><Suspense fallback={<CargandoSolapa />}><Conteo articulos={articulos} usuarios={usuarios} perfilNombre={empleadoActual} esAdmin={esAdmin} onActualizado={() => recalcularStock()} /></Suspense></div>
           )}
           {tabsVisitadas.has('tutos') && (
-            <div style={tabStyle('tutos')}><Tutoriales esAdmin={esAdmin} perfilNombre={empleadoActual} version={versionTutos} /></div>
+            <div style={tabStyle('tutos')}><Suspense fallback={<CargandoSolapa />}><Tutoriales esAdmin={esAdmin} perfilNombre={empleadoActual} version={versionTutos} /></Suspense></div>
           )}
           {esAdmin && tabsVisitadas.has('rota') && (
-            <div style={tabStyle('rota')}><Rotacion articulos={articulos} stockMap={stockMap} /></div>
+            <div style={tabStyle('rota')}><Suspense fallback={<CargandoSolapa />}><Rotacion articulos={articulos} stockMap={stockMap} /></Suspense></div>
           )}
           {esAdmin && tabsVisitadas.has('ing') && (
-            <div style={tabStyle('ing')}><Ingresos /></div>
+            <div style={tabStyle('ing')}><Suspense fallback={<CargandoSolapa />}><Ingresos /></Suspense></div>
           )}
           {esAdmin && tabsVisitadas.has('pagos') && (
-            <div style={tabStyle('pagos')}><Pagos empleado={empleadoActual} empleadoFijo={empleadoActual} usuarios={usuarios} /></div>
+            <div style={tabStyle('pagos')}><Suspense fallback={<CargandoSolapa />}><Pagos empleado={empleadoActual} empleadoFijo={empleadoActual} usuarios={usuarios} /></Suspense></div>
           )}
           {tabsVisitadas.has('asis') && (
-            <div style={tabStyle('asis')}><Asistencia usuarios={usuarios} esAdmin={esAdmin} /></div>
+            <div style={tabStyle('asis')}><Suspense fallback={<CargandoSolapa />}><Asistencia usuarios={usuarios} esAdmin={esAdmin} /></Suspense></div>
           )}
           {esAdmin && tabsVisitadas.has('fich') && (
-            <div style={tabStyle('fich')}><Fichadas usuarios={usuarios} /></div>
+            <div style={tabStyle('fich')}><Suspense fallback={<CargandoSolapa />}><Fichadas usuarios={usuarios} /></Suspense></div>
           )}
           {esAdmin && tabsVisitadas.has('admin') && (
-            <div style={tabStyle('admin')}><Administracion perfilNombre={empleadoActual} /></div>
+            <div style={tabStyle('admin')}><Suspense fallback={<CargandoSolapa />}><Administracion perfilNombre={empleadoActual} /></Suspense></div>
           )}
           {esAdmin && tabsVisitadas.has('gastos') && (
-            <div style={tabStyle('gastos')}><GastosFijos soloLectura={!esAdrian} /></div>
+            <div style={tabStyle('gastos')}><Suspense fallback={<CargandoSolapa />}><GastosFijos soloLectura={!esAdrian} /></Suspense></div>
           )}
         </div>
 

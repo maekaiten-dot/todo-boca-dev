@@ -6,9 +6,16 @@ const PRIVATE_KEY = import.meta.env.VITE_GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n
 const SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 let _cachedToken = null
 let _tokenExpiry = 0
+let _tokenPromesa = null
 
-async function getAccessToken() {
-  if (_cachedToken && Date.now() < _tokenExpiry - 60000) return _cachedToken
+// Si varias lecturas arrancan juntas (al abrir la app), comparten el mismo pedido de token
+function getAccessToken() {
+  if (_cachedToken && Date.now() < _tokenExpiry - 60000) return Promise.resolve(_cachedToken)
+  if (!_tokenPromesa) _tokenPromesa = pedirToken().finally(() => { _tokenPromesa = null })
+  return _tokenPromesa
+}
+
+async function pedirToken() {
   const header = { alg: 'RS256', typ: 'JWT' }
   const now = Math.floor(Date.now() / 1000)
   const claim = { iss: CLIENT_EMAIL, scope: SCOPES.join(' '), aud: 'https://oauth2.googleapis.com/token', iat: now, exp: now + 3600 }
@@ -306,19 +313,65 @@ function mapRow(r) {
   }
 }
 
-export async function getVentasHoy() {
-  const data = await sheetsGet('DETALLE DE VENTAS!A2:AL')
-  const rows = data.values || []
+// ── Caché de DETALLE DE VENTAS ──────────────────────────────────────────────────
+// La hoja tiene decenas de miles de renglones: bajarla entera cada vez (stock cada 3 minutos, Hoy,
+// Estadísticas…) era lo que hacía lenta la app. Ahora se baja entera una vez y después solo se
+// vuelve a leer el final (las ventas de hoy y los últimos renglones), que es lo que cambia.
+// Cada 15 minutos se vuelve a bajar entera, por si se tocó algo viejo desde otro equipo o a mano.
+// Antes de pegar el final se controla que la planilla no se haya movido (filas borradas o
+// insertadas arriba); si se movió, se baja entera.
+const DV = { filas: null, tCompleta: 0, tCola: 0, invalida: false, promesa: null }
+const DV_COMPLETA_MS = 15 * 60 * 1000
+const DV_FRESCA_MS = 8 * 1000      // dos pedidos casi juntos usan la misma lectura
+const DV_COLA = 300                // renglones del final que se releen siempre (además de los de hoy)
+
+function inicioColaDetalle(filas) {
   const { fecha } = getArgentinaDate()
-  return rows.filter(r => r[2]===fecha).map(mapRow)
+  let i = filas.length - 1
+  while (i >= 0 && String(filas[i]?.[2] || '').replace(/^'/, '') === fecha) i--
+  return Math.max(0, Math.min(i + 1, filas.length - DV_COLA))
+}
+
+function leerDetalle() {
+  if (DV.promesa) return DV.promesa
+  if (DV.filas && !DV.invalida && Date.now() - DV.tCola < DV_FRESCA_MS && Date.now() - DV.tCompleta < DV_COMPLETA_MS) return Promise.resolve(DV.filas)
+  DV.promesa = (async () => {
+    const completa = async () => {
+      const d = await sheetsGet('DETALLE DE VENTAS!A2:AL')
+      DV.filas = d.values || []; DV.tCompleta = DV.tCola = Date.now(); DV.invalida = false
+    }
+    if (!DV.filas || DV.invalida || Date.now() - DV.tCompleta >= DV_COMPLETA_MS) await completa()
+    else {
+      const desde = inicioColaDetalle(DV.filas)
+      const d = await sheetsGet(`DETALLE DE VENTAS!A${desde + 2}:AL`)
+      const cola = d.values || []
+      const antes = String(DV.filas[desde]?.[0] || ''), ahora = String(cola[0]?.[0] || '')
+      if (desde < DV.filas.length && antes !== ahora) await completa()   // la planilla se movió
+      else { DV.filas = DV.filas.slice(0, desde).concat(cola); DV.tCola = Date.now() }
+    }
+    return DV.filas
+  })().finally(() => { DV.promesa = null })
+  return DV.promesa
+}
+
+// Después de escribir en DETALLE DE VENTAS: la próxima lectura vuelve a leer el final.
+// filas: las filas de la planilla que se tocaron; si alguna es vieja (fuera del final), se baja entera.
+function detalleCambio(filas = []) {
+  DV.tCola = 0
+  if (DV.filas && filas.some(f => f - 2 < DV.filas.length - DV_COLA)) DV.invalida = true
+}
+
+export async function getVentasHoy() {
+  const rows = await leerDetalle()
+  const { fecha } = getArgentinaDate()
+  return rows.filter(r => String(r[2] || '').replace(/^'/, '')===fecha).map(mapRow)
 }
 
 // unificar: true → las ventas de artículos unificados se cuentan como del artículo que quedó
 // (para estadísticas y rotación). El listado de ventas usa el código original.
 export async function getHistoricoVentas({ unificar = false } = {}) {
   // Hasta AK para incluir el POSNET (amarillo/blanco) y su corrección manual
-  const [data] = await Promise.all([sheetsGet('DETALLE DE VENTAS!A2:AL'), unificar ? asegurarAlias() : null])
-  const rows = data.values || []
+  const [rows] = await Promise.all([leerDetalle(), unificar ? asegurarAlias() : null])
   const ventas = rows.filter(r => r[0]).map(mapRow)
   if (unificar) ventas.forEach(v => { const c = idCanonico(v.articulo); if (c !== v.articulo) { v.articuloOriginal = v.articulo; v.articulo = c } })
   return ventas
@@ -328,30 +381,25 @@ export async function getHistoricoVentas({ unificar = false } = {}) {
 // la primera fila del período, y después baja completas solo las filas desde ahí. Así el Historial
 // no descarga todas las ventas desde que arrancó el negocio.
 export async function getVentasDesde(desde) {
-  const fechas = (await sheetsGet('DETALLE DE VENTAS!C2:C')).values || []
   const clave = f => { const [d, m, a] = String(f || '').replace(/^'/, '').split(' ')[0].split('/').map(Number); return d && m && a ? `${a}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}` : '' }
-  // la primera fila con fecha dentro del período (aunque haya alguna fila fuera de orden)
-  const idx = fechas.findIndex(r => clave(r[0]) >= desde)
-  if (idx < 0) return []
-  const data = await sheetsGet(`DETALLE DE VENTAS!A${idx + 2}:AL`)
-  return (data.values || []).filter(r => r[0] && clave(r[2]) >= desde).map(mapRow)
+  const rows = await leerDetalle()
+  return rows.filter(r => r[0] && clave(r[2]) >= desde).map(mapRow)
 }
 
 export async function anularVenta(idVenta, empleado = '') {
-  const data = await sheetsGet('DETALLE DE VENTAS!A2:U')
-  const rows = data.values || []
-  const requests = []
-  rows.forEach((r, idx) => { if (r[1]===idVenta) requests.push(sheetsUpdate(`DETALLE DE VENTAS!U${idx+2}`, [['TRUE']])) })
-  if (requests.length===0) throw new Error('No se encontraron filas para anular')
-  await Promise.all(requests)
-  await registrarLog({ accion:'VENTA_ANULADA', detalle:`Venta ${idVenta} anulada (${requests.length} items)`, idReferencia:idVenta, empleado, resultado:'OK' })
-  return requests.length
+  const rows = (await sheetsGet('DETALLE DE VENTAS!B2:B')).values || []
+  const filas = []
+  rows.forEach((r, idx) => { if (r[0]===idVenta) filas.push(idx + 2) })
+  if (filas.length===0) throw new Error('No se encontraron filas para anular')
+  await sheetsBatchUpdate(filas.map(f => ({ range: `DETALLE DE VENTAS!U${f}`, values: [['TRUE']] })))
+  detalleCambio(filas)
+  await registrarLog({ accion:'VENTA_ANULADA', detalle:`Venta ${idVenta} anulada (${filas.length} items)`, idReferencia:idVenta, empleado, resultado:'OK' })
+  return filas.length
 }
 
 // fecha: 'd/m/aaaa' para una venta cargada con fecha de otro día (el código lleva ese día)
-export async function generarIdVenta(fecha = null) {
-  const data = await sheetsGet('DETALLE DE VENTAS!A2:B')
-  const rows = data.values || []
+export async function generarIdVenta(fecha = null, filasAB = null) {
+  const rows = filasAB || (await sheetsGet('DETALLE DE VENTAS!A2:B')).values || []
   let { raw } = getArgentinaDate()
   if (fecha) { const [d, m, a] = String(fecha).split('/').map(Number); raw = new Date(a, m - 1, d) }
   const prefix = `V${String(raw.getFullYear()).slice(2)}${String(raw.getMonth()+1).padStart(2,'0')}${String(raw.getDate()).padStart(2,'0')}`
@@ -403,10 +451,10 @@ export const MOTIVOS_CORRECCION_POSNET = ['Se cobró con el otro posnet', 'El po
 export async function corregirPosnetVenta({ idVenta, posnetNuevo, motivo, detalle = '', quien = '' }) {
   if (!POSNETS.includes(posnetNuevo)) throw new Error('POSNET_INVALIDO')
   if (!motivo || (motivo === 'Otro' && !detalle.trim())) throw new Error('FALTA_MOTIVO')
-  const data = await sheetsGet('DETALLE DE VENTAS!A2:AL')
-  const rows = data.values || []
+  // Solo las columnas que hacen falta: B (venta), P (método) y AI:AJ (posnet y su corrección)
+  const [b, pm, ai] = await Promise.all(['B2:B', 'P2:P', 'AI2:AJ'].map(r => sheetsGet(`DETALLE DE VENTAS!${r}`).then(d => d.values || [])))
   const filas = []
-  rows.forEach((r, i) => { if (r[1] === idVenta) filas.push({ fila: i + 2, metodo: r[15] || '', posnet: r[34] || '', nota: r[35] || '' }) })
+  b.forEach((r, i) => { if (r[0] === idVenta) filas.push({ fila: i + 2, metodo: pm[i]?.[0] || '', posnet: ai[i]?.[0] || '', nota: ai[i]?.[1] || '' }) })
   if (filas.length === 0) throw new Error('VENTA_NO_ENCONTRADA')
   if (!filas.some(f => usaPosnet(f.metodo))) throw new Error('VENTA_SIN_POSNET')
   const anterior = filas[0].posnet || 'SIN DATO'
@@ -415,7 +463,8 @@ export async function corregirPosnetVenta({ idVenta, posnetNuevo, motivo, detall
   await asegurarColumna(COL_CORRECCION_POSNET, 'CORRECCIÓN POSNET')
   const dt = getArgentinaDate()
   const texto = `${anterior} → ${posnetNuevo} · ${motivo}${detalle.trim() ? ` (${detalle.trim()})` : ''} · ${quien || 'sin nombre'} · ${dt.fecha} ${String(dt.hora).slice(0, 5)}`
-  await Promise.all(filas.map(f => sheetsUpdate(`DETALLE DE VENTAS!AI${f.fila}:AJ${f.fila}`, [[posnetNuevo, f.nota ? `${f.nota} | ${texto}` : texto]])))
+  await sheetsBatchUpdate(filas.map(f => ({ range: `DETALLE DE VENTAS!AI${f.fila}:AJ${f.fila}`, values: [[posnetNuevo, f.nota ? `${f.nota} | ${texto}` : texto]] })))
+  detalleCambio(filas.map(f => f.fila))
   await registrarLog({ accion: 'POSNET_CORREGIDO', detalle: `${idVenta} · ${texto}`, idReferencia: idVenta, empleado: quien, resultado: 'OK' })
   return { anterior, posnetNuevo }
 }
@@ -592,12 +641,12 @@ export async function registrarVenta({ items, devueltos = [], metodoPago, pagos 
     constancia = `${ahora.fecha} ${ahora.hora} ${cargadaPor || empleado || 'Admin'}: cargada después, con fecha ${dt.fecha} ${dt.hora.slice(0, 5)}`
     await asegurarColumna(COL_EDICIONES, 'EDICIONES')
   }
-  const idVenta = await generarIdVenta(dt.fecha !== ahora.fecha ? dt.fecha : null)
+  // Una sola lectura de A:B sirve para el código de la venta y para saber dónde termina la planilla
+  const filasAB = (await sheetsGet('DETALLE DE VENTAS!A2:B')).values || []
+  const idVenta = await generarIdVenta(dt.fecha !== ahora.fecha ? dt.fecha : null, filasAB)
   const dtosPorItem = calcularDescuentosImanesItems(items)
-  const existentes = await sheetsGet('DETALLE DE VENTAS!A:A')
-  const allRows = existentes.values || []
   let lastDataRow = 1
-  allRows.forEach((r, i) => { if (r[0] && String(r[0]).trim()) lastDataRow = i+1 })
+  filasAB.forEach((r, i) => { if (r[0] && String(r[0]).trim()) lastDataRow = i+2 })
   const nextRow = lastDataRow + 1
 
   // 1) Precio final de cada línea con promos y descuento socio/manual (sin redondear todavía)
@@ -727,9 +776,9 @@ export async function registrarVenta({ items, devueltos = [], metodoPago, pagos 
   })
   const ultimaCol = ['AD', COL_DTO_SOCIO, COL_DTO_XXXL, COL_DTO_EFECTIVO, COL_REDONDEO, COL_POSNET, COL_CORRECCION_POSNET, COL_PAGOS, COL_EDICIONES][ultimaExtra + 1]
 
-  await Promise.all(rows.map((row, idx) =>
-    sheetsUpdate(`DETALLE DE VENTAS!A${nextRow+idx}:${ultimaCol}${nextRow+idx}`, [row])
-  ))
+  // Todos los renglones de la venta en un solo pedido
+  await sheetsBatchUpdate(rows.map((row, idx) => ({ range: `DETALLE DE VENTAS!A${nextRow+idx}:${ultimaCol}${nextRow+idx}`, values: [row] })))
+  detalleCambio()
 
   const totalVenta = rows.reduce((s, r) => s+(r[18]||0), 0)
   const totalDtoImanes = dtosPorItem.reduce((s, d) => s+d.descuentoImanes, 0)
@@ -842,26 +891,30 @@ export async function editarVenta({ venta, lineas, metodoPago, pagos = null, pos
     ]] })
   }
   await sheetsBatchUpdate(data)
+  detalleCambio(data.map(d => Number(String(d.range).match(/(\d+)$/)?.[1]) || 0))
   await registrarLog({ accion: 'VENTA_EDITADA', detalle: `${venta.idVenta} · ${registro} · Total ${fmtPesos(total)}`, idReferencia: venta.idVenta, empleado: editor, resultado: 'OK' })
   return registro
 }
 
 export async function anularItemVenta(idDetalle, todosLosItems, empleado = '') {
-  const data = await sheetsGet('DETALLE DE VENTAS!A2:U')
-  const rows = data.values || []
-  const requests = []
+  // Solo A (id del renglón), B (id de la venta) y U (anulado)
+  const [ab, u] = await Promise.all([sheetsGet('DETALLE DE VENTAS!A2:B'), sheetsGet('DETALLE DE VENTAS!U2:U')])
+  const rows = (ab.values || []).map((r, i) => { const x = [r[0], r[1]]; x[20] = (u.values || [])[i]?.[0]; return x })
+  const filas = []
   let idVenta = ''
-  rows.forEach((r, idx) => { if (r[0]===idDetalle) { idVenta=r[1]; requests.push(sheetsUpdate(`DETALLE DE VENTAS!U${idx+2}`, [['TRUE']])) } })
-  if (requests.length===0) throw new Error('No se encontró el item')
-  await Promise.all(requests)
+  rows.forEach((r, idx) => { if (r[0]===idDetalle) { idVenta=r[1]; filas.push(idx + 2) } })
+  if (filas.length===0) throw new Error('No se encontró el item')
+  await sheetsBatchUpdate(filas.map(f => ({ range: `DETALLE DE VENTAS!U${f}`, values: [['TRUE']] })))
+  detalleCambio(filas)
   await registrarLog({ accion:'ITEM_ANULADO', detalle:`Item ${idDetalle} anulado`, idReferencia:idDetalle, empleado, resultado:'OK' })
   const idVentaFinal = idVenta || todosLosItems[0]?.idVenta
   if (idVentaFinal) {
     const itemsActivos = todosLosItems.filter(i => i.idDetalle!==idDetalle && !i.anulado)
     if (itemsActivos.length===0) {
       const vr = []
-      rows.forEach((r, idx) => { if (r[1]===idVentaFinal && r[20]!=='TRUE') vr.push(sheetsUpdate(`DETALLE DE VENTAS!U${idx+2}`, [['TRUE']])) })
-      await Promise.all(vr)
+      rows.forEach((r, idx) => { if (r[1]===idVentaFinal && r[20]!=='TRUE') vr.push(idx + 2) })
+      await sheetsBatchUpdate(vr.map(f => ({ range: `DETALLE DE VENTAS!U${f}`, values: [['TRUE']] })))
+      detalleCambio(vr)
       await registrarLog({ accion:'VENTA_ANULADA_AUTO', detalle:`Venta ${idVentaFinal} anulada automáticamente`, idReferencia:idVentaFinal, empleado, resultado:'OK' })
     }
   }
@@ -1238,8 +1291,8 @@ async function getMovimientosRows() {
 
 // Lee todo lo necesario para calcular stock (ventas, ingresos y movimientos)
 export async function getDatosStock() {
-  const [dv, di, movs] = await Promise.all([sheetsGet('DETALLE DE VENTAS!A2:U'), sheetsGet('INGRESOS!A2:K'), getMovimientosRows()])
-  const ventas = (dv.values || []).filter(r => r[0] && r[6] && r[20] !== 'TRUE')
+  const [dvFilas, di, movs] = await Promise.all([leerDetalle(), sheetsGet('INGRESOS!A2:K'), getMovimientosRows()])
+  const ventas = dvFilas.filter(r => r[0] && r[6] && r[20] !== 'TRUE')
     .map(r => ({ id: r[6], cant: Number(r[9]) || 0, ms: fechaHoraAMsAR(r[2], r[3]), total: parsePrecio(r[18]) || parsePrecio(r[11]) }))
   const ingresos = (di.values || []).filter(r => r[0] && r[3] && r[10] !== 'TRUE')
     .map(r => ({ id: r[3], cant: Number(r[5]) || 0, ms: fechaHoraAMsAR(r[1], r[2]) }))
@@ -1286,13 +1339,13 @@ function calcularStockCrudo(articulos, { ventas, ingresos, movimientos }) {
 // posteriores. Si tiene artículos unificados, suma lo de ellos como en el cálculo normal.
 export async function desgloseStock(art) {
   await asegurarAlias()
-  const [dv, di, movs] = await Promise.all([sheetsGet('DETALLE DE VENTAS!A2:U'), sheetsGet('INGRESOS!A2:K'), getMovimientosRows()])
+  const [dvFilas, di, movs] = await Promise.all([leerDetalle(), sheetsGet('INGRESOS!A2:K'), getMovimientosRows()])
   const id = art.id
   const conteos = movs.filter(m => !m.anulado && m.tipo === 'CONTEO' && m.articuloId === id).sort((a, b) => a.ms - b.ms)
   const conteo = conteos[conteos.length - 1] || null
   const desde = conteo ? conteo.ms : -Infinity
   const eventos = []
-  ;(dv.values || []).forEach(r => {
+  ;dvFilas.forEach(r => {
     if (!r[0] || r[6] !== id || r[20] === 'TRUE') return
     const ms = fechaHoraAMsAR(r[2], r[3]); if (!(ms > desde)) return
     const cant = Number(r[9]) || 0

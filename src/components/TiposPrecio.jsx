@@ -47,8 +47,8 @@ export default function TiposPrecio({ articulos, ventas, ingresos, hoy }) {
   return (
     <div style={S.wrap}>
       <div style={S.nota}>
-        <b>Tipo por precio</b> (tercios de los {cortes.n} artículos activos con precio, se recalcula solo):{' '}
-        <b style={{ color: COLOR.POPULAR }}>Popular</b> hasta {$(cortes.c1 - 1)} · <b style={{ color: COLOR.ESTANDAR }}>Estándar</b> de {$(cortes.c1)} a {$(cortes.c2 - 1)} · <b style={{ color: COLOR.PREMIUM }}>Premium</b> desde {$(cortes.c2)}.
+        <b>Tipo por precio</b>: <b style={{ color: COLOR.PREMIUM }}>Premium</b> desde {$(cortes.c2)} (donde arranca el tercio más caro de la facturación: pocos artículos, los más caros) · <b style={{ color: COLOR.ESTANDAR }}>Estándar</b> de {$(cortes.c1)} a {$(cortes.c2 - 1)} · <b style={{ color: COLOR.POPULAR }}>Popular</b> hasta {$(cortes.c1 - 1)} (el corte entre los dos está en el salto de precios más marcado).
+        {cortes.porVentas ? ' Se recalcula solo una vez por mes, con las ventas de las 26 semanas hasta el fin del mes pasado.' : ' Todavía sin ventas para calcular: se usan tercios por cantidad de artículos.'}
         {' '}<b>Rotación</b>: unidades por semana en las últimas {SEMANAS_VENTANA} semanas, comparada contra los de su mismo tipo (los artículos con menos tiempo se cuentan desde que llegaron).
         {' '}<b>Ganancia/semana</b> = (precio − costo) × unidades por semana, con el precio y el costo de hoy. Es lo que conviene maximizar, no las unidades.
         {' '}<b>🌎 Turistas</b>: parte de lo vendido que se pagó en dólares, reales, euros o Pix (seguro turista); <b>🏠 Locales</b>: efectivo en pesos o transferencia. La tarjeta y el QR los usan los dos y no cuentan para ninguno.

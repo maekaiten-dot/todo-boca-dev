@@ -1,9 +1,9 @@
 // src/components/ModalArticulo.jsx
 // Ventana de artículo nuevo / editar artículo. La usan la pantalla Arts. y el escaneo de facturas
 // (que la abre con el nombre y el costo leídos de la factura ya completos).
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { parseMonto as numArs } from '../lib/montos.js'
-import { generarIdArticulo, agregarArticulo, editarArticulo } from '../api/sheets.js'
+import { generarIdArticulo, agregarArticulo, editarArticulo, getHistoricoVentas } from '../api/sheets.js'
 import HerramientasArticulo from './HerramientasArticulo.jsx'
 import { TIPOS, NOMBRE_TIPO, cortesDePrecio, tipoAutomatico } from '../lib/tiposProducto.js'
 
@@ -63,7 +63,10 @@ export default function ModalArticulo({ inicial, editando = null, empleado = '',
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0], 'es'))
   })()
   // Tipo de producto: automático por precio (tercios de la lista) o forzado a mano
-  const cortes = cortesDePrecio(articulos)
+  // Las ventas ya están en memoria (las usa el stock), así que leerlas acá no vuelve a bajar la planilla
+  const [ventasCortes, setVentasCortes] = useState([])
+  useEffect(() => { getHistoricoVentas({ unificar: true }).then(setVentasCortes).catch(() => {}) }, [])
+  const cortes = useMemo(() => cortesDePrecio(articulos, ventasCortes), [articulos, ventasCortes])
   const tipoAuto = tipoAutomatico(numArs(form.precioUnitario), cortes)
   const grupoNorm = String(form.grupo || '').trim().toLowerCase()
   const otrosDelGrupo = grupoNorm ? articulos.filter(a => a.id !== form.id && String(a.grupo || '').trim().toLowerCase() === grupoNorm) : []

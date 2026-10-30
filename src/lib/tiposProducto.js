@@ -1,10 +1,12 @@
 // src/lib/tiposProducto.js
-// Tipos de producto: POPULAR / ESTÁNDAR / PREMIUM según el precio de venta, con cortes en los
-// tercios de precio de los artículos activos (se recalculan solos cada vez que cambian los precios).
+// Tipos de producto: POPULAR / ESTÁNDAR / PREMIUM según el precio de venta (ver cortesDePrecio).
 // Dentro de cada tipo, la rotación (unidades por semana) se compara contra los de su mismo tipo:
 // ALTA / MEDIA / BAJA. Cada casillero tipo × rotación lleva una acción de precio sugerida.
 // El tipo se puede forzar a mano por artículo (columna O de ARTICULOS: TIPO).
 import { parseMonto } from './montos.js'
+
+// "23/9/2026" → número de día
+const diaDe = f => { const p = String(f || '').replace(/^'/, '').split(' ')[0].split('/').map(Number); return p[2] ? Math.floor(Date.UTC(p[2], p[1] - 1, p[0]) / 86400000) : null }
 
 export const TIPOS = ['POPULAR', 'ESTANDAR', 'PREMIUM']
 export const NOMBRE_TIPO = { POPULAR: 'Popular', ESTANDAR: 'Estándar', PREMIUM: 'Premium' }
@@ -23,11 +25,51 @@ export const esActivo = a => { const d = String(a.disponibilidad || '').toUpperC
 const precioDe = a => parseMonto(a.precioUnitario || 0)
 export const tipoManualDe = a => { const t = String(a.tipoManual || '').toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim(); return TIPOS.includes(t) ? t : '' }
 
-// Cortes: el precio en el tercio y en los dos tercios de la lista de activos con precio
-export function cortesDePrecio(articulos) {
-  const p = articulos.filter(esActivo).map(precioDe).filter(x => x > 0).sort((a, b) => a - b)
-  if (p.length < 3) return null
-  return { c1: p[Math.floor(p.length / 3)], c2: p[Math.floor(p.length * 2 / 3)], n: p.length }
+// Cortes (se recalculan una vez por mes, con las ventas de las 26 semanas hasta el fin del mes pasado):
+// · Premium: desde el precio donde arranca el tercio más caro de la facturación (pocos artículos,
+//   los más caros: buzos, camisetas oficiales, mates, copas).
+// · Popular / Estándar: entre lo que queda debajo, el salto natural de precios más marcado (lo chico
+//   de impulso: llaveros, imanes, alfajores, bebidas; y la indumentaria y accesorios medianos).
+// Sin ventas para calcular, se usan tercios por cantidad de artículos.
+export const hoyArgentina = () => {
+  const [d, m, a] = new Date().toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' }).split('/').map(Number)
+  return Math.floor(Date.UTC(a, m - 1, d) / 86400000)
+}
+const finMesPasado = hoy => { const f = new Date(hoy * 86400000); return Math.floor(Date.UTC(f.getUTCFullYear(), f.getUTCMonth(), 1) / 86400000) - 1 }
+
+export function cortesDePrecio(articulos, ventas = [], hoy = hoyArgentina()) {
+  const activos = articulos.filter(esActivo).map(a => ({ id: a.id, p: precioDe(a) })).filter(a => a.p > 0)
+  const precios = activos.map(a => a.p).sort((a, b) => a - b)
+  if (precios.length < 3) return null
+  const hasta = finMesPasado(hoy), desde = hasta - SEMANAS_VENTANA * 7
+  const fact = {}
+  for (const v of ventas) {
+    if (v.anulado || !v.articulo) continue
+    const d = diaDe(v.fecha); if (d == null || d <= desde || d > hasta) continue
+    fact[v.articulo] = (fact[v.articulo] || 0) + (v.precioTotalFinal || v.precioTotal || 0)
+  }
+  const conFact = activos.filter(a => fact[a.id] > 0).sort((a, b) => a.p - b.p)
+  const total = conFact.reduce((s, a) => s + fact[a.id], 0)
+  if (!total) return { c1: precios[Math.floor(precios.length / 3)], c2: precios[Math.floor(precios.length * 2 / 3)], n: precios.length, porVentas: false }
+  let acc = 0, pCorte = conFact[conFact.length - 1].p
+  for (const a of conFact) { acc += fact[a.id]; if (acc >= total * 2 / 3) { pCorte = a.p; break } }
+  const c2 = precios.find(p => p > pCorte) ?? pCorte
+  // Salto natural (2 grupos) en escala logarítmica entre los precios debajo de Premium
+  const x = precios.filter(p => p < c2).map(Math.log)
+  let c1 = precios[Math.floor(precios.length / 3)]
+  if (x.length >= 2) {
+    const s1 = [0], s2 = [0]
+    x.forEach(v => { s1.push(s1[s1.length - 1] + v); s2.push(s2[s2.length - 1] + v * v) })
+    const ss = (i, j) => s2[j] - s2[i] - (s1[j] - s1[i]) ** 2 / (j - i)
+    let mejor = null
+    for (let i = 1; i < x.length; i++) {
+      if (x[i] === x[i - 1]) continue
+      const v = ss(0, i) + ss(i, x.length)
+      if (!mejor || v < mejor.v) mejor = { v, i }
+    }
+    if (mejor) c1 = Math.round(Math.exp(x[mejor.i]))
+  }
+  return { c1, c2, n: precios.length, porVentas: true, hasta }
 }
 
 export function tipoAutomatico(precio, cortes) {
@@ -45,12 +87,11 @@ export function claseDePago(metodo) {
   return 'mixto'
 }
 
-const diaDe = f => { const p = String(f || '').replace(/^'/, '').split(' ')[0].split('/').map(Number); return p[2] ? Math.floor(Date.UTC(p[2], p[1] - 1, p[0]) / 86400000) : null }
 
 // ventas: con artículos unificados (getHistoricoVentas({ unificar: true })); ingresos: getIngresos
 // hoy: número de día. metodosDe: separa "A + B" en los medios de pago de la venta.
 export function clasificarArticulos({ articulos, ventas, ingresos = [], hoy, metodosDe = m => [m] }) {
-  const cortes = cortesDePrecio(articulos)
+  const cortes = cortesDePrecio(articulos, ventas, hoy)
   const desde = hoy - SEMANAS_VENTANA * 7
   const primerDia = {}, porArt = {}
   const marcar = (id, d) => { if (id && d != null && (primerDia[id] == null || d < primerDia[id])) primerDia[id] = d }

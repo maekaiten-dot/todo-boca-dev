@@ -88,6 +88,7 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
       precioUnitario: art.precioUnitario, costoUnitario: art.costoUnitario,
       cantidadReponer: art.cantidadReponer, stockCierre: art.stockCierre,
       stockActual: art.stockActual, grupo: art.grupo || '',
+      tipoManual: art.tipoManual || '', tipoManualAntes: art.tipoManual || '',
     })
     setEditando(art)
     setModalAbierto(true)

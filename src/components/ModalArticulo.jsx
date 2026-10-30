@@ -5,6 +5,7 @@ import { useState, useEffect, useRef } from 'react'
 import { parseMonto as numArs } from '../lib/montos.js'
 import { generarIdArticulo, agregarArticulo, editarArticulo } from '../api/sheets.js'
 import HerramientasArticulo from './HerramientasArticulo.jsx'
+import { TIPOS, NOMBRE_TIPO, cortesDePrecio, tipoAutomatico } from '../lib/tiposProducto.js'
 
 const CLOUDINARY_CLOUD = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
 const CLOUDINARY_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET
@@ -61,6 +62,9 @@ export default function ModalArticulo({ inicial, editando = null, empleado = '',
     articulos.forEach(a => { const g = String(a.grupo || '').trim(); if (g) m.set(g, (m.get(g) || 0) + 1) })
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0], 'es'))
   })()
+  // Tipo de producto: automático por precio (tercios de la lista) o forzado a mano
+  const cortes = cortesDePrecio(articulos)
+  const tipoAuto = tipoAutomatico(numArs(form.precioUnitario), cortes)
   const grupoNorm = String(form.grupo || '').trim().toLowerCase()
   const otrosDelGrupo = grupoNorm ? articulos.filter(a => a.id !== form.id && String(a.grupo || '').trim().toLowerCase() === grupoNorm) : []
   const [saving, setSaving] = useState(false)
@@ -134,6 +138,21 @@ export default function ModalArticulo({ inicial, editando = null, empleado = '',
                 </div>
 
                 <MargenArticulo precio={form.precioUnitario} costo={form.costoUnitario} precioAntes={editando ? inicial?.precioUnitario : null} costoAntes={editando ? inicial?.costoUnitario : null} />
+
+                <div style={S.fieldGroup}>
+                  <label style={S.label}>TIPO DE PRODUCTO</label>
+                  <div style={S.dispBtns} role="group" aria-label="Tipo de producto">
+                    {['', ...TIPOS].map(t => (
+                      <button key={t || 'auto'} style={{ ...S.dispBtnOpt, fontSize: 13, padding: '8px 4px', ...((form.tipoManual || '') === t ? S.dispBtnOptActive : {}) }} onClick={() => setForm(f => ({ ...f, tipoManual: t }))}>
+                        {t ? NOMBRE_TIPO[t].toUpperCase() : 'AUTOMÁTICO'}
+                      </button>
+                    ))}
+                  </div>
+                  <div style={S.ayuda}>
+                    {cortes ? <>Automático por precio: hoy sería <b>{tipoAuto ? NOMBRE_TIPO[tipoAuto] : '–'}</b> (Popular hasta ${(cortes.c1 - 1).toLocaleString('es-AR')}, Premium desde ${cortes.c2.toLocaleString('es-AR')}; se recalcula solo).</> : 'Automático por precio.'}
+                    {form.tipoManual ? ' Forzado a mano: no cambia aunque cambien los precios.' : ''}
+                  </div>
+                </div>
   
                 {/* STOCK INICIAL y CANT. A REPONER venían de la app anterior: ya no se muestran (se guardan sin cambios) */}
                 <div style={S.fieldGroup}>

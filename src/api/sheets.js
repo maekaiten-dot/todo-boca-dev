@@ -267,6 +267,7 @@ export async function getArticulos() {
   const iStockC = col('STOCK CIERRE','CIERRE')
   const iStockA = col('STOCK ACTUAL','ACTUAL')
   const iGrupo = headers.findIndex(h => h === 'GRUPO')
+  const iTipo = headers.findIndex(h => h === 'TIPO')
   armarAlias(rows)
   const idx = (found, fallback) => found >= 0 ? found : fallback
   const parseNum = v => parseMonto(v)
@@ -280,6 +281,7 @@ export async function getArticulos() {
       cantidadReponer: parseNum(r[idx(iReponer,8)]), stockCierre: parseNum(r[idx(iStockC,9)]),
       stockActual: parseNum(r[idx(iStockA,10)]),
       grupo: String(r[idx(iGrupo,11)] || '').trim(),
+      tipoManual: String(r[idx(iTipo,14)] || '').trim(),
     }))
     .filter(a => { const d = a.disponibilidad?.toString().toUpperCase(); return !d||d==='ACTIVO'||d==='SI'||d==='TRUE'||d==='1' })
 }
@@ -1005,7 +1007,7 @@ async function historicoSeguro(fn, id, empleado) {
 }
 
 export async function getArticulosAdmin() {
-  const data = await sheetsGet('ARTICULOS!A1:N')
+  const data = await sheetsGet('ARTICULOS!A1:O')
   const rows = data.values || []
   if (rows.length===0) return []
   armarAlias(rows)
@@ -1015,6 +1017,7 @@ export async function getArticulosAdmin() {
     costoUnitario:r[7]||'0', cantidadReponer:r[8]||'0', stockCierre:r[9]||'0', stockActual:r[10]||'0',
     grupo:String(r[11]||'').trim(),
     unificadoEn:String(r[12]||'').trim(), unificadoEl:String(r[13]||'').replace(/^'/, '').trim(),
+    tipoManual:String(r[14]||'').trim(),
   })).filter(r => r.id)
 }
 
@@ -1025,6 +1028,16 @@ async function asegurarColumnaGrupo() {
     const enc = await sheetsGet('ARTICULOS!L1')
     if (!enc.values?.[0]?.[0]) await sheetsUpdate('ARTICULOS!L1', [['GRUPO']])
   } catch (e) { console.warn('No se pudo crear la columna GRUPO:', e) }
+}
+// Columna O de ARTICULOS: TIPO forzado a mano (POPULAR / ESTANDAR / PREMIUM). Vacío = automático
+// por precio (ver src/lib/tiposProducto.js).
+async function guardarTipoManual(rowNum, art) {
+  if (art.tipoManual === undefined || String(art.tipoManual || '') === String(art.tipoManualAntes || '')) return
+  try {
+    const enc = await sheetsGet('ARTICULOS!O1')
+    if (!enc.values?.[0]?.[0]) await sheetsUpdate('ARTICULOS!O1', [['TIPO']])
+    await sheetsUpdate(`ARTICULOS!O${rowNum}`, [[art.tipoManual || '']])
+  } catch (e) { console.warn('No se pudo guardar el tipo:', e) }
 }
 async function asegurarColumnasUnificado() {
   try {
@@ -1136,8 +1149,10 @@ export async function agregarArticulo(art, empleado = '') {
   const nextRow = lastTBRow+1
   const row = filaArticulo(art)
   if (art.grupo) await asegurarColumnaGrupo()
+  let fila = nextRow
   try { await sheetsUpdate(`ARTICULOS!A${nextRow}:${row.length > 11 ? 'L' : 'K'}${nextRow}`, [row]) }
-  catch (e) { await sheetsAppend('ARTICULOS!A1', [row]) }
+  catch (e) { await sheetsAppend('ARTICULOS!A1', [row]); fila = null }
+  if (fila) await guardarTipoManual(fila, art)
   marcarArticuloVisto(art)
   await registrarLog({ accion:'ARTICULO_CREADO', detalle:`${art.id} · ${art.nombre} · $${art.precioUnitario}`, idReferencia:art.id, empleado, resultado:'OK' })
   await historicoSeguro(() => registrarAltaEnHistorico(art, empleado), art.id, empleado)
@@ -1154,6 +1169,7 @@ export async function editarArticulo(rowNum, art, empleado = '') {
   const row = filaArticulo(art)
   if (art.grupo) await asegurarColumnaGrupo()
   await sheetsUpdate(`ARTICULOS!A${rowNum}:${row.length > 11 ? 'L' : 'K'}${rowNum}`, [row])
+  await guardarTipoManual(rowNum, art)
   marcarArticuloVisto(art)
   await registrarLog({ accion:'ARTICULO_EDITADO', detalle:`${art.id} · ${art.nombre} · $${art.precioUnitario}`, idReferencia:art.id, empleado, resultado:'OK' })
   if (anterior) {

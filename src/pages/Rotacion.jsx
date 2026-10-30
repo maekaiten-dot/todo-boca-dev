@@ -4,6 +4,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { parseMonto as parseArs } from '../lib/montos.js'
 import { getHistoricoVentas, getIngresos } from '../api/sheets.js'
+import TiposPrecio from '../components/TiposPrecio.jsx'
 
 const VENTANAS = [30, 60, 90, 365]
 const METRICAS = [
@@ -194,6 +195,7 @@ export default function Rotacion({ articulos = [], stockMap = {} }) {
   const [recBusqueda, setRecBusqueda] = useState('')
   const [recMostrar, setRecMostrar] = useState(30)
   const [vista, setVista] = useState('modelo') // modelo | grupo
+  const [seccion, setSeccion] = useState('rotacion') // rotacion | tipos
   const [abiertos, setAbiertos] = useState(() => new Set()) // grupos desplegados (clave de sección + id)
   const alternar = k => setAbiertos(s => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n })
 
@@ -364,6 +366,10 @@ export default function Rotacion({ articulos = [], stockMap = {} }) {
       </div>
 
       <div style={S.controls}>
+        <Segmento opciones={[{ v: 'rotacion', label: 'Rotación y reposición' }, { v: 'tipos', label: 'Tipos y precios' }]} valor={seccion} onChange={setSeccion} />
+      </div>
+      {seccion === 'tipos' ? <TiposPrecio articulos={articulos} ventas={ventas} ingresos={ingresos} hoy={hoy} /> : <>
+      <div style={S.controls}>
         <Segmento opciones={METRICAS.map(m => ({ v: m.id, label: m.label }))} valor={metrica} onChange={setMetrica} />
         <Segmento opciones={TOPS.map(n => ({ v: n, label: `Top ${n}` }))} valor={top} onChange={setTop} />
         <Segmento opciones={[{ v: 'modelo', label: 'Por modelo' }, { v: 'grupo', label: `Por grupo${nGrupos ? ` (${nGrupos})` : ''}` }]} valor={vista} onChange={setVista} />
@@ -532,6 +538,7 @@ export default function Rotacion({ articulos = [], stockMap = {} }) {
           <button style={S.masBtn} onClick={() => setMostrar(m => m + 50)}>Ver 50 más ({filasVisibles.length - mostrar} restantes)</button>
         )}
       </div>
+      </>}
     </div>
   )
 }

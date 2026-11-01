@@ -1,5 +1,6 @@
 // src/pages/NuevaVenta.jsx
 import { useState, useEffect } from 'react'
+import { calcularPromosConfig, fijaPausada, promoVigente as promoConfigVigente, etiquetaPromo } from '../lib/promos.js'
 import { idCanonico, registrarVenta, registrarLog, REMERAS_XXXL, calcularPromoXXXL, getPromoXXXLEstado, POSNET_METODOS, posnetSugerido, socioPermitido, calcularRedondeoSocio, usaPosnet as metodoUsaPosnet, SEP_METODOS } from '../api/sheets.js'
 import BarcodeScanner from '../components/BarcodeScanner.jsx'
 
@@ -94,12 +95,15 @@ function precioLlaveroPromo(cantTotal) {
 }
 
 // ── Cálculo de totales ────────────────────────────────────────────────────────
-function calcularTotalesConDescuento(carrito, descCarrito, xxxlDisponibles = 0) {
+function calcularTotalesConDescuento(carrito, descCarrito, xxxlDisponibles = 0, promos = []) {
   const activo = promosActivas()
+  // Promos fijas que se pueden pausar desde la solapa Promos
+  const imanesPausados = fijaPausada(promos, 'FIJA-IMANES'), alfajoresPausados = fijaPausada(promos, 'FIJA-ALFAJORES')
 
   let cantA = 0, cantB = 0, cantLlaveros = 0
   carrito.forEach(item => {
-    if (IMANES_A.has(item.id)) cantA += item.cantidad
+    if (imanesPausados) {}
+    else if (IMANES_A.has(item.id)) cantA += item.cantidad
     else if (IMANES_B.has(item.id)) cantB += item.cantidad
     if (activo && LLAVEROS_PROMO.has(item.id)) cantLlaveros += item.cantidad
   })
@@ -129,7 +133,7 @@ function calcularTotalesConDescuento(carrito, descCarrito, xxxlDisponibles = 0) 
     }
   })
 
-  const comboAlfajores = calcularComboAlfajores(carrito)
+  const comboAlfajores = alfajoresPausados ? { grupos: 0, descuento: 0, detallePorId: {} } : calcularComboAlfajores(carrito)
   const descuentoAlfajores = comboAlfajores.descuento
 
   // Promo 2x1 remeras XXXL: se aplica antes de los descuentos de socio / manuales
@@ -138,16 +142,26 @@ function calcularTotalesConDescuento(carrito, descCarrito, xxxlDisponibles = 0) 
   const xxxlPorId = {}
   carrito.forEach((item, idx) => { xxxlPorId[item.id] = promoXXXL.porItem[idx] })
 
-  const subtotalConDesc = subtotalBruto - descuentoImanes - descuentoPromo - descuentoAlfajores - descuentoXXXL
+  // Promos configurables (solapa Promos): no entran los artículos con promo fija ni las remeras del 2x1
+  const excluir = new Set([...(imanesPausados ? [] : [...IMANES_A, ...IMANES_B]), ...(alfajoresPausados ? [] : ALFAJORES_PROMO),
+    ...carrito.filter(i => (i.xxxl || 0) > 0).map(i => i.id)])
+  const promosCfg = calcularPromosConfig(carrito, promos, { excluir })
+  const descuentoPromosCfg = promosCfg.total
+  const cfgPorId = {}
+  carrito.forEach((item, idx) => { cfgPorId[item.id] = (cfgPorId[item.id] || 0) + (promosCfg.porItem[idx] || 0) })
+
+  const subtotalConDesc = subtotalBruto - descuentoImanes - descuentoPromo - descuentoAlfajores - descuentoXXXL - descuentoPromosCfg
   // Base del descuento de socio: sin las remeras del 2x1 XXXL (lo que se paga por ellas = descuentoXXXL)
   const baseDescuentos = subtotalConDesc - descuentoXXXL
   const descCarritoMonto = baseDescuentos * (descCarrito / 100)
   const totalNeto = subtotalConDesc - descCarritoMonto
 
-  return { totalBruto: subtotalBruto, descuentoImanes, descuentoPromo, descuentoAlfajores, descuentoXXXL, promoXXXL, xxxlPorId, subtotalConDesc, baseDescuentos, descCarritoMonto, totalNeto, cantA, cantB, cantLlaveros, comboAlfajores }
+  return { totalBruto: subtotalBruto, descuentoImanes, descuentoPromo, descuentoAlfajores, descuentoXXXL, promoXXXL, xxxlPorId, descuentoPromosCfg, promosCfg, cfgPorId, subtotalConDesc, baseDescuentos, descCarritoMonto, totalNeto, cantA, cantB, cantLlaveros, comboAlfajores }
 }
 
 function precioEfectivoItem(item, totales) {
+  const cfg = totales.cfgPorId?.[item.id] || 0
+  if (cfg > 0) return item.precioUnitario - cfg / item.cantidad
   const activo = promosActivas()
   if (IMANES_A.has(item.id) && totales.cantA > 1) return precioImanConDescuento('A', totales.cantA)
   if (IMANES_B.has(item.id) && totales.cantB > 1) return precioImanConDescuento('B', totales.cantB)
@@ -207,7 +221,7 @@ function XXXLControl({ item, estado, onCambiar }) {
   )
 }
 
-export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistrada, usuarios: usuariosProp, stockMap = {}, empleadoFijo = null, esAdmin = false, cargadoPor = '' }) {
+export default function NuevaVenta({ promos = [], articulos, loadingArticulos, onVentaRegistrada, usuarios: usuariosProp, stockMap = {}, empleadoFijo = null, esAdmin = false, cargadoPor = '' }) {
   // Fecha de la venta (solo Admin): por defecto es "ahora". Se cambia a mano para cargar una venta de
   // otro día, y después de guardarla vuelve sola a "ahora".
   const [fechaOtra, setFechaOtra] = useState(null) // null | { dia: 'aaaa-mm-dd', hora: 'hh:mm' }
@@ -373,7 +387,7 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
     setConfirmarReinicio(false)
   }
 
-  const totales = calcularTotalesConDescuento(carrito, descAplicado, promoXXXLEstado?.disponibles || 0)
+  const totales = calcularTotalesConDescuento(carrito, descAplicado, promoXXXLEstado?.disponibles || 0, promos)
   // Socio pagando en Efectivo Pesos: el total se redondea hacia abajo a $500
   const redondeoCalc = calcularRedondeoSocio({ montoActual: totales.totalNeto, metodoPago: metodoCompleto, socio: descAplicado > 0 })
   const totalFinal = redondeoCalc.total
@@ -438,6 +452,8 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
         notas,
         descuentoImanes: totales.descuentoImanes,
         descuentoPromo: totales.descuentoPromo,
+        promos,
+        descuentoPromosConfigEsperado: totales.descuentoPromosCfg,
         ...(esAdmin && fechaOtra ? { fechaVenta: { fecha: fechaOtraTexto.split(' ')[0], hora: fechaOtra.hora }, cargadaPor: cargadoPor } : {}),
       })
       showToast((modoCambio ? 'Cambio ' : 'Venta ') + idVenta + ' registrado ✓' + (fechaOtra ? ` con fecha ${fechaOtraTexto}` : ''), 'success')
@@ -510,6 +526,9 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
 
   const promoVigente = promosActivas()
   const cantLlavCarrito = carrito.filter(i => LLAVEROS_PROMO.has(i.id)).reduce((s,i) => s+i.cantidad, 0)
+  // Promos configurables vigentes: qué artículo está en cuál (para mostrar la etiqueta en el buscador)
+  const promoDeArticulo = {}
+  promos.filter(p => promoConfigVigente(p)).forEach(p => [...p.articulosA, ...p.articulosB].forEach(id => { promoDeArticulo[id] ||= `🏷️ ${etiquetaPromo(p)}` }))
 
   return (
     <div style={isMobile ? S.layoutMobile : S.layout}>
@@ -543,7 +562,7 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
         <div style={isMobile ? S.scrollListMobile : S.scrollList}>
           {articulosFiltrados.map(art => {
             const stock = stockMap[art.id]
-            const promo = (promoVigente || ALFAJORES_PROMO.has(art.id)) ? badgePromo(art.id, cantLlavCarrito) : null
+            const promo = ((promoVigente || ALFAJORES_PROMO.has(art.id)) ? badgePromo(art.id, cantLlavCarrito) : null) || promoDeArticulo[art.id] || null
             return (
               <button key={art.id} style={isMobile ? S.artRowMobile : S.artRow} onClick={() => agregarAlCarrito(art)}>
                 {art.foto
@@ -720,6 +739,12 @@ export default function NuevaVenta({ articulos, loadingArticulos, onVentaRegistr
               <span style={{fontFamily:'Barlow Condensed,sans-serif',fontWeight:700,fontSize:15,color:'#f59e0b'}}>−${Math.round(totales.descuentoPromo).toLocaleString('es-AR')}</span>
             </div>
           )}
+          {totales.promosCfg.aplicadas.map(a => (
+            <div key={a.id} style={S.totalBrutoRow}>
+              <span style={{fontFamily:'Barlow,sans-serif',fontSize:14,color:'#f59e0b'}}>🏷️ {a.nombre}{a.veces > 1 ? ` ×${a.veces}` : ''}</span>
+              <span style={{fontFamily:'Barlow Condensed,sans-serif',fontWeight:700,fontSize:15,color:'#f59e0b'}}>−${Math.round(a.descuento).toLocaleString('es-AR')}</span>
+            </div>
+          ))}
           {totales.descuentoAlfajores > 0 && (
             <div style={S.totalBrutoRow}>
               <span style={{fontFamily:'Barlow,sans-serif',fontSize:14,color:'#f59e0b'}}>🥮 Descuento alfajores</span>

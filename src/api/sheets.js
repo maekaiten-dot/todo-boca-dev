@@ -1,5 +1,6 @@
 // src/api/sheets.js
 import { parseMonto } from '../lib/montos.js'
+import { calcularPromosConfig, fijaPausada } from '../lib/promos.js'
 const SHEET_ID = import.meta.env.VITE_SHEET_ID
 const CLIENT_EMAIL = import.meta.env.VITE_GOOGLE_CLIENT_EMAIL
 const PRIVATE_KEY = import.meta.env.VITE_GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n')
@@ -125,7 +126,8 @@ function _precioLlaveroPromo(cantTotal) {
   return 6000
 }
 
-function calcularDescuentosImanesItems(items) {
+function calcularDescuentosImanesItems(items, pausada = false) {
+  if (pausada) items = items.map(i => ({ ...i, articulo: '~', id: '~' }))
   const itemsA = items.filter(i => IMANES_A.has(i.articulo || i.id))
   const itemsB = items.filter(i => IMANES_B.has(i.articulo || i.id))
   const cantA = itemsA.reduce((s, i) => s + i.cantidad, 0)
@@ -175,9 +177,9 @@ function calcularDescuentoPromoItem(item, items) {
 // unidades hasta completar cada grupo de 6 van al precio de combo, el resto queda
 // a precio de lista de su propio item. Debe coincidir con el mismo criterio del
 // front-end (NuevaVenta.jsx) para que lo cobrado coincida con lo mostrado en pantalla.
-function calcularDescuentoAlfajorItem(item, items) {
+function calcularDescuentoAlfajorItem(item, items, pausada = false) {
   const sku = item.articulo || item.id
-  if (!ALFAJORES_PROMO.has(sku)) return 0
+  if (pausada || !ALFAJORES_PROMO.has(sku)) return 0
   const itemsAlf = items.filter(i => ALFAJORES_PROMO.has(i.articulo || i.id))
   const cantTotal = itemsAlf.reduce((s, i) => s + i.cantidad, 0)
   const grupos = Math.floor(cantTotal / ALFAJORES_CANT_GRUPO)
@@ -312,6 +314,7 @@ function mapRow(r) {
     correccionPosnet: r[35] || '',
     pagos: parsePagos(r[36]),
     ediciones: r[37] || '',
+    promos: r[38] || '',
   }
 }
 
@@ -339,13 +342,13 @@ function leerDetalle() {
   if (DV.filas && !DV.invalida && Date.now() - DV.tCola < DV_FRESCA_MS && Date.now() - DV.tCompleta < DV_COMPLETA_MS) return Promise.resolve(DV.filas)
   DV.promesa = (async () => {
     const completa = async () => {
-      const d = await sheetsGet('DETALLE DE VENTAS!A2:AL')
+      const d = await sheetsGet('DETALLE DE VENTAS!A2:AM')
       DV.filas = d.values || []; DV.tCompleta = DV.tCola = Date.now(); DV.invalida = false
     }
     if (!DV.filas || DV.invalida || Date.now() - DV.tCompleta >= DV_COMPLETA_MS) await completa()
     else {
       const desde = inicioColaDetalle(DV.filas)
-      const d = await sheetsGet(`DETALLE DE VENTAS!A${desde + 2}:AL`)
+      const d = await sheetsGet(`DETALLE DE VENTAS!A${desde + 2}:AM`)
       const cola = d.values || []
       const antes = String(DV.filas[desde]?.[0] || ''), ahora = String(cola[0]?.[0] || '')
       if (desde < DV.filas.length && antes !== ahora) await completa()   // la planilla se movió
@@ -605,7 +608,7 @@ export function calcularRedondeoSocio({ montoActual, metodoPago, socio }) {
 
 // fechaVenta: { fecha: 'd/m/aaaa', hora: 'hh:mm' } para cargar una venta de otro día (solo Admin).
 // Queda la constancia en EDICIONES: quién la cargó y cuándo.
-export async function registrarVenta({ items, devueltos = [], metodoPago, pagos = null, descCarrito = 0, empleado = '', notas = '', descuentoImanes = 0, descuentoPromo = 0, socio = false, descuentoXXXLEsperado = 0, totalEsperado = null, posnet = '', fechaVenta = null, cargadaPor = '' }) {
+export async function registrarVenta({ items, devueltos = [], metodoPago, pagos = null, descCarrito = 0, empleado = '', notas = '', descuentoImanes = 0, descuentoPromo = 0, socio = false, descuentoXXXLEsperado = 0, totalEsperado = null, posnet = '', fechaVenta = null, cargadaPor = '', promos = [], descuentoPromosConfigEsperado = null }) {
   // Pago con 2 medios: [{ metodo, monto }, { metodo }]. El segundo se lleva el resto del total.
   const dividido = Array.isArray(pagos) && pagos.length === 2
   if (dividido) {
@@ -646,7 +649,13 @@ export async function registrarVenta({ items, devueltos = [], metodoPago, pagos 
   // Una sola lectura de A:B sirve para el código de la venta y para saber dónde termina la planilla
   const filasAB = (await sheetsGet('DETALLE DE VENTAS!A2:B')).values || []
   const idVenta = await generarIdVenta(dt.fecha !== ahora.fecha ? dt.fecha : null, filasAB)
-  const dtosPorItem = calcularDescuentosImanesItems(items)
+  const imanesPausados = fijaPausada(promos, 'FIJA-IMANES'), alfajoresPausados = fijaPausada(promos, 'FIJA-ALFAJORES')
+  const dtosPorItem = calcularDescuentosImanesItems(items, imanesPausados)
+  // Promos configurables (hoja PROMOS): no entran los artículos con promo fija ni las remeras del 2x1
+  const excluirPromos = new Set([...(imanesPausados ? [] : [...IMANES_A, ...IMANES_B]), ...(alfajoresPausados ? [] : ALFAJORES_PROMO),
+    ...items.filter(i => (i.xxxl || 0) > 0).map(i => i.articulo || i.id)])
+  const promosCfg = calcularPromosConfig(items, promos, { excluir: excluirPromos })
+  if (descuentoPromosConfigEsperado != null && Math.round(promosCfg.total) !== Math.round(descuentoPromosConfigEsperado)) throw new Error('TOTAL_NO_COINCIDE')
   let lastDataRow = 1
   filasAB.forEach((r, i) => { if (r[0] && String(r[0]).trim()) lastDataRow = i+2 })
   const nextRow = lastDataRow + 1
@@ -657,9 +666,10 @@ export async function registrarVenta({ items, devueltos = [], metodoPago, pagos 
     const descuentoItem = item.descuento || 0
     const dto = dtosPorItem[idx]
     const dtoPromoItem = calcularDescuentoPromoItem(item, items)
-    const dtoAlfajorItem = calcularDescuentoAlfajorItem(item, items)
+    const dtoAlfajorItem = calcularDescuentoAlfajorItem(item, items, alfajoresPausados)
     const dtoXXXLItem = conXXXL ? promoXXXL.porItem[idx].descuento : 0
-    const baseConDtos = precioTotal - dto.descuentoImanes - dtoPromoItem - dtoAlfajorItem - dtoXXXLItem
+    const dtoConfigItem = promosCfg.porItem[idx] || 0
+    const baseConDtos = precioTotal - dto.descuentoImanes - dtoPromoItem - dtoAlfajorItem - dtoXXXLItem - dtoConfigItem
     // Las remeras del 2x1 XXXL no se combinan con socio/efectivo: lo que se paga por ellas
     // (la mitad de cada par = dtoXXXLItem) queda fuera de la base de esos descuentos
     const baseDescuentos = baseConDtos - dtoXXXLItem
@@ -727,7 +737,9 @@ export async function registrarVenta({ items, devueltos = [], metodoPago, pagos 
   }
 
   // 3) Filas para la planilla. Columnas extra: AE socio · AF 2x1 XXXL · AG (vacía) · AH redondeo · AI posnet · AJ (corrección) · AK pagos
-  const ultimaExtra = constancia ? 7 : dividido ? 6 : posnetVenta ? 4 : conRedondeo ? 3 : conXXXL ? 1 : socio ? 0 : -1
+  const conPromosCfg = promosCfg.total > 0
+  if (conPromosCfg) await asegurarColumna(COL_PROMOS, 'PROMOS')
+  const ultimaExtra = conPromosCfg ? 8 : constancia ? 7 : dividido ? 6 : posnetVenta ? 4 : conRedondeo ? 3 : conXXXL ? 1 : socio ? 0 : -1
   const rows = lineas.map(l => {
     const { item, idx, precioTotal, descuentoItem, dto } = l
     const idDetalle = `${idVenta}-${String(idx+1).padStart(2,'0')}`
@@ -742,6 +754,7 @@ export async function registrarVenta({ items, devueltos = [], metodoPago, pagos 
       '',
       textoPagosVenta,
       constancia,
+      promosCfg.textoPorItem[idx] || '',
     ]
     return [
       idDetalle, idVenta, `'${dt.fecha}`, `'${dt.hora}`, dt.mes, dt.anio,
@@ -776,7 +789,7 @@ export async function registrarVenta({ items, devueltos = [], metodoPago, pagos 
       ...extras.slice(0, ultimaExtra + 1),
     ])
   })
-  const ultimaCol = ['AD', COL_DTO_SOCIO, COL_DTO_XXXL, COL_DTO_EFECTIVO, COL_REDONDEO, COL_POSNET, COL_CORRECCION_POSNET, COL_PAGOS, COL_EDICIONES][ultimaExtra + 1]
+  const ultimaCol = ['AD', COL_DTO_SOCIO, COL_DTO_XXXL, COL_DTO_EFECTIVO, COL_REDONDEO, COL_POSNET, COL_CORRECCION_POSNET, COL_PAGOS, COL_EDICIONES, COL_PROMOS][ultimaExtra + 1]
 
   // Todos los renglones de la venta en un solo pedido
   await sheetsBatchUpdate(rows.map((row, idx) => ({ range: `DETALLE DE VENTAS!A${nextRow+idx}:${ultimaCol}${nextRow+idx}`, values: [row] })))
@@ -784,10 +797,10 @@ export async function registrarVenta({ items, devueltos = [], metodoPago, pagos 
 
   const totalVenta = rows.reduce((s, r) => s+(r[18]||0), 0)
   const totalDtoImanes = dtosPorItem.reduce((s, d) => s+d.descuentoImanes, 0)
-  const totalDtoAlfajores = items.reduce((s, item) => s + calcularDescuentoAlfajorItem(item, items), 0)
+  const totalDtoAlfajores = items.reduce((s, item) => s + calcularDescuentoAlfajorItem(item, items, alfajoresPausados), 0)
   await registrarLog({
     accion:'VENTA_REGISTRADA',
-    detalle:`${constancia ? `CON FECHA ${dt.fecha} ${dt.hora.slice(0, 5)} (cargada por ${cargadaPor || empleado}) · ` : ''}${devs.length ? `CAMBIO · devuelve ${devs.map(d => `${d.cantidad}× ${d.id}`).join(', ')} · ` : ''}${items.length} producto(s) · ${textoPagosVenta || metodoPago}${posnetVenta?` · POSNET ${posnetVenta}`:''}${socio?' · SOCIO':''}${conRedondeo?` · REDONDEO $${Math.round(redondeoCalc.redondeo)}`:''}${conXXXL?` · 2x1 XXXL $${Math.round(promoXXXL.descuento)} (${promoXXXL.unidadesEnPromo}u)`:''}${descCarrito>0?` · DTO ${descCarrito}%`:''}${totalDtoImanes>0?` · DTO imanes $${totalDtoImanes}`:''}${descuentoPromo>0?` · DTO promos $${Math.round(descuentoPromo)}`:''}${totalDtoAlfajores>0?` · DTO alfajores $${Math.round(totalDtoAlfajores)}`:''} · Total $${Math.round(totalVenta).toLocaleString('es-AR')}`,
+    detalle:`${constancia ? `CON FECHA ${dt.fecha} ${dt.hora.slice(0, 5)} (cargada por ${cargadaPor || empleado}) · ` : ''}${devs.length ? `CAMBIO · devuelve ${devs.map(d => `${d.cantidad}× ${d.id}`).join(', ')} · ` : ''}${items.length} producto(s) · ${textoPagosVenta || metodoPago}${posnetVenta?` · POSNET ${posnetVenta}`:''}${socio?' · SOCIO':''}${conRedondeo?` · REDONDEO $${Math.round(redondeoCalc.redondeo)}`:''}${conXXXL?` · 2x1 XXXL $${Math.round(promoXXXL.descuento)} (${promoXXXL.unidadesEnPromo}u)`:''}${descCarrito>0?` · DTO ${descCarrito}%`:''}${totalDtoImanes>0?` · DTO imanes $${totalDtoImanes}`:''}${descuentoPromo>0?` · DTO promos $${Math.round(descuentoPromo)}`:''}${totalDtoAlfajores>0?` · DTO alfajores $${Math.round(totalDtoAlfajores)}`:''}${conPromosCfg?` · PROMOS ${promosCfg.aplicadas.map(a => `${a.id} $${Math.round(a.descuento)}`).join(', ')}`:''} · Total $${Math.round(totalVenta).toLocaleString('es-AR')}`,
     idReferencia:idVenta, empleado, resultado:'OK',
   })
   return idVenta
@@ -798,6 +811,8 @@ export async function registrarVenta({ items, devueltos = [], metodoPago, pagos 
 // ("25/10/2026 11:30 Adrián: agregó 1× TB01150 $8.000; método Efectivo Pesos → QR"). Las ediciones
 // se suman separadas por " | ". Lo quitado se marca ANULADO (no se borra). El stock lo toma solo.
 const COL_EDICIONES = 'AL'
+// AM: PROMOS — promos configurables que tuvo el renglón y cuánto descontó cada una ("P003:2500 | P004:1200")
+const COL_PROMOS = 'AM'
 const fmtPesos = n => '$' + Math.round(n || 0).toLocaleString('es-AR')
 // lineas: [{ idDetalle (si ya existía), articulo, nombre, foto, cantidad, precioUnitario, precioTotalFinal, costoUnitario, quitar }]
 // pagos: null (un medio) o [{ metodo, monto }, { metodo, monto }]
@@ -2109,4 +2124,88 @@ export async function registrarPagosLote({ renglones, fechaIngreso, fechaPago, p
   const total = filas.reduce((s, f) => s + f[8], 0)
   await registrarLog({ accion: 'FACTURA_ESCANEADA', detalle: `${compra} · ${proveedor} · ${descripcion} · ${filas.length} renglón(es) · $${Math.round(total).toLocaleString('es-AR')}`, idReferencia: ids[0], empleado, resultado: 'OK' })
   return ids
+}
+
+// ── Promos configurables ──────────────────────────────────────────────────────
+// Hoja PROMOS: A ID · B NOMBRE · C TIPO (CANTIDAD / COMBINACION / KIT) · D ARTICULOS A · E ARTICULOS B
+// F CANTIDAD · G PRECIO · H PORCENTAJE · I DESDE · J HASTA · K ESTADO (ACTIVA / PAUSADA / TERMINADA)
+// L CREADA POR · M CREADA EL · N HISTORIAL ("31/10/2026 22:50 Adrián: pausó | …")
+// Las promos fijas de la app (imanes, alfajores) se pausan con una fila FIJA-… en ESTADO PAUSADA.
+const HOJA_PROMOS = 'PROMOS'
+const ENCABEZADOS_PROMOS = ['ID', 'NOMBRE', 'TIPO', 'ARTICULOS A', 'ARTICULOS B', 'CANTIDAD', 'PRECIO', 'PORCENTAJE', 'DESDE', 'HASTA', 'ESTADO', 'CREADA POR', 'CREADA EL', 'HISTORIAL']
+let _hojaPromosLista = false
+async function asegurarHojaPromos() {
+  if (_hojaPromosLista) return
+  const token = await getAccessToken()
+  const metaRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}?fields=sheets.properties.title`, { headers: { Authorization: `Bearer ${token}` } })
+  if (!metaRes.ok) throw new Error(`Sheets META error: ${metaRes.status}`)
+  const meta = await metaRes.json()
+  if (!(meta.sheets || []).some(s => s.properties?.title === HOJA_PROMOS)) {
+    const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}:batchUpdate`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requests: [{ addSheet: { properties: { title: HOJA_PROMOS } } }] }),
+    })
+    if (!res.ok) throw new Error(`Sheets ADD SHEET error: ${res.status}`)
+    await sheetsUpdate(`${HOJA_PROMOS}!A1:N1`, [ENCABEZADOS_PROMOS])
+  }
+  _hojaPromosLista = true
+}
+const listaIds = t => String(t || '').split(/[,\s]+/).map(x => x.trim()).filter(Boolean)
+
+export async function getPromos() {
+  let data
+  try { data = await sheetsGet(`${HOJA_PROMOS}!A2:N`) }
+  catch (e) { if (String(e.message).includes('400')) return []; throw e }
+  return (data.values || []).filter(r => r[0]).map((r, i) => ({
+    fila: i + 2, id: String(r[0]).trim(), nombre: r[1] || '', tipo: String(r[2] || '').toUpperCase().trim(),
+    articulosA: listaIds(r[3]), articulosB: listaIds(r[4]),
+    cantidad: parseMonto(r[5]) || 0, precio: parseMonto(r[6]) || 0, porcentaje: parseMonto(r[7]) || 0,
+    desde: String(r[8] || '').replace(/^'/, ''), hasta: String(r[9] || '').replace(/^'/, ''),
+    estado: String(r[10] || 'ACTIVA').toUpperCase().trim(),
+    creadaPor: r[11] || '', creadaEl: String(r[12] || '').replace(/^'/, ''), historial: r[13] || '',
+  }))
+}
+
+// promo: { id? (si es edición), nombre, tipo, articulosA, articulosB, cantidad, precio, porcentaje, desde, hasta }
+export async function guardarPromo(promo, quien = '') {
+  await asegurarHojaPromos()
+  const dt = getArgentinaDate()
+  const cuando = `${dt.fecha} ${String(dt.hora).slice(0, 5)}`
+  const lista = await getPromos()
+  const fila = v => [v.id, v.nombre.trim(), v.tipo, (v.articulosA || []).join(', '), (v.articulosB || []).join(', '),
+    v.cantidad || '', v.precio || '', v.porcentaje || '', v.desde ? `'${v.desde}` : '', v.hasta ? `'${v.hasta}` : '']
+  if (promo.id) {
+    const ex = lista.find(p => p.id === promo.id)
+    if (!ex) throw new Error('PROMO_NO_ENCONTRADA')
+    const hist = [ex.historial, `${cuando} ${quien || 'Admin'}: editó`].filter(Boolean).join(' | ')
+    await sheetsUpdate(`${HOJA_PROMOS}!A${ex.fila}:J${ex.fila}`, [fila(promo)])
+    await sheetsUpdate(`${HOJA_PROMOS}!N${ex.fila}`, [[hist]])
+    await registrarLog({ accion: 'PROMO_EDITADA', detalle: `${promo.id} · ${promo.nombre}`, idReferencia: promo.id, empleado: quien, resultado: 'OK' })
+    return promo.id
+  }
+  const nums = lista.map(p => Number(String(p.id).replace(/^P/, ''))).filter(n => Number.isFinite(n))
+  const id = `P${String((nums.length ? Math.max(...nums) : 0) + 1).padStart(3, '0')}`
+  await sheetsAppend(`${HOJA_PROMOS}!A1`, [[...fila({ ...promo, id }), 'ACTIVA', quien || 'Admin', `'${cuando}`, `${cuando} ${quien || 'Admin'}: la creó`]])
+  await registrarLog({ accion: 'PROMO_CREADA', detalle: `${id} · ${promo.nombre}`, idReferencia: id, empleado: quien, resultado: 'OK' })
+  return id
+}
+
+// estado: ACTIVA / PAUSADA / TERMINADA. Para una promo fija (FIJA-IMANES…) crea su fila la primera vez.
+export async function cambiarEstadoPromo(id, estado, quien = '', nombre = '') {
+  await asegurarHojaPromos()
+  const dt = getArgentinaDate()
+  const cuando = `${dt.fecha} ${String(dt.hora).slice(0, 5)}`
+  const verbo = { ACTIVA: 'la activó', PAUSADA: 'la pausó', TERMINADA: 'la terminó' }[estado] || estado
+  const ex = (await getPromos()).find(p => p.id === id)
+  if (!ex) {
+    if (!id.startsWith('FIJA-')) throw new Error('PROMO_NO_ENCONTRADA')
+    await sheetsAppend(`${HOJA_PROMOS}!A1`, [[id, nombre, 'FIJA', '', '', '', '', '', '', '', estado, quien || 'Admin', `'${cuando}`, `${cuando} ${quien || 'Admin'}: ${verbo}`]])
+  } else {
+    const hist = [ex.historial, `${cuando} ${quien || 'Admin'}: ${verbo}`].filter(Boolean).join(' | ')
+    const extra = estado === 'TERMINADA' && !ex.hasta ? [[`'${dt.fecha}`]] : null
+    await sheetsUpdate(`${HOJA_PROMOS}!K${ex.fila}`, [[estado]])
+    await sheetsUpdate(`${HOJA_PROMOS}!N${ex.fila}`, [[hist]])
+    if (extra) await sheetsUpdate(`${HOJA_PROMOS}!J${ex.fila}`, extra)
+  }
+  await registrarLog({ accion: 'PROMO_' + estado, detalle: `${id}${nombre ? ' · ' + nombre : ''}`, idReferencia: id, empleado: quien, resultado: 'OK' })
 }

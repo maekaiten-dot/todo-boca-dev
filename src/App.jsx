@@ -4,7 +4,7 @@ import NuevaVenta from './pages/NuevaVenta.jsx'
 import VentasDelDia from './pages/VentasDelDia.jsx'
 import FicharTablet from './components/FicharTablet.jsx'
 import AvisoPrecios, { totalCambios, resumenCambios } from './components/AvisoPrecios.jsx'
-import { getAlias, getArticulos, getUsuarios, registrarLog, calcularStockTodos, leerArticulosVistos, guardarArticulosVistos, getTutoriales, leerTutorialesVistos, guardarTutorialesVistos } from './api/sheets.js'
+import { getPromos, getAlias, getArticulos, getUsuarios, registrarLog, calcularStockTodos, leerArticulosVistos, guardarArticulosVistos, getTutoriales, leerTutorialesVistos, guardarTutorialesVistos } from './api/sheets.js'
 // Las solapas que no son Vender ni Hoy se bajan aparte (la app abre más rápido). Unos segundos
 // después de abrir se precargan en segundo plano, así al tocarlas ya están.
 const CARGAS = {
@@ -21,6 +21,7 @@ const CARGAS = {
   Fichadas: () => import('./pages/Fichadas.jsx'),
   Asistencia: () => import('./pages/Asistencia.jsx'),
   Administracion: () => import('./pages/Administracion.jsx'),
+  Promos: () => import('./pages/Promos.jsx'),
 }
 const LogVentas = lazy(CARGAS.LogVentas)
 const Estadisticas = lazy(CARGAS.Estadisticas)
@@ -35,6 +36,7 @@ const Conteo = lazy(CARGAS.Conteo)
 const Fichadas = lazy(CARGAS.Fichadas)
 const Asistencia = lazy(CARGAS.Asistencia)
 const Administracion = lazy(CARGAS.Administracion)
+const Promos = lazy(CARGAS.Promos)
 const precargarSolapas = () => Object.values(CARGAS).forEach(f => f().catch(() => {}))
 const CargandoSolapa = () => <div style={{ padding: 24, fontFamily: 'Barlow, sans-serif', color: 'var(--muted)' }}>Cargando…</div>
 
@@ -57,6 +59,7 @@ const TABS_POR_TIPO = {
 const TABS_MAS_ADMIN = [
   { id:'stats', label:'Estadísticas', icon:'📈', desc:'Ventas por día y por mes' },
   { id:'rota', label:'Rotación', icon:'🔄', desc:'Más vendidos y reposición' },
+  { id:'promos', label:'Promos', icon:'🏷️', desc:'Armar promos y ver si funcionan' },
   { id:'ing', label:'Ingresos', icon:'📥', desc:'Mercadería que entró' },
   { id:'pagos', label:'Pagos', icon:'💳', desc:'Pagos a proveedores y gastos' },
   { id:'gastos', label:'Gastos fijos', icon:'📌', desc:'Gastos fijos del mes' },
@@ -172,6 +175,9 @@ export default function App() {
   const [tab, setTab] = useState('venta')
   const [refreshKey, setRefreshKey] = useState(0)
   const [articulos, setArticulos] = useState([])
+  // Promos configurables (hoja PROMOS): se releen junto con los artículos
+  const [promos, setPromos] = useState([])
+  const cargarPromos = () => getPromos().then(setPromos).catch(e => console.warn('No se pudieron leer las promos', e))
   const [loadingArticulos, setLoadingArticulos] = useState(true)
   const [usuarios, setUsuarios] = useState([])
   const [loadingUsuarios, setLoadingUsuarios] = useState(true)
@@ -279,6 +285,7 @@ export default function App() {
       detectarCambiosPrecio(arts)
     } catch (e) { console.warn('No se pudieron releer los artículos', e) }
     revisarTutoriales()
+    cargarPromos()
   }
   useEffect(() => {
     const id = setInterval(() => { if (document.visibilityState === 'visible') refrescarArticulos() }, INTERVALO_PRECIOS)
@@ -306,6 +313,7 @@ export default function App() {
   }, [])
 
   async function cargarArticulos() {
+    cargarPromos()
     setLoadingArticulos(true)
     try {
       const arts = await getArticulos()
@@ -440,7 +448,7 @@ export default function App() {
 
         <div style={S.content}>
           <div style={tabStyle('venta')}>
-            <NuevaVenta articulos={articulos} loadingArticulos={loadingArticulos} usuarios={usuarios} stockMap={stockMap} empleadoFijo={esAdmin ? empleadoActual : null} esAdmin={esAdmin} cargadoPor={empleadoActual} onVentaRegistrada={() => { setRefreshKey(k => k + 1); recalcularStock(articulosRef.current) }} />
+            <NuevaVenta promos={promos} articulos={articulos} loadingArticulos={loadingArticulos} usuarios={usuarios} stockMap={stockMap} empleadoFijo={esAdmin ? empleadoActual : null} esAdmin={esAdmin} cargadoPor={empleadoActual} onVentaRegistrada={() => { setRefreshKey(k => k + 1); recalcularStock(articulosRef.current) }} />
           </div>
           {tabsVisitadas.has('hoy') && (
             <div style={tabStyle('hoy')}><VentasDelDia refreshKey={refreshKey} puedeAnular={true} usuarios={usuarios} perfilNombre={empleadoActual} esAdmin={esAdmin} articulos={articulos} /></div>
@@ -465,6 +473,9 @@ export default function App() {
           )}
           {esAdmin && tabsVisitadas.has('rota') && (
             <div style={tabStyle('rota')}><Suspense fallback={<CargandoSolapa />}><Rotacion articulos={articulos} stockMap={stockMap} /></Suspense></div>
+          )}
+          {esAdmin && tabsVisitadas.has('promos') && (
+            <div style={tabStyle('promos')}><Suspense fallback={<CargandoSolapa />}><Promos promos={promos} articulos={articulos} perfilNombre={empleadoActual} onCambio={cargarPromos} /></Suspense></div>
           )}
           {esAdmin && tabsVisitadas.has('ing') && (
             <div style={tabStyle('ing')}><Suspense fallback={<CargandoSolapa />}><Ingresos /></Suspense></div>

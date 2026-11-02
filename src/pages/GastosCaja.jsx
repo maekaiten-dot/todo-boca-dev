@@ -242,7 +242,7 @@ export default function GastosCaja({ usuarios = [], perfilNombre = '', onRegistr
           <div style={S.confirmBox} onClick={e => e.stopPropagation()}>
             <div style={S.confirmTitle}>¿Anular movimiento?</div>
             <div style={S.confirmSub}>
-              {confirmAnular.categoria} · <strong style={{ color: 'var(--accent)' }}>{fmt$(confirmAnular.monto)}</strong><br />
+              {confirmAnular.categoria} · <strong style={{ color:'var(--accent-text)' }}>{fmt$(confirmAnular.monto)}</strong><br />
               registrado por {confirmAnular.empleado} a las {confirmAnular.hora.slice(0, 5)}.<br />
               Queda en la lista marcado como anulado.
             </div>
@@ -263,7 +263,7 @@ const S = {
   toastSuccess: { background: '#22c55e', color: '#000' },
   toastError: { background: '#ef4444', color: '#fff' },
   header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '16px 20px 12px', borderBottom: '2px solid var(--accent)', flexShrink: 0 },
-  headerTitle: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 28, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: 2 },
+  headerTitle: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 28, color:'var(--accent-text)', textTransform: 'uppercase', letterSpacing: 2 },
   headerSub: { fontFamily: 'Barlow, sans-serif', fontSize: 13, color: 'var(--muted)' },
   refreshBtn: { background: 'var(--surface)', border: '1.5px solid var(--border)', borderRadius: 10, color: 'var(--text)', fontSize: 24, width: 44, height: 44, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   layout: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16, padding: '16px 20px 24px', alignItems: 'start' },
@@ -273,7 +273,7 @@ const S = {
   grid4: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(70px, 1fr))', gap: 8 },
   grid2: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 },
   optBtn: { padding: '12px 6px', background: 'var(--surface2)', border: '1.5px solid var(--border)', borderRadius: 10, cursor: 'pointer', color: 'var(--muted)', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 17, textAlign: 'center' },
-  optBtnActivo: { background: 'rgba(245,200,0,0.12)', border: '1.5px solid var(--accent)', color: 'var(--accent)' },
+  optBtnActivo: { background: 'rgba(245,200,0,0.12)', border: '1.5px solid var(--accent)', color:'var(--accent-text)' },
   tipoBtn: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, padding: '12px 6px', background: 'var(--surface2)', border: '1.5px solid var(--border)', borderRadius: 10, cursor: 'pointer', color: 'var(--muted)' },
   tipoSalidaActivo: { background: 'rgba(239,68,68,0.12)', border: '1.5px solid #ef4444', color: '#ef4444' },
   tipoEntradaActivo: { background: 'rgba(34,197,94,0.12)', border: '1.5px solid #22c55e', color: '#22c55e' },
@@ -285,7 +285,7 @@ const S = {
   catAyuda: { fontFamily: 'Barlow, sans-serif', fontSize: 11, color: 'var(--muted)', lineHeight: 1.3 },
   input: { fontFamily: 'Barlow, sans-serif', fontSize: 16, padding: '12px 14px', background: 'var(--bg)', border: '1.5px solid var(--border)', borderRadius: 10, color: 'var(--text)', width: '100%' },
   montoWrap: { display: 'flex', alignItems: 'center', background: 'var(--bg)', border: '1.5px solid var(--accent)', borderRadius: 10 },
-  montoSimbolo: { padding: '0 14px', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 24, color: 'var(--accent)', borderRight: '1.5px solid var(--border)' },
+  montoSimbolo: { padding: '0 14px', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 24, color:'var(--accent-text)', borderRight: '1.5px solid var(--border)' },
   montoInput: { flex: 1, minWidth: 0, fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 28, padding: '8px 14px', background: 'transparent', border: 'none', color: 'var(--text)', outline: 'none' },
   guardarBtn: { marginTop: 12, padding: '16px', background: '#ef4444', border: 'none', borderRadius: 12, color: '#fff', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 20, letterSpacing: 1, cursor: 'pointer' },
   guardarEntrada: { background: '#22c55e', color: '#000' },

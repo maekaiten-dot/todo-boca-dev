@@ -35,7 +35,7 @@ export default function CorregirPosnetModal({ venta, usuarios = [], perfilNombre
   return (
     <div style={S.overlay} onClick={() => !guardando && onCerrar()}>
       <div style={{ ...S.confirmBox, ...S.corrBox }} onClick={e => e.stopPropagation()}>
-        <div style={{ ...S.confirmTitle, color: 'var(--accent)' }}>Corregir posnet</div>
+        <div style={{ ...S.confirmTitle, color:'var(--accent-text)' }}>Corregir posnet</div>
         <div style={S.confirmSub}>
           Venta <strong style={{ color: 'var(--text)' }}>{venta.idVenta}</strong> · {venta.hora} · ${Math.round(venta.total).toLocaleString('es-AR')}<br />
           Registrado: <strong style={{ color: 'var(--text)' }}>{venta.posnet ? `posnet ${venta.posnet.toLowerCase()}` : 'sin posnet'}</strong>
@@ -94,7 +94,7 @@ const S = {
   corrPosnet: { display:'flex', alignItems:'center', gap:10, padding:'12px', background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:10, color:'var(--text)', fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:16, cursor:'pointer' },
   corrRect: { width:34, height:20, borderRadius:6, flexShrink:0 },
   corrOpt: { padding:'10px 12px', background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:10, color:'var(--muted)', fontFamily:'Barlow, sans-serif', fontSize:14, cursor:'pointer', textAlign:'left' },
-  corrActivo: { background:'rgba(245,200,0,0.12)', border:'1.5px solid var(--accent)', color:'var(--accent)' },
+  corrActivo: { background:'rgba(245,200,0,0.12)', border:'1.5px solid var(--accent)', color:'var(--accent-text)' },
   corrInput: { width:'100%', fontFamily:'Barlow, sans-serif', fontSize:15, padding:'10px 12px', background:'var(--bg)', border:'1.5px solid var(--border)', borderRadius:10, color:'var(--text)' },
   confirmCancel: { flex:1, padding:'12px', background:'none', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--muted)', fontFamily:'Barlow, sans-serif', fontSize:14, cursor:'pointer' },
   corrGuardar: { flex:2, padding:'12px', background:'var(--accent)', border:'none', borderRadius:8, color:'#000', fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:16, cursor:'pointer' },

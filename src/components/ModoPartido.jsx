@@ -74,7 +74,7 @@ export function BarraModoPartido({ activo, quien, cola, esAdmin, perfilNombre })
 }
 
 const S = {
-  boton: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 13, color: 'var(--accent)', background: 'none', border: '1.5px solid var(--accent)', borderRadius: 20, padding: '4px 12px', cursor: 'pointer', whiteSpace: 'nowrap' },
+  boton: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 13, color:'var(--accent-text)', background: 'none', border: '1.5px solid var(--accent)', borderRadius: 20, padding: '4px 12px', cursor: 'pointer', whiteSpace: 'nowrap' },
   botonActivo: { color: '#000', background: '#f97316', borderColor: '#f97316' },
   confirmWrap: { position: 'absolute', top: 'calc(100% + 8px)', right: 0, zIndex: 250, width: 230, background: 'var(--surface2)', border: '1px solid var(--accent)', borderRadius: 12, padding: 12, boxShadow: '0 8px 24px rgba(0,0,0,0.5)' },
   confirmTxt: { fontFamily: 'Barlow, sans-serif', fontSize: 14, color: 'var(--text)', lineHeight: 1.3 },

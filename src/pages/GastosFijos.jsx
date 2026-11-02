@@ -278,7 +278,7 @@ export default function GastosFijos({ soloLectura = false }) {
           <div style={S.confirmBox} onClick={e => e.stopPropagation()}>
             <div style={S.confirmTitle}>¿Eliminar gasto?</div>
             <div style={S.confirmSub}>
-              <strong style={{color:'var(--accent)'}}>{confirmEliminar.concepto}</strong><br/>
+              <strong style={{color:'var(--accent-text)'}}>{confirmEliminar.concepto}</strong><br/>
               ${confirmEliminar.monto.toLocaleString('es-AR')} · {confirmEliminar.semana}
             </div>
             <div style={{display:'flex', gap:10, marginTop:20}}>
@@ -304,7 +304,7 @@ const S = {
   toastSuccess: { background:'#22c55e', color:'#000' },
   toastError: { background:'#ef4444', color:'#fff' },
   header: { display:'flex', alignItems:'center', justifyContent:'space-between', padding:'16px 20px 12px', borderBottom:'2px solid var(--accent)', flexShrink:0 },
-  headerTitle: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:28, color:'var(--accent)', textTransform:'uppercase', letterSpacing:2 },
+  headerTitle: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:28, color:'var(--accent-text)', textTransform:'uppercase', letterSpacing:2 },
   refreshBtn: { background:'var(--surface)', border:'1.5px solid var(--border)', borderRadius:10, color:'var(--text)', fontSize:22, width:40, height:40, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' },
   newBtn: { background:'var(--accent)', border:'none', borderRadius:10, color:'#000', fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:15, padding:'0 16px', height:40, cursor:'pointer', letterSpacing:1 },
   infoBar: { margin:'10px 20px 0', background:'rgba(59,130,246,0.1)', border:'1px solid rgba(59,130,246,0.3)', borderRadius:8, padding:'8px 14px' },
@@ -312,11 +312,11 @@ const S = {
   totalesRow: { display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10, margin:'14px 20px 0', flexShrink:0 },
   totalCard: { background:'var(--surface)', border:'2px solid var(--accent)', borderRadius:12, padding:'12px 16px', display:'flex', flexDirection:'column', gap:4 },
   totalLabel: { fontFamily:'Barlow Condensed, sans-serif', fontSize:11, color:'var(--muted)', letterSpacing:1 },
-  totalMonto: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:24, color:'var(--accent)' },
+  totalMonto: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:24, color:'var(--accent-text)' },
   scrollArea: { flex:1, overflowY:'auto', padding:'14px 20px 20px', display:'flex', flexDirection:'column', gap:16 },
   semanaBlock: { background:'var(--surface)', border:'1.5px solid var(--border)', borderRadius:12, overflow:'visible' },
   semanaHeader: { display:'flex', justifyContent:'space-between', alignItems:'center', padding:'10px 16px', background:'var(--surface2)', borderBottom:'1.5px solid var(--border)', borderRadius:'12px 12px 0 0' },
-  semanaLabel: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:14, color:'var(--accent)', letterSpacing:2 },
+  semanaLabel: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:14, color:'var(--accent-text)', letterSpacing:2 },
   semanadTotal: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:18, color:'var(--text)' },
   gastoRow: { display:'flex', alignItems:'center', gap:10, padding:'10px 16px', borderBottom:'1px solid rgba(13,48,128,0.3)' },
   gastoRowPagado: { background:'rgba(34,197,94,0.05)' },
@@ -324,7 +324,7 @@ const S = {
   tildeBtnActivo: { border:'2px solid #22c55e', background:'rgba(34,197,94,0.15)', color:'#22c55e' },
   gastoConcepto: { fontFamily:'Barlow, sans-serif', fontSize:15, color:'var(--text)' },
   fechaPago: { fontFamily:'Barlow Condensed, sans-serif', fontSize:12, color:'#22c55e', opacity:0.7, marginTop:2 },
-  gastoMonto: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:17, color:'var(--accent)', flexShrink:0 },
+  gastoMonto: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:17, color:'var(--accent-text)', flexShrink:0 },
   gastoBtns: { display:'flex', gap:6, flexShrink:0 },
   editBtn: { background:'none', border:'1px solid var(--border)', borderRadius:6, fontSize:15, padding:'4px 8px', cursor:'pointer' },
   deleteBtn: { background:'none', border:'1px solid rgba(239,68,68,0.3)', borderRadius:6, fontSize:15, padding:'4px 8px', cursor:'pointer' },
@@ -332,15 +332,15 @@ const S = {
   overlay: { position:'fixed', inset:0, background:'rgba(0,0,10,0.85)', display:'flex', alignItems:'flex-end', justifyContent:'center', zIndex:300, backdropFilter:'blur(6px)' },
   modal: { background:'var(--surface)', borderRadius:'20px 20px 0 0', width:'100%', maxWidth:520, display:'flex', flexDirection:'column', overflow:'hidden' },
   modalHeader: { display:'flex', justifyContent:'space-between', alignItems:'center', padding:'20px 24px 14px', borderBottom:'1px solid var(--border)', flexShrink:0 },
-  modalTitle: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:22, color:'var(--accent)', letterSpacing:1 },
+  modalTitle: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:22, color:'var(--accent-text)', letterSpacing:1 },
   closeBtn: { background:'none', border:'none', color:'var(--muted)', fontSize:20, cursor:'pointer' },
   formBody: { padding:'20px 24px', display:'flex', flexDirection:'column', gap:16 },
   fieldGroup: { display:'flex', flexDirection:'column', gap:6 },
-  label: { fontFamily:'Barlow Condensed, sans-serif', fontSize:13, color:'var(--accent)', letterSpacing:1, fontWeight:700 },
+  label: { fontFamily:'Barlow Condensed, sans-serif', fontSize:13, color:'var(--accent-text)', letterSpacing:1, fontWeight:700 },
   input: { background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--text)', fontFamily:'Barlow, sans-serif', fontSize:16, padding:'10px 12px', outline:'none' },
   semanaBtns: { display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:6 },
   semanaBtn: { padding:'10px 6px', background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, cursor:'pointer', color:'var(--muted)', fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:13, textAlign:'center' },
-  semanaBtnActive: { background:'rgba(245,200,0,0.12)', border:'1.5px solid var(--accent)', color:'var(--accent)' },
+  semanaBtnActive: { background:'rgba(245,200,0,0.12)', border:'1.5px solid var(--accent)', color:'var(--accent-text)' },
   modalFooter: { display:'flex', gap:10, padding:'14px 24px', borderTop:'1px solid var(--border)', flexShrink:0 },
   cancelBtn: { flex:1, padding:'13px', background:'none', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--muted)', fontFamily:'Barlow, sans-serif', fontSize:15, cursor:'pointer' },
   saveBtn: { flex:2, padding:'13px', background:'var(--accent)', border:'none', borderRadius:8, color:'#000', fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:17, cursor:'pointer', letterSpacing:1 },

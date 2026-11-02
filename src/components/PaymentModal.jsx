@@ -90,7 +90,7 @@ const styles = {
     fontFamily: 'Barlow Condensed, sans-serif',
     fontWeight: 800,
     fontSize: 20,
-    color: 'var(--accent)',
+    color:'var(--accent-text)',
   },
   grid: {
     display: 'grid',
@@ -149,6 +149,6 @@ const styles = {
     fontFamily: 'Barlow Condensed, sans-serif',
     fontWeight: 700,
     fontSize: 20,
-    color: 'var(--accent)',
+    color:'var(--accent-text)',
   },
 }

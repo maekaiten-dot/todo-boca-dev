@@ -112,7 +112,7 @@ export default function Fichadas({ usuarios = [] }) {
 
 const S = {
   page: { flex: 1, overflowY: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 640, width: '100%', margin: '0 auto' },
-  titulo: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 26, color: 'var(--accent)', letterSpacing: 1.5, textTransform: 'uppercase' },
+  titulo: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 26, color:'var(--accent-text)', letterSpacing: 1.5, textTransform: 'uppercase' },
   card: { background: 'var(--surface)', border: '1.5px solid var(--border)', borderRadius: 14, padding: 16, display: 'flex', flexDirection: 'column', gap: 10 },
   subtitulo: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 19, color: 'var(--text)', letterSpacing: 0.5 },
   label: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 14, color: 'var(--muted)', letterSpacing: 1, textTransform: 'uppercase' },

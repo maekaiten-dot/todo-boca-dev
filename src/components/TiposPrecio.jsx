@@ -145,7 +145,7 @@ const S = {
   mAccion: { fontFamily: 'Barlow, sans-serif', fontSize: 11, color: 'var(--muted)', lineHeight: 1.3 },
   filtros: { display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' },
   search: { fontFamily: 'Barlow, sans-serif', fontSize: 15, padding: '9px 12px', background: 'var(--bg)', border: '1.5px solid var(--border)', borderRadius: 10, color: 'var(--text)', width: '100%', maxWidth: 300, boxSizing: 'border-box' },
-  chipSel: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 14, background: 'rgba(245,200,0,0.12)', border: '1.5px solid var(--accent)', color: 'var(--accent)', borderRadius: 999, padding: '5px 12px', cursor: 'pointer' },
+  chipSel: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 14, background: 'rgba(245,200,0,0.12)', border: '1.5px solid var(--accent)', color:'var(--accent-text)', borderRadius: 999, padding: '5px 12px', cursor: 'pointer' },
   cuenta: { fontFamily: 'Barlow, sans-serif', fontSize: 12, color: 'var(--muted)' },
   tablaWrap: { overflowX: 'auto', WebkitOverflowScrolling: 'touch' },
   tabla: { width: '100%', minWidth: 860, borderCollapse: 'collapse' },

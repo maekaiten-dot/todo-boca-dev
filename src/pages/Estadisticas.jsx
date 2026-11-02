@@ -105,7 +105,7 @@ const PosnetTooltip = ({ active, payload, label, modo }) => {
   return (
     <div style={{ background:'var(--surface)', border:'1.5px solid var(--border)', borderRadius:8, padding:'10px 14px', minWidth:230 }}>
       <div style={{ fontFamily:'Barlow Condensed, sans-serif', fontSize:13, color:'var(--muted)', marginBottom:4 }}>{label}</div>
-      <div style={{ fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:20, color:'var(--accent)' }}>
+      <div style={{ fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:20, color:'var(--accent-text)' }}>
         {modo === 'pct' ? `${d.pct.toFixed(1)}% del total` : `$${Math.round(d.total).toLocaleString('es-AR')}`}
       </div>
       <div style={{ fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)' }}>
@@ -221,7 +221,7 @@ const MesTooltip = ({ active, payload, label, modo = 'ARS' }) => {
   return (
     <div style={caja}>
       <div style={{ ...t, fontSize:13, color:'var(--muted)', marginBottom:4 }}>{label}{r.proy ? ' · mes en curso' : ''}</div>
-      <div style={{ ...t, fontWeight:800, fontSize:20, color:'var(--accent)' }}>{pf}{Math.round(r.total).toLocaleString('es-AR')}{r.proy ? <span style={{ fontSize:13, fontWeight:600, color:'var(--muted)' }}> vendido</span> : null}</div>
+      <div style={{ ...t, fontWeight:800, fontSize:20, color:'var(--accent-text)' }}>{pf}{Math.round(r.total).toLocaleString('es-AR')}{r.proy ? <span style={{ fontSize:13, fontWeight:600, color:'var(--muted)' }}> vendido</span> : null}</div>
       {r.proy && (
         <>
           <div style={{ ...t, fontWeight:800, fontSize:18, color:'#90caf9', marginTop:4 }}>≈ {pf}{Math.round(r.proy.proyectado).toLocaleString('es-AR')} <span style={{ fontSize:13, fontWeight:600, color:'var(--muted)' }}>proyectado a fin de mes</span></div>
@@ -249,7 +249,7 @@ const UnidadesTooltip = ({ active, payload, label }) => {
   return (
     <div style={{ background:'var(--surface)', border:'1.5px solid var(--border)', borderRadius:8, padding:'10px 14px' }}>
       <div style={{ ...t, fontSize:13, color:'var(--muted)', marginBottom:4 }}>{label}{r.proy ? ' · mes en curso' : ''}</div>
-      <div style={{ ...t, fontWeight:800, fontSize:20, color:'var(--accent)' }}>{n(r.unidades)} unidades{r.proy ? <span style={{ fontSize:13, fontWeight:600, color:'var(--muted)' }}> vendidas</span> : null}</div>
+      <div style={{ ...t, fontWeight:800, fontSize:20, color:'var(--accent-text)' }}>{n(r.unidades)} unidades{r.proy ? <span style={{ fontSize:13, fontWeight:600, color:'var(--muted)' }}> vendidas</span> : null}</div>
       {r.proy && (
         <>
           <div style={{ ...t, fontWeight:800, fontSize:18, color:'#fde68a', marginTop:4 }}>≈ {n(r.proy.proyectado)} <span style={{ fontSize:13, fontWeight:600, color:'var(--muted)' }}>proyectadas a fin de mes</span></div>
@@ -274,7 +274,7 @@ const CustomTooltip = ({ active, payload, label }) => {
     return (
       <div style={{ background:'var(--surface)', border:'1.5px solid var(--border)', borderRadius:8, padding:'10px 14px' }}>
         <div style={{ fontFamily:'Barlow Condensed, sans-serif', fontSize:13, color:'var(--muted)', marginBottom:4 }}>{label}</div>
-        <div style={{ fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:20, color:'var(--accent)' }}>
+        <div style={{ fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:20, color:'var(--accent-text)' }}>
           ${Math.round(payload[0].value).toLocaleString('es-AR')}
         </div>
       </div>
@@ -328,7 +328,7 @@ const FrecuenciaTooltip = ({ active, payload, label }) => {
         <div style={{ fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)', marginTop:2, lineHeight:1.5 }}>
           {d.tickets} tickets entre {d.desde} y {d.hasta}<br />
           Mediana: {fmtMin(d.mediana)}<br />Hueco más largo: {fmtMin(d.maxGap)} (de {d.huecoDesde} a {d.huecoHasta})
-          {d.fueraN > 0 && <><br /><span style={{ color:'var(--accent)' }}>+ {d.fueraN} {d.fueraN === 1 ? 'venta' : 'ventas'} fuera de horario ({d.fueraDesde}{d.fueraN > 1 ? ` a ${d.fueraHasta}` : ''}), no incluidas</span></>}
+          {d.fueraN > 0 && <><br /><span style={{ color:'var(--accent-text)' }}>+ {d.fueraN} {d.fueraN === 1 ? 'venta' : 'ventas'} fuera de horario ({d.fueraDesde}{d.fueraN > 1 ? ` a ${d.fueraHasta}` : ''}), no incluidas</span></>}
         </div>
       </div>
     )
@@ -567,7 +567,7 @@ const D = {
   overlay: { position:'fixed', inset:0, background:'rgba(0,0,10,0.7)', zIndex:400, display:'flex', alignItems:'flex-end', justifyContent:'center' },
   sheet: { width:'100%', maxWidth:720, maxHeight:'88vh', display:'flex', flexDirection:'column', background:'var(--surface)', borderTop:'2px solid var(--accent)', borderRadius:'18px 18px 0 0', padding:'14px 16px calc(12px + env(safe-area-inset-bottom, 0px))', gap:10 },
   head: { display:'flex', justifyContent:'space-between', alignItems:'center', gap:12 },
-  titulo: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:22, color:'var(--accent)', letterSpacing:0.5 },
+  titulo: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:22, color:'var(--accent-text)', letterSpacing:0.5 },
   sub: { fontFamily:'Barlow, sans-serif', fontSize:13, color:'var(--muted)' },
   total: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:26, color:'#00e676', whiteSpace:'nowrap' },
   cerrar: { background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:10, color:'var(--text)', fontSize:18, width:40, height:40, cursor:'pointer', flexShrink:0 },
@@ -576,12 +576,12 @@ const D = {
   lista: { overflowY:'auto', display:'flex', flexDirection:'column', gap:8, paddingBottom:4 },
   vacio: { fontFamily:'Barlow, sans-serif', fontSize:14, color:'var(--muted)', padding:'16px 0' },
   ticket: { background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:10, padding:'10px 12px' },
-  posnetBtn: { background:'none', border:'1px solid rgba(245,200,0,0.45)', borderRadius:6, color:'var(--accent)', fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:11, padding:'2px 8px', cursor:'pointer', letterSpacing:0.5, textTransform:'uppercase' },
+  posnetBtn: { background:'none', border:'1px solid rgba(245,200,0,0.45)', borderRadius:6, color:'var(--accent-text)', fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:11, padding:'2px 8px', cursor:'pointer', letterSpacing:0.5, textTransform:'uppercase' },
   ticketHead: { display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:10, marginBottom:4 },
   ticketMeta: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:16, color:'var(--text)' },
   ticketMetodo: { fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)', display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' },
   posnetDot: { display:'inline-block', width:18, height:10, borderRadius:3 },
-  ticketTotal: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:18, color:'var(--accent)', whiteSpace:'nowrap' },
+  ticketTotal: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:18, color:'var(--accent-text)', whiteSpace:'nowrap' },
   item: { display:'flex', justifyContent:'space-between', gap:10, fontFamily:'Barlow, sans-serif', fontSize:13, color:'var(--text)', padding:'2px 0' },
   itemNombre: { minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', opacity:0.9 },
   itemPrecio: { flexShrink:0, color:'var(--muted)' },
@@ -884,18 +884,18 @@ const S = {
   errorText: { fontFamily:'Barlow, sans-serif', fontSize:16, color:'#ef4444', textAlign:'center' },
   retryBtn: { background:'var(--surface)', border:'1.5px solid var(--border)', borderRadius:10, color:'var(--text)', fontFamily:'Barlow, sans-serif', fontSize:15, padding:'10px 24px', cursor:'pointer' },
   header: { display:'flex', alignItems:'center', justifyContent:'space-between', padding:'16px 20px 12px', borderBottom:'2px solid var(--accent)', flexShrink:0 },
-  headerTitle: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:28, color:'var(--accent)', textTransform:'uppercase', letterSpacing:2 },
+  headerTitle: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:28, color:'var(--accent-text)', textTransform:'uppercase', letterSpacing:2 },
   refreshBtn: { background:'var(--surface)', border:'1.5px solid var(--border)', borderRadius:10, color:'var(--text)', fontSize:24, width:44, height:44, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' },
   statsRow: { display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12, padding:'16px 20px 12px' },
   statCard: { background:'var(--surface)', borderRadius:12, padding:'14px 16px', border:'1.5px solid var(--border)' },
-  statValue: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:24, color:'var(--accent)' },
+  statValue: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:24, color:'var(--accent-text)' },
   statLabel: { fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)', marginTop:2 },
   chartCard: { margin:'0 20px 16px', background:'var(--surface)', borderRadius:14, border:'1.5px solid var(--border)', padding:'16px' },
   chartTitle: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:16, color:'var(--muted)', letterSpacing:1, textTransform:'uppercase', marginBottom:12 },
   chartWrap: { width:'100%' },
-  fueraChip: { fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--accent)', background:'rgba(245,200,0,0.08)', border:'1px solid rgba(245,200,0,0.3)', borderRadius:20, padding:'3px 10px' },
+  fueraChip: { fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--accent-text)', background:'rgba(245,200,0,0.08)', border:'1px solid rgba(245,200,0,0.3)', borderRadius:20, padding:'3px 10px' },
   rangoBtn: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:13, padding:'6px 12px', background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--muted)', cursor:'pointer' },
-  rangoBtnActivo: { borderColor:'var(--accent)', color:'var(--accent)', background:'rgba(245,200,0,0.1)' },
+  rangoBtnActivo: { borderColor:'var(--accent)', color:'var(--accent-text)', background:'rgba(245,200,0,0.1)' },
   mapaHora: { fontFamily:'Barlow Condensed, sans-serif', fontSize:12, color:'var(--muted)', textAlign:'center', padding:'2px 0' },
   mapaDia: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:13, color:'var(--muted)', display:'flex', alignItems:'center' },
   mapaCelda: { height:34, borderRadius:6, display:'flex', alignItems:'center', justifyContent:'center', fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:13, border:'1px solid rgba(255,255,255,0.05)' },

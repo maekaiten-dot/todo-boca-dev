@@ -2,6 +2,9 @@
 import { useState, useEffect, useRef, lazy, Suspense } from 'react'
 import NuevaVenta from './pages/NuevaVenta.jsx'
 import VentasDelDia from './pages/VentasDelDia.jsx'
+import VenderSimple from './pages/VenderSimple.jsx'
+import HoySimple from './pages/HoySimple.jsx'
+import { LOCAL, TEMA, cssVariablesTema } from './config/local.js'
 import FicharTablet from './components/FicharTablet.jsx'
 import AvisoPrecios, { totalCambios, resumenCambios } from './components/AvisoPrecios.jsx'
 import { BotonModoPartido, BarraModoPartido } from './components/ModoPartido.jsx'
@@ -53,6 +56,12 @@ const CargandoSolapa = () => <div style={{ padding: 24, fontFamily: 'Barlow, san
 const INTERVALO_PRECIOS = 90 * 1000
 const firmaArticulos = arts => arts.map(a => `${a.id}|${a.precioUnitario}|${a.costoUnitario}|${a.nombre}|${a.foto}|${a.grupo || ""}`).join('\n')
 
+// Nombre y color de la pestaña del navegador según el local
+if (typeof document !== 'undefined') {
+  document.title = LOCAL.nombre
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', TEMA.metaColor)
+}
+
 // Barra inferior: solapas de uso diario. El resto de las solapas de Admin va en el menú "Más".
 const TABS_POR_TIPO = {
   Admin: [{ id:'venta', label:'Vender', icon:'🛒' }, { id:'hoy', label:'Hoy', icon:'📊' }, { id:'caja', label:'Gastos', icon:'🧾' }, { id:'log', label:'Historial', icon:'📋' }, { id:'arts', label:'Arts.', icon:'📦' }],
@@ -72,6 +81,19 @@ const TABS_MAS_ADMIN = [
   { id:'fich', label:'Fichadas', icon:'⏱', desc:'Tablet y celulares para fichar' },
   { id:'admin', label:'Administración', icon:'🔒', desc:'Cierre de mes, regalías, cuentas y ahorros' },
 ]
+
+// Solapas según el local (src/config/local.js). Sin configuración: las de siempre.
+const TODAS_LAS_TABS = [...TABS_POR_TIPO.Admin, ...TABS_POR_TIPO.Caja, ...TABS_MAS_ADMIN]
+  .filter((t, i, arr) => arr.findIndex(x => x.id === t.id) === i)
+const tabsPorIds = ids => (ids || []).map(id => TODAS_LAS_TABS.find(t => t.id === id)).filter(Boolean)
+function tabsDelLocal(tipoKey) {
+  if (!LOCAL.solapas) return TABS_POR_TIPO[tipoKey] || TABS_POR_TIPO['Caja']
+  return tabsPorIds(LOCAL.solapas[tipoKey] || LOCAL.solapas.Caja)
+}
+function tabsMasDelLocal(esAdmin) {
+  if (!esAdmin) return []
+  return LOCAL.solapas ? tabsPorIds(LOCAL.solapas.mas) : TABS_MAS_ADMIN
+}
 
 function MenuMas({ tabs, tabActual, onElegir, onCerrar }) {
   useEffect(() => {
@@ -159,7 +181,7 @@ function PinModal({ onConfirm, onCancel, usuario }) {
 const P = {
   overlay: { position:'fixed', inset:0, background:'rgba(0,0,10,0.9)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:500, backdropFilter:'blur(8px)' },
   box: { background:'var(--surface)', border:'2px solid var(--border)', borderRadius:20, padding:'32px 28px', width:320, display:'flex', flexDirection:'column', alignItems:'center', gap:16, transition:'transform 0.1s' },
-  title: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:26, color:'var(--accent)', letterSpacing:2, textTransform:'uppercase' },
+  title: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:26, color:'var(--accent-text)', letterSpacing:2, textTransform:'uppercase' },
   subtitle: { fontFamily:'Barlow, sans-serif', fontSize:14, color:'var(--muted)', marginTop:-8 },
   dots: { display:'flex', gap:12, margin:'8px 0' },
   dot: { width:14, height:14, borderRadius:'50%', border:'2px solid var(--border)', background:'transparent', transition:'all 0.15s' },
@@ -443,10 +465,10 @@ export default function App() {
   const esAdmin = perfilGuardado?.tipo?.toLowerCase() === 'admin'
   const esAdrian = perfilGuardado?.nombre?.toLowerCase() === 'adrián' || perfilGuardado?.nombre?.toLowerCase() === 'adrian'
   const tipoKey = esAdmin ? 'Admin' : 'Caja'
-  const tabsBase = TABS_POR_TIPO[tipoKey] || TABS_POR_TIPO['Caja']
+  const tabsBase = tabsDelLocal(tipoKey)
   // Gastos Fijos visible para todos los Admin, editable solo por Adrián
   const tabs = tabsBase
-  const tabsMas = esAdmin ? TABS_MAS_ADMIN : []
+  const tabsMas = tabsMasDelLocal(esAdmin)
   const tabMasActiva = tabsMas.find(t => t.id === tab)
   const empleadoActual = perfilGuardado?.nombre || ''
   const usuariosLogin = usuarios.filter(u => u.tipo?.toLowerCase() === 'admin' || u.nombre === 'Tablet')
@@ -464,7 +486,7 @@ export default function App() {
         <style>{CSS_GLOBAL}</style>
         <div style={S.setupOverlay}>
           <div style={S.setupBox}>
-            <div style={S.setupLogo}><span style={S.logoTodo}>TODO</span><span style={S.logoBoca}>BOCA</span></div>
+            <div style={S.setupLogo}><span style={S.logoTodo}>{LOCAL.logo[0]}</span><span style={S.logoBoca}>{LOCAL.logo[1]}</span></div>
             <div style={S.setupTitle}>¿Quién sos?</div>
             <div style={S.setupSub}>{loadingUsuarios ? 'Cargando usuarios...' : 'Elegí tu usuario para continuar.'}</div>
             <div style={S.setupBtns}>
@@ -490,7 +512,7 @@ export default function App() {
       <div style={S.app}>
         <div style={S.header}>
           <div style={S.logo} onClick={handleLogoTap} role="button">
-            <span style={S.logoTodo}>TODO</span><span style={S.logoBoca}>BOCA</span>
+            <span style={{ ...S.logoTodo, color:'var(--header-text)' }}>{LOCAL.logo[0]}</span><span style={{ ...S.logoBoca, color:'var(--accent)' }}>{LOCAL.logo[1]}</span>
           </div>
           <div style={S.headerRight}>
             {esAdmin && totalCambios(avisoCambios) > 0 && (
@@ -498,8 +520,8 @@ export default function App() {
                 📢 {resumenCambios(avisoCambios)}
               </button>
             )}
-            {esAdmin && <BotonModoPartido activo={modo.activo} cambiando={cambiandoModo} onCambiar={cambiarModo} />}
-            <FicharTablet />
+            {esAdmin && LOCAL.modoPartido && <BotonModoPartido activo={modo.activo} cambiando={cambiandoModo} onCambiar={cambiarModo} />}
+            {LOCAL.fichar && <FicharTablet />}
             <div style={S.perfilPill}><span style={S.perfilLabel}>{empleadoActual}</span></div>
             {loadingArticulos && <span style={S.loadingPill}>Cargando...</span>}
           </div>
@@ -509,12 +531,17 @@ export default function App() {
 
         <div style={S.content}>
           <div style={tabStyle('venta')}>
+            {LOCAL.venderSimple ? (
+              <VenderSimple articulos={articulos} loadingArticulos={loadingArticulos} usuarios={usuarios} stockMap={stockMap} perfilNombre={empleadoActual} esAdmin={esAdmin}
+                onVentaRegistrada={() => { setRefreshKey(k => k + 1); recalcularStock(articulosRef.current) }} />
+            ) : (
             <NuevaVenta promos={promos} articulos={articulos} loadingArticulos={loadingArticulos} usuarios={usuarios} stockMap={stockMap} empleadoFijo={esAdmin ? empleadoActual : null} esAdmin={esAdmin} cargadoPor={empleadoActual}
               modoPartido={modo.activo} masVendidos={modo.masVendidos || []}
               onVentaRegistrada={() => { if (modoRef.current.activo) return; setRefreshKey(k => k + 1); recalcularStock(articulosRef.current) }} />
+            )}
           </div>
           {tabsVisitadas.has('hoy') && (
-            <div style={tabStyle('hoy')}><VentasDelDia refreshKey={refreshKey} puedeAnular={true} usuarios={usuarios} perfilNombre={empleadoActual} esAdmin={esAdmin} articulos={articulos} /></div>
+            <div style={tabStyle('hoy')}>{LOCAL.hoySimple && !esAdmin ? <HoySimple refreshKey={refreshKey} articulos={articulos} /> : <VentasDelDia refreshKey={refreshKey} puedeAnular={true} usuarios={usuarios} perfilNombre={empleadoActual} esAdmin={esAdmin} articulos={articulos} />}</div>
           )}
           {tabsVisitadas.has('caja') && (
             <div style={tabStyle('caja')}><Suspense fallback={<CargandoSolapa />}><GastosCaja usuarios={usuarios} perfilNombre={empleadoActual} onRegistrado={() => setRefreshKey(k => k + 1)} /></Suspense></div>
@@ -564,8 +591,8 @@ export default function App() {
           {tabs.map(t => (
             <button key={t.id} style={{ ...S.navBtn, ...(tab === t.id ? S.navBtnActive : {}) }} onClick={() => handleTabChange(t.id)}>
               {tab === t.id && <div style={S.navBar} />}
-              <span style={S.navIcon}>{t.icon}</span>
-              <span style={S.navLabel}>{t.label}</span>
+              <span style={LOCAL.barraGrande ? S.navIconGrande : S.navIcon}>{t.icon}</span>
+              <span style={LOCAL.barraGrande ? S.navLabelGrande : S.navLabel}>{t.label}</span>
             </button>
           ))}
           {tabsMas.length > 0 && (
@@ -584,11 +611,11 @@ export default function App() {
 
 export const CSS_GLOBAL = `
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  :root { --bg: #021030; --surface: #031a4a; --surface2: #042060; --border: #0d3080; --text: #f0f4ff; --muted: #6a8ccc; --accent: #f5c800; --success: #22c55e; }
+  :root { ${cssVariablesTema()} }
   html, body, #root { height: 100%; width: 100%; background: var(--bg); color: var(--text); -webkit-font-smoothing: antialiased; overflow: hidden; }
   button { transition: opacity 0.1s, transform 0.1s; }
   button:active { opacity: 0.75; transform: scale(0.97); }
-  select option { background: #031a4a; color: #f0f4ff; }
+  select option { background: var(--surface); color: var(--text); }
   ::-webkit-scrollbar { width: 3px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
@@ -596,10 +623,10 @@ export const CSS_GLOBAL = `
 
 const S = {
   app: { height:'100%', display:'flex', flexDirection:'column', overflow:'hidden' },
-  header: { display:'flex', alignItems:'center', justifyContent:'space-between', padding:'8px 16px', borderBottom:'2px solid var(--accent)', background:'var(--surface)', flexShrink:0 },
+  header: { display:'flex', alignItems:'center', justifyContent:'space-between', padding:'8px 16px', borderBottom:'2px solid var(--accent)', background:'var(--header-bg)', flexShrink:0 },
   logo: { display:'flex', alignItems:'baseline', gap:5, cursor:'pointer', userSelect:'none' },
   logoTodo: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:24, color:'var(--text)', letterSpacing:3 },
-  logoBoca: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:24, color:'var(--accent)', letterSpacing:3 },
+  logoBoca: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:24, color:'var(--accent-text)', letterSpacing:3 },
   headerRight: { display:'flex', alignItems:'center', gap:8 },
   avisoPreciosPill: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:13, color:'#000', background:'var(--accent)', border:'none', borderRadius:20, padding:'4px 12px', cursor:'pointer', whiteSpace:'nowrap' },
   perfilPill: { background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:20, padding:'3px 12px' },
@@ -608,9 +635,11 @@ const S = {
   content: { flex:1, overflow:'hidden', display:'flex', flexDirection:'column', position:'relative' },
   nav: { display:'flex', borderTop:'1.5px solid var(--border)', background:'var(--surface)', flexShrink:0 },
   navBtn: { flex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:2, padding:'8px 0 10px', background:'none', border:'none', cursor:'pointer', color:'var(--muted)', position:'relative' },
-  navBtnActive: { color:'var(--accent)' },
+  navBtnActive: { color:'var(--accent-text)' },
   navBar: { position:'absolute', top:0, left:'50%', transform:'translateX(-50%)', width:32, height:2, background:'var(--accent)', borderRadius:'0 0 3px 3px' },
   navIcon: { fontSize:20 },
+  navIconGrande: { fontSize:30, lineHeight:1.1 },
+  navLabelGrande: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:20, textTransform:'uppercase', letterSpacing:1, paddingBottom:4 },
   navLabel: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:11, textTransform:'uppercase', letterSpacing:1 },
   setupOverlay: { height:'100%', display:'flex', alignItems:'center', justifyContent:'center', background:'var(--bg)' },
   setupBox: { display:'flex', flexDirection:'column', alignItems:'center', gap:20, padding:32, maxWidth:380, width:'100%' },
@@ -619,6 +648,6 @@ const S = {
   setupSub: { fontFamily:'Barlow, sans-serif', fontSize:13, color:'var(--muted)', textAlign:'center', lineHeight:1.5 },
   setupBtns: { display:'flex', flexDirection:'column', gap:10, width:'100%' },
   setupBtn: { width:'100%', display:'flex', flexDirection:'column', alignItems:'flex-start', padding:'16px 20px', background:'var(--surface)', border:'2px solid var(--border)', borderRadius:12, cursor:'pointer', gap:4 },
-  setupBtnLabel: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:22, color:'var(--accent)', letterSpacing:1 },
+  setupBtnLabel: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:22, color:'var(--accent-text)', letterSpacing:1 },
   setupBtnDesc: { fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)' },
 }

@@ -153,7 +153,7 @@ export default function EditarVentaModal({ venta, articulos = [], usuarios = [],
 
           <div style={S.caja}>
             <div style={S.totales}>
-              <span>Total: {Math.round(total) !== Math.round(totalAntes) && <span style={{ color: 'var(--muted)', textDecoration: 'line-through', marginRight: 6 }}>{fmt$(totalAntes)}</span>}<b style={{ color: 'var(--accent)', fontSize: 22 }}>{fmt$(total)}</b></span>
+              <span>Total: {Math.round(total) !== Math.round(totalAntes) && <span style={{ color: 'var(--muted)', textDecoration: 'line-through', marginRight: 6 }}>{fmt$(totalAntes)}</span>}<b style={{ color:'var(--accent-text)', fontSize: 22 }}>{fmt$(total)}</b></span>
               {Math.round(total) !== Math.round(totalAntes) && <span style={{ color: total > totalAntes ? '#22c55e' : '#f59e0b' }}>{total > totalAntes ? `+${fmt$(total - totalAntes)} más que antes` : `${fmt$(totalAntes - total)} menos que antes`}</span>}
             </div>
             <div style={S.campos}>
@@ -198,7 +198,7 @@ const S = {
   overlay: { position: 'fixed', inset: 0, background: 'rgba(0,0,10,0.85)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 320, backdropFilter: 'blur(6px)' },
   modal: { background: 'var(--surface)', borderRadius: '20px 20px 0 0', width: '100%', maxWidth: 640, maxHeight: '92vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '16px 20px 10px', borderBottom: '1px solid var(--border)' },
-  titulo: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 21, color: 'var(--accent)', letterSpacing: 1 },
+  titulo: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 21, color:'var(--accent-text)', letterSpacing: 1 },
   sub: { fontFamily: 'Barlow, sans-serif', fontSize: 12, color: 'var(--muted)', marginTop: 2 },
   cerrar: { background: 'none', border: 'none', color: 'var(--muted)', fontSize: 20, cursor: 'pointer' },
   cuerpo: { overflowY: 'auto', padding: '12px 20px', display: 'flex', flexDirection: 'column', gap: 10 },
@@ -207,7 +207,7 @@ const S = {
   chico: { fontFamily: 'Barlow, sans-serif', fontSize: 12, color: 'var(--muted)' },
   campos: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 8 },
   campo: { display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 },
-  label: { fontFamily: 'Barlow Condensed, sans-serif', fontSize: 11, color: 'var(--accent)', letterSpacing: 1, fontWeight: 700 },
+  label: { fontFamily: 'Barlow Condensed, sans-serif', fontSize: 11, color:'var(--accent-text)', letterSpacing: 1, fontWeight: 700 },
   input: { width: '100%', boxSizing: 'border-box', minWidth: 0, background: 'var(--surface)', border: '1.5px solid var(--border)', borderRadius: 8, color: 'var(--text)', fontFamily: 'Barlow, sans-serif', fontSize: 15, padding: '8px 10px', outline: 'none' },
   lista: { position: 'absolute', zIndex: 5, left: 0, right: 0, top: '100%', background: 'var(--surface)', border: '1.5px solid var(--border)', borderRadius: 8, maxHeight: 260, overflowY: 'auto' },
   opcion: { display: 'block', width: '100%', textAlign: 'left', background: 'none', border: 'none', borderBottom: '1px solid var(--border)', color: 'var(--text)', fontFamily: 'Barlow, sans-serif', fontSize: 14, padding: '8px 10px', cursor: 'pointer' },
@@ -217,7 +217,7 @@ const S = {
   check: { display: 'flex', alignItems: 'center', gap: 8, fontFamily: 'Barlow, sans-serif', fontSize: 14, color: 'var(--text)' },
   btn: { flex: 2, padding: 13, background: 'var(--accent)', border: 'none', borderRadius: 8, color: '#000', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 16, letterSpacing: 1, cursor: 'pointer' },
   btnSec: { flex: 1, padding: '10px 12px', background: 'var(--surface2)', border: '1.5px solid var(--border)', borderRadius: 8, color: 'var(--text)', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 15, cursor: 'pointer' },
-  activo: { border: '1.5px solid var(--accent)', color: 'var(--accent)', background: 'rgba(245,200,0,0.1)' },
+  activo: { border: '1.5px solid var(--accent)', color:'var(--accent-text)', background: 'rgba(245,200,0,0.1)' },
   pie: { display: 'flex', gap: 10, padding: '12px 20px', borderTop: '1px solid var(--border)' },
   error: { fontFamily: 'Barlow, sans-serif', fontSize: 13, color: '#ef4444' },
 }

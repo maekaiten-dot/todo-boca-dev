@@ -156,9 +156,9 @@ export default function HerramientasArticulo({ editando, form, articulos = [], s
 
 const S = {
   caja: { display: 'flex', flexDirection: 'column', gap: 8, padding: 12, border: '1.5px dashed var(--border)', borderRadius: 10 },
-  titulo: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 13, color: 'var(--accent)', letterSpacing: 1 },
+  titulo: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 13, color:'var(--accent-text)', letterSpacing: 1 },
   texto: { fontFamily: 'Barlow, sans-serif', fontSize: 13, color: 'var(--muted)', lineHeight: 1.4 },
-  label: { fontFamily: 'Barlow Condensed, sans-serif', fontSize: 12, color: 'var(--accent)', letterSpacing: 1, fontWeight: 700 },
+  label: { fontFamily: 'Barlow Condensed, sans-serif', fontSize: 12, color:'var(--accent-text)', letterSpacing: 1, fontWeight: 700 },
   input: { background: 'var(--surface2)', border: '1.5px solid var(--border)', borderRadius: 8, color: 'var(--text)', fontFamily: 'Barlow, sans-serif', fontSize: 15, padding: '9px 12px', outline: 'none', width: '100%', boxSizing: 'border-box' },
   opcion: { display: 'block', textAlign: 'left', width: '100%', background: 'var(--surface2)', border: '1.5px solid var(--border)', borderRadius: 8, color: 'var(--text)', fontFamily: 'Barlow, sans-serif', fontSize: 14, padding: '8px 10px', cursor: 'pointer', boxSizing: 'border-box' },
   opcionActiva: { border: '1.5px solid var(--accent)', background: 'rgba(245,200,0,0.08)' },

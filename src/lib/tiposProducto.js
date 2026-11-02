@@ -107,8 +107,15 @@ export function cambiosDePrecio(articulos, ventas, historico = []) {
     if (k >= 0 && k < l.length - 1) { const d = diaDe(l[k + 1].desde); if (d != null) out[id] = { dia: d, precioAntes: l[k].precio } }
   }
   const vs = {}
-  for (const v of ventas) if (!v.anulado && v.articulo && v.cantidad > 0 && precioHoy[v.articulo] != null && !out[v.articulo]) (vs[v.articulo] ||= []).push(v)
+  for (const v of ventas) if (!v.anulado && v.articulo && v.cantidad > 0 && precioHoy[v.articulo] != null) (vs[v.articulo] ||= []).push(v)
+  // El precio anterior es el último al que se VENDIÓ antes del cambio: si el precio se cambió
+  // sin pasar por la app (por ejemplo, directo en la planilla), el histórico no lo tiene.
+  for (const [id, c] of Object.entries(out)) {
+    const antes = (vs[id] || []).filter(v => { const d = diaDe(v.fecha); return d != null && d < c.dia && Math.round(v.precioUnitario) !== precioHoy[id] })
+    if (antes.length) c.precioAntes = antes.reduce((a, b) => (diaDe(b.fecha) >= diaDe(a.fecha) ? b : a)).precioUnitario
+  }
   for (const [id, l] of Object.entries(vs)) {
+    if (out[id]) continue
     l.sort((a, b) => (diaDe(a.fecha) ?? 0) - (diaDe(b.fecha) ?? 0))
     const ult = l[l.length - 1]
     // Se cambió el precio después de la última venta (todavía no se vendió al precio nuevo)

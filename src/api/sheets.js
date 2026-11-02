@@ -813,13 +813,19 @@ export async function registrarVenta({ items, devueltos = [], metodoPago, pagos 
   // Clave de la carga en AN (todas las filas de la venta)
   rows.forEach(r => { while (r.length < IDX_UID) r.push(''); r[IDX_UID] = uid })
 
-  // Se AGREGA al final de la planilla (Google pone las filas una después de otra aunque carguen
-  // varios dispositivos a la vez: nunca se pisan). Antes se escribía en "la fila siguiente" calculada
-  // en el dispositivo, y si dos cargaban en el mismo segundo una venta podía pisar a la otra.
-  const res = await sheetsAppend(`DETALLE DE VENTAS!A${lastDataRow}:${COL_UID}${lastDataRow}`, rows)
-  const primera = Number(String(res?.updates?.updatedRange || '').match(/![A-Z]+(\d+)/)?.[1]) || nextRow
-  detalleCambio([primera])
-  idVenta = await verificarCodigoVenta({ idVenta, primera, cantidad: rows.length, filasLeidas: filasAB })
+  // Se AGREGA al final de la hoja con "appendCells": Google pone las filas una después de otra
+  // aunque carguen varios dispositivos a la vez (nunca se pisan) y SIEMPRE desde la columna A.
+  // (El "append" de valores que se usó el 2/11 adivinaba dónde empezaba la tabla y dejó ventas
+  // corridas 17 columnas a la derecha.)
+  void nextRow
+  await agregarFilasDetalle(rows)
+  // Se ubica la venta por su clave para saber en qué fila quedó y confirmar el código
+  const filasDespues = await leerDetalleFresco()
+  const idx = filasDespues.findIndex(r => r[0] && String(r[IDX_UID] || '') === uid)
+  if (idx >= 0) {
+    detalleCambio([idx + 2])
+    idVenta = await verificarCodigoVenta({ idVenta, primera: idx + 2, cantidad: rows.length, filas: filasDespues })
+  }
 
   const totalVenta = rows.reduce((s, r) => s+(r[18]||0), 0)
   const totalDtoImanes = dtosPorItem.reduce((s, d) => s+d.descuentoImanes, 0)
@@ -837,17 +843,13 @@ export async function registrarVenta({ items, devueltos = [], metodoPago, pagos 
 // ventas nunca ocupan el mismo lugar, así que el número no se repite aunque carguen los 3
 // dispositivos en el mismo segundo. Normalmente coincide con el que ya tenía y no se toca nada;
 // si otro dispositivo guardó en el medio, se corrige el código de esta venta (A y B).
-async function verificarCodigoVenta({ idVenta, primera, cantidad, filasLeidas }) {
+async function verificarCodigoVenta({ idVenta, primera, cantidad, filas }) {
   const prefijo = idVenta.split('-')[0]
-  let desde = filasLeidas.findIndex(r => String(r[1] || '').startsWith(prefijo + '-'))
-  desde = desde >= 0 ? desde + 2 : primera
-  if (desde >= primera) return idVenta
-  const [colB, colUid] = await sheetsBatchGet([`DETALLE DE VENTAS!B${desde}:B${primera - 1}`, `DETALLE DE VENTAS!${COL_UID}${desde}:${COL_UID}${primera - 1}`])
   const claves = new Set(), numeros = []
-  colB.forEach((r, k) => {
-    const id = String(r?.[0] || '')
-    if (!id.startsWith(prefijo + '-')) return
-    claves.add(String(colUid[k]?.[0] || '') || id)
+  filas.slice(0, primera - 2).forEach(r => {
+    const id = String(r?.[1] || '')
+    if (!r?.[0] || !id.startsWith(prefijo + '-')) return
+    claves.add(String(r[IDX_UID] || '') || id)
     numeros.push(Number(id.split('-')[1]) || 0)
   })
   let numero = claves.size + 1
@@ -860,6 +862,32 @@ async function verificarCodigoVenta({ idVenta, primera, cantidad, filasLeidas })
   await sheetsBatchUpdate(data)
   registrarLog({ accion: 'VENTA_RENUMERADA', detalle: `${idVenta} → ${nuevo} (otro dispositivo guardó una venta al mismo tiempo)`, idReferencia: nuevo, resultado: 'OK' }).catch(() => {})
   return nuevo
+}
+
+// Agrega filas al final de DETALLE DE VENTAS empezando en la columna A (appendCells)
+let _sheetIdDetalle = null
+async function agregarFilasDetalle(rows) {
+  const token = await getAccessToken()
+  if (_sheetIdDetalle == null) {
+    const metaRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}?fields=sheets.properties(sheetId,title)`, { headers: { Authorization: `Bearer ${token}` } })
+    if (!metaRes.ok) throw new Error(`Sheets META error: ${metaRes.status}`)
+    const hoja = ((await metaRes.json()).sheets || []).find(h => h.properties?.title === 'DETALLE DE VENTAS')
+    if (!hoja) throw new Error('No se encontró la hoja DETALLE DE VENTAS')
+    _sheetIdDetalle = hoja.properties.sheetId
+  }
+  const celda = v => {
+    if (v === '' || v == null) return {}
+    if (typeof v === 'boolean') return { userEnteredValue: { boolValue: v } }
+    if (typeof v === 'number') return Number.isFinite(v) ? { userEnteredValue: { numberValue: v } } : {}
+    const t = String(v)
+    return { userEnteredValue: { stringValue: t.startsWith("'") ? t.slice(1) : t } }
+  }
+  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}:batchUpdate`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requests: [{ appendCells: { sheetId: _sheetIdDetalle, fields: 'userEnteredValue', rows: rows.map(r => ({ values: r.map(celda) })) } }] }),
+  })
+  if (!res.ok) throw new Error(`Sheets APPEND CELLS error: ${res.status}`)
 }
 
 async function sheetsBatchGet(rangos) {

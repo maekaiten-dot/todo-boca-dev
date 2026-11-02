@@ -12,8 +12,8 @@ const u1 = n => !n ? '–' : n < 0.1 ? '<0,1' : n.toLocaleString('es-AR', { maxi
 const COLOR = { POPULAR: '#22c55e', ESTANDAR: '#60a5fa', PREMIUM: '#f5c800' }
 const norm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
 
-export default function TiposPrecio({ articulos, ventas, ingresos, hoy }) {
-  const { cortes, filas } = useMemo(() => clasificarArticulos({ articulos, ventas, ingresos, hoy, metodosDe }), [articulos, ventas, ingresos, hoy])
+export default function TiposPrecio({ articulos, ventas, ingresos, historico = [], hoy }) {
+  const { cortes, filas } = useMemo(() => clasificarArticulos({ articulos, ventas, ingresos, historico, hoy, metodosDe }), [articulos, ventas, ingresos, historico, hoy])
   const [sel, setSel] = useState(null)       // { tipo, nivel } o null = todos
   const [busq, setBusq] = useState('')
   const [orden, setOrden] = useState({ k: 'ganSem', dir: -1 })
@@ -33,6 +33,7 @@ export default function TiposPrecio({ articulos, ventas, ingresos, hoy }) {
   }, [filas])
   const celda = (t, n) => { const g = filas.filter(f => f.tipo === t && f.nivel === n); return { n: g.length, gan: g.reduce((s, f) => s + (f.ganSem || 0), 0) } }
   const nuevos = filas.filter(f => f.nivel === 'NUEVO')
+  const recientes = filas.filter(f => f.nivel === 'CAMBIO')
 
   const visibles = useMemo(() => {
     const q = norm(busq)
@@ -49,7 +50,7 @@ export default function TiposPrecio({ articulos, ventas, ingresos, hoy }) {
       <div style={S.nota}>
         <b>Tipo por precio</b>: <b style={{ color: COLOR.PREMIUM }}>Premium</b> desde {$(cortes.c2)} (donde arranca el tercio más caro de la facturación: pocos artículos, los más caros) · <b style={{ color: COLOR.ESTANDAR }}>Estándar</b> de {$(cortes.c1)} a {$(cortes.c2 - 1)} · <b style={{ color: COLOR.POPULAR }}>Popular</b> hasta {$(cortes.c1 - 1)} (el corte entre los dos está en el salto de precios más marcado).
         {cortes.porVentas ? ' Se recalcula solo una vez por mes, con las ventas de las 26 semanas hasta el fin del mes pasado.' : ' Todavía sin ventas para calcular: se usan tercios por cantidad de artículos.'}
-        {' '}<b>Rotación</b>: unidades por semana en las últimas {SEMANAS_VENTANA} semanas, comparada contra los de su mismo tipo (los artículos con menos tiempo se cuentan desde que llegaron).
+        {' '}<b>Rotación</b>: unidades por semana en las últimas {SEMANAS_VENTANA} semanas, comparada contra los de su mismo tipo (los artículos con menos tiempo se cuentan desde que llegaron; si cambió el precio, cuenta solo lo vendido al precio actual).
         {' '}<b>Ganancia/semana</b> = (precio − costo) × unidades por semana, con el precio y el costo de hoy. Es lo que conviene maximizar, no las unidades.
         {' '}<b>🌎 Turistas</b>: parte de lo vendido que se pagó en dólares, reales, euros o Pix (seguro turista); <b>🏠 Locales</b>: efectivo en pesos o transferencia. La tarjeta y el QR los usan los dos y no cuentan para ninguno.
       </div>
@@ -87,6 +88,7 @@ export default function TiposPrecio({ articulos, ventas, ingresos, hoy }) {
         </div>
       </div>
       {nuevos.length > 0 && <div style={S.nota}>Además hay {nuevos.length} artículos nuevos (menos de 4 semanas de historia) que todavía no se clasifican por rotación.</div>}
+      {recientes.length > 0 && <div style={S.nota}>{recientes.length} {recientes.length === 1 ? 'artículo cambió' : 'artículos cambiaron'} de precio hace menos de 4 semanas: no entran en la matriz hasta juntar 4 semanas de ventas al precio nuevo (así lo vendido al precio anterior no cuenta).</div>}
 
       <div style={S.filtros}>
         <input style={S.search} placeholder="Buscar artículo…" value={busq} onChange={e => setBusq(e.target.value)} aria-label="Buscar artículo" />
@@ -104,7 +106,8 @@ export default function TiposPrecio({ articulos, ventas, ingresos, hoy }) {
             {visibles.slice(0, 300).map(f => (
               <tr key={f.id}>
                 <td style={{ ...S.td, textAlign: 'left', whiteSpace: 'normal', minWidth: 180 }}>{f.nombre}<div style={S.cod}>{f.id}{f.grupo ? ` · ${f.grupo}` : ''}</div></td>
-                <td style={{ ...S.td, color: COLOR[f.tipo] }}>{NOMBRE_TIPO[f.tipo]}{f.manual && <span title={`Forzado a mano (por precio sería ${NOMBRE_TIPO[f.tipoAuto] || '–'})`}> ✋</span>}<div style={S.cod}>{NOMBRE_NIVEL[f.nivel]}</div></td>
+                <td style={{ ...S.td, color: COLOR[f.tipo] }}>{NOMBRE_TIPO[f.tipo]}{f.manual && <span title={`Forzado a mano (por precio sería ${NOMBRE_TIPO[f.tipoAuto] || '–'})`}> ✋</span>}<div style={S.cod}>{NOMBRE_NIVEL[f.nivel]}</div>
+                  {f.cambioPrecio && <div style={{ ...S.cod, color: '#60a5fa', whiteSpace: 'normal', maxWidth: 190 }} title="La rotación cuenta solo lo vendido al precio actual">{$(f.cambioPrecio.precioAntes)} → {$(f.precio)} hace {f.cambioPrecio.dias} d · antes {u1(f.cambioPrecio.uSemAntes)}/sem, ahora {u1(f.cambioPrecio.uSemDesde)}/sem</div>}</td>
                 <td style={S.td}>{$(f.precio)}</td>
                 <td style={{ ...S.td, color: f.margen == null ? 'var(--muted)' : f.margen < 0.4 ? '#f59e0b' : 'var(--text)' }}>{pct(f.margen)}</td>
                 <td style={S.td}>{u1(f.uSem)}</td>

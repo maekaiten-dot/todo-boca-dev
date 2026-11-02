@@ -3,7 +3,7 @@
 // reposición sugerida según el stock calculado. Solo para Admin (lo controla App.jsx).
 import { useState, useEffect, useMemo } from 'react'
 import { parseMonto as parseArs } from '../lib/montos.js'
-import { getHistoricoVentas, getIngresos } from '../api/sheets.js'
+import { getHistoricoVentas, getIngresos, getHistoricoPrecios } from '../api/sheets.js'
 import TiposPrecio from '../components/TiposPrecio.jsx'
 
 const VENTANAS = [30, 60, 90, 365]
@@ -183,6 +183,7 @@ function fechaDeDia(dia) {
 export default function Rotacion({ articulos = [], stockMap = {} }) {
   const [ventas, setVentas] = useState([])
   const [ingresos, setIngresos] = useState([])
+  const [historicoPrecios, setHistoricoPrecios] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [metrica, setMetrica] = useState('u')
@@ -205,8 +206,8 @@ export default function Rotacion({ articulos = [], stockMap = {} }) {
     setLoading(true)
     setError(null)
     try {
-      const [v, ing] = await Promise.all([getHistoricoVentas({ unificar: true }), getIngresos({ unificar: true }).catch(() => [])])
-      setVentas(v); setIngresos(ing)
+      const [v, ing, hp] = await Promise.all([getHistoricoVentas({ unificar: true }), getIngresos({ unificar: true }).catch(() => []), getHistoricoPrecios().catch(() => [])])
+      setVentas(v); setIngresos(ing); setHistoricoPrecios(hp)
     }
     catch (e) { console.error(e); setError('No se pudo cargar. Intentá de nuevo.') }
     finally { setLoading(false) }
@@ -368,7 +369,7 @@ export default function Rotacion({ articulos = [], stockMap = {} }) {
       <div style={S.controls}>
         <Segmento opciones={[{ v: 'rotacion', label: 'Rotación y reposición' }, { v: 'tipos', label: 'Tipos y precios' }]} valor={seccion} onChange={setSeccion} />
       </div>
-      {seccion === 'tipos' ? <TiposPrecio articulos={articulos} ventas={ventas} ingresos={ingresos} hoy={hoy} /> : <>
+      {seccion === 'tipos' ? <TiposPrecio articulos={articulos} ventas={ventas} ingresos={ingresos} historico={historicoPrecios} hoy={hoy} /> : <>
       <div style={S.controls}>
         <Segmento opciones={METRICAS.map(m => ({ v: m.id, label: m.label }))} valor={metrica} onChange={setMetrica} />
         <Segmento opciones={TOPS.map(n => ({ v: n, label: `Top ${n}` }))} valor={top} onChange={setTop} />

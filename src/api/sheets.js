@@ -1001,6 +1001,17 @@ export async function registrarCambioPrecioCosto({ id, nombre, precioAnterior, c
   return true
 }
 
+// Intervalos de precio de cada artículo (para saber desde cuándo rige el precio actual)
+export async function getHistoricoPrecios() {
+  let data
+  try { data = await sheetsGet(`${HOJA_HIST}!A2:F`) }
+  catch (e) { if (String(e.message).includes('400')) return []; throw e }
+  return (data.values || []).filter(r => r[0]).map(r => ({
+    id: idCanonico(String(r[0]).trim()), desde: String(r[2] || '').replace(/^'/, '').trim(), hasta: String(r[3] || '').replace(/^'/, '').trim(),
+    precio: parsePrecio(r[4]),
+  }))
+}
+
 // Artículo nuevo: abre su primer intervalo
 async function registrarAltaEnHistorico(art, quien = '') {
   await asegurarFormatoHistorico()

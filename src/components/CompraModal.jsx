@@ -85,7 +85,7 @@ export default function CompraModal({ compra, empleado = '', onCerrar, onCambio,
                   <td style={S.td}>{r.cantidad}</td>
                   <td style={S.td}>{fmt$(r.costoTotal)}</td>
                   <td style={{ ...S.td, color: compra.renglones.find(x => x.rowNum === r.rowNum)?.pagado ? '#22c55e' : 'var(--text)' }}>{fmt$(compra.renglones.find(x => x.rowNum === r.rowNum)?.montoPagado)}</td>
-                  {compra.saldo > 0 && m > 0 && <td style={{ ...S.td, color: 'var(--accent)', fontWeight: 700 }}>{r.parte > 0 ? `+${fmt$(r.parte)}` : '–'}</td>}
+                  {compra.saldo > 0 && m > 0 && <td style={{ ...S.td, color:'var(--accent-text)', fontWeight: 700 }}>{r.parte > 0 ? `+${fmt$(r.parte)}` : '–'}</td>}
                 </tr>
               ))}
             </tbody>
@@ -130,20 +130,20 @@ const S = {
   overlay: { position: 'fixed', inset: 0, background: 'rgba(0,0,10,0.85)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 300, backdropFilter: 'blur(6px)' },
   modal: { background: 'var(--surface)', borderRadius: '20px 20px 0 0', width: '100%', maxWidth: 680, maxHeight: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '18px 22px 12px', borderBottom: '1px solid var(--border)' },
-  titulo: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 22, color: 'var(--accent)', letterSpacing: 1 },
+  titulo: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 22, color:'var(--accent-text)', letterSpacing: 1 },
   sub: { fontFamily: 'Barlow, sans-serif', fontSize: 13, color: 'var(--muted)', marginTop: 2 },
   cerrar: { background: 'none', border: 'none', color: 'var(--muted)', fontSize: 20, cursor: 'pointer' },
   cuerpo: { overflowY: 'auto', padding: '14px 22px 22px', display: 'flex', flexDirection: 'column', gap: 12 },
   resumen: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 },
-  num: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 24, color: 'var(--accent)' },
+  num: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 24, color:'var(--accent-text)' },
   lbl: { fontFamily: 'Barlow, sans-serif', fontSize: 12, color: 'var(--muted)' },
   tabla: { width: '100%', borderCollapse: 'collapse' },
   th: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 12, color: 'var(--muted)', letterSpacing: 1, textTransform: 'uppercase', padding: '6px 8px', borderBottom: '1.5px solid var(--border)', textAlign: 'right' },
   td: { fontFamily: 'Barlow, sans-serif', fontSize: 14, color: 'var(--text)', padding: '7px 8px', borderBottom: '1px solid var(--border)', textAlign: 'right', whiteSpace: 'nowrap' },
   chico: { fontFamily: 'Barlow, sans-serif', fontSize: 12, color: 'var(--muted)', lineHeight: 1.4 },
   caja: { display: 'flex', flexDirection: 'column', gap: 8, padding: 12, border: '1.5px solid var(--border)', borderRadius: 10, background: 'var(--surface2)' },
-  cajaTitulo: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 14, color: 'var(--accent)', letterSpacing: 1 },
-  label: { display: 'block', fontFamily: 'Barlow Condensed, sans-serif', fontSize: 12, color: 'var(--accent)', letterSpacing: 1, fontWeight: 700, marginBottom: 4 },
+  cajaTitulo: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 14, color:'var(--accent-text)', letterSpacing: 1 },
+  label: { display: 'block', fontFamily: 'Barlow Condensed, sans-serif', fontSize: 12, color:'var(--accent-text)', letterSpacing: 1, fontWeight: 700, marginBottom: 4 },
   input: { width: '100%', boxSizing: 'border-box', background: 'var(--surface)', border: '1.5px solid var(--border)', borderRadius: 8, color: 'var(--text)', fontFamily: 'Barlow, sans-serif', fontSize: 15, padding: '9px 12px', outline: 'none', colorScheme: 'dark' },
   btn: { flex: 2, padding: '12px', background: 'var(--accent)', border: 'none', borderRadius: 8, color: '#000', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 15, letterSpacing: 1, cursor: 'pointer' },
   gastoTag: { display: 'inline-block', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 11, color: '#a78bfa', border: '1px solid #a78bfa', borderRadius: 4, padding: '0 5px', marginRight: 6 },

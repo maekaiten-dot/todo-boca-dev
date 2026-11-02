@@ -314,7 +314,7 @@ export default function VentasDelDia({ refreshKey, usuarios = [], perfilNombre =
                                 </span>
                               </span>
                             ) : (
-                              <span style={{color:'var(--accent)', fontWeight:700}}>
+                              <span style={{color:'var(--accent-text)', fontWeight:700}}>
                                 {m$(ptf !== 0 ? ptf : pt)}
                               </span>
                             )}
@@ -362,11 +362,11 @@ const S = {
   toastSuccess: { background:'#22c55e', color:'#000' },
   toastError: { background:'#ef4444', color:'#fff' },
   header: { display:'flex', alignItems:'center', justifyContent:'space-between', padding:'16px 20px 12px', borderBottom:'2px solid var(--accent)', flexShrink:0 },
-  headerTitle: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:32, color:'var(--accent)', textTransform:'uppercase', letterSpacing:2 },
+  headerTitle: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:32, color:'var(--accent-text)', textTransform:'uppercase', letterSpacing:2 },
   refreshBtn: { background:'var(--surface)', border:'1.5px solid var(--border)', borderRadius:10, color:'var(--text)', fontSize:24, width:44, height:44, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' },
   resumenBar: { display:'flex', flexWrap:'wrap', alignItems:'center', gap:'6px 24px', margin:'10px 20px', padding:'8px 16px', background:'var(--surface)', border:'1.5px solid var(--border)', borderRadius:12, cursor:'pointer', textAlign:'left', flexShrink:0 },
   resumenItem: { display:'flex', flexDirection:'column' },
-  resumenValor: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:24, lineHeight:1.1, color:'var(--accent)' },
+  resumenValor: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:24, lineHeight:1.1, color:'var(--accent-text)' },
   resumenEtiqueta: { fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)' },
   resumenToggle: { marginLeft:'auto', fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:14, color:'var(--muted)', letterSpacing:0.5, textTransform:'uppercase', whiteSpace:'nowrap' },
   detalleGrid: { display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(300px, 1fr))', gap:12, margin:'0 20px 12px', alignItems:'start' },
@@ -375,11 +375,11 @@ const S = {
   cajaRow: { display:'flex', justifyContent:'space-between', fontFamily:'Barlow, sans-serif', fontSize:15, color:'var(--text)' },
   cajaMonto: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:18, color:'var(--text)' },
   cajaTotalRow: { display:'flex', justifyContent:'space-between', alignItems:'baseline', borderTop:'1.5px solid var(--border)', paddingTop:8, marginTop:4, fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:18, color:'var(--text)', textTransform:'uppercase', letterSpacing:0.5 },
-  cajaTotal: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:32, color:'var(--accent)' },
+  cajaTotal: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:32, color:'var(--accent-text)' },
   cajaNota: { fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)', lineHeight:1.4 },
   metodoSection: { background:'var(--surface)', borderRadius:10, border:'1.5px solid var(--border)', overflow:'hidden' },
   metodoRow: { display:'flex', justifyContent:'space-between', padding:'8px 14px', borderBottom:'1px solid var(--border)', fontFamily:'Barlow, sans-serif', fontSize:15, color:'var(--text)' },
-  metodoTotal: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:17, color:'var(--accent)' },
+  metodoTotal: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:17, color:'var(--accent-text)' },
   tableWrap: { flex:1, overflowX:'auto', padding:'0 20px 20px' },
   table: { width:'100%', minWidth:860, borderCollapse:'collapse', tableLayout:'fixed' },
   th: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:13, color:'var(--muted)', letterSpacing:1, textTransform:'uppercase', padding:'8px 10px', borderBottom:'2px solid var(--border)', textAlign:'left', background:'var(--surface)', position:'sticky', top:0, zIndex:1 },
@@ -391,12 +391,12 @@ const S = {
   ventaHeaderRow: { background:'var(--surface2)', cursor:'pointer' },
   ventaHeaderAnulada: { background:'rgba(239,68,68,0.08)' },
   ventaHeaderId: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:14, color:'var(--muted)', letterSpacing:1, padding:'10px 10px 6px', borderTop:'2px solid var(--border)' },
-  ventaHeaderTotal: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:18, color:'var(--accent)', padding:'10px 10px 6px', borderTop:'2px solid var(--border)', textAlign:'right' },
+  ventaHeaderTotal: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:18, color:'var(--accent-text)', padding:'10px 10px 6px', borderTop:'2px solid var(--border)', textAlign:'right' },
   badge_anulada: { fontFamily:'Barlow Condensed, sans-serif', fontSize:11, fontWeight:800, color:'#ef4444', background:'rgba(239,68,68,0.15)', borderRadius:4, padding:'2px 6px', marginRight:8, letterSpacing:1 },
   badge_parcial: { fontFamily:'Barlow Condensed, sans-serif', fontSize:11, fontWeight:800, color:'#f59e0b', background:'rgba(245,158,11,0.15)', borderRadius:4, padding:'2px 6px', marginRight:8, letterSpacing:1 },
   itemRow: { cursor:'pointer', transition:'background 0.1s' },
   itemRowAnulado: { opacity:0.45 },
-  posnetBtnInline: { marginLeft:12, background:'none', border:'1px solid rgba(245,200,0,0.45)', borderRadius:6, color:'var(--accent)', fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:11, padding:'3px 8px', cursor:'pointer', letterSpacing:0.5, textTransform:'uppercase' },
+  posnetBtnInline: { marginLeft:12, background:'none', border:'1px solid rgba(245,200,0,0.45)', borderRadius:6, color:'var(--accent-text)', fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:11, padding:'3px 8px', cursor:'pointer', letterSpacing:0.5, textTransform:'uppercase' },
   anularBtnInline: { marginLeft:12, background:'none', border:'1px solid rgba(239,68,68,0.4)', borderRadius:6, color:'rgba(239,68,68,0.8)', fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:11, padding:'3px 8px', cursor:'pointer', letterSpacing:0.5, textTransform:'uppercase' },
   emptyText: { fontFamily:'Barlow, sans-serif', color:'var(--muted)', textAlign:'center', padding:40, fontSize:18 },
   overlay: { position:'fixed', inset:0, background:'rgba(0,0,10,0.8)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:200, backdropFilter:'blur(6px)' },

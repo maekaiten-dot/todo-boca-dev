@@ -263,7 +263,7 @@ export default function EscanearFactura({ articulos = [], proveedores = [], empl
                     <div style={S.numeros}>
                       <label style={S.mini}><span>Cant.</span><input style={S.inputMini} inputMode="numeric" value={r.cantidad ?? ''} onChange={e => editar(i, 'cantidad', e.target.value)} aria-label={`Cantidad renglón ${i + 1}`} /></label>
                       <label style={S.mini}><span>Precio factura</span><input style={S.inputMini} inputMode="decimal" value={r.precioUnit ?? ''} onChange={e => editar(i, 'precioUnit', e.target.value)} aria-label={`Precio renglón ${i + 1}`} /></label>
-                      <div style={S.mini}><span>Costo unit.</span><b style={{ color: 'var(--accent)' }}>{fmt$(cu)}</b></div>
+                      <div style={S.mini}><span>Costo unit.</span><b style={{ color:'var(--accent-text)' }}>{fmt$(cu)}</b></div>
                       <div style={S.mini}><span>Total</span><b>{cierra && cu != null ? fmt$(cant * cu) : '—'}</b></div>
                     </div>
                     <div style={S.articulo}>
@@ -367,7 +367,7 @@ const S = {
   overlay: { position: 'fixed', inset: 0, background: 'rgba(0,0,10,0.85)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 400, backdropFilter: 'blur(6px)' },
   modal: { background: 'var(--surface)', borderRadius: '20px 20px 0 0', width: '100%', maxWidth: 980, height: '94dvh', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px 12px', borderBottom: '1px solid var(--border)', flexShrink: 0 },
-  titulo: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 22, color: 'var(--accent)', letterSpacing: 2 },
+  titulo: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 22, color:'var(--accent-text)', letterSpacing: 2 },
   cerrar: { background: 'none', border: 'none', color: 'var(--muted)', fontSize: 22, cursor: 'pointer' },
   cuerpo: { flex: 1, display: 'flex', flexDirection: 'column', gap: 14, padding: 20, overflowY: 'auto' },
   cuerpoScroll: { flex: 1, overflowY: 'auto', padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: 10 },
@@ -375,7 +375,7 @@ const S = {
   ayudaChica: { fontFamily: 'Barlow, sans-serif', fontSize: 12, color: 'var(--muted)' },
   tips: { fontFamily: 'Barlow, sans-serif', fontSize: 13, color: 'var(--muted)', background: 'var(--surface2)', borderRadius: 10, padding: '10px 14px', lineHeight: 1.4 },
   botonesGrandes: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 },
-  botonGrande: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, padding: '26px 10px', background: 'var(--surface2)', border: '2px solid var(--accent)', borderRadius: 14, color: 'var(--accent)', fontSize: 36, cursor: 'pointer', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800 },
+  botonGrande: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, padding: '26px 10px', background: 'var(--surface2)', border: '2px solid var(--accent)', borderRadius: 14, color:'var(--accent-text)', fontSize: 36, cursor: 'pointer', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800 },
   spinner: { width: 44, height: 44, border: '4px solid var(--border)', borderTopColor: 'var(--accent)', borderRadius: '50%', animation: 'spin 0.9s linear infinite' },
   estado: { fontFamily: 'Barlow Condensed, sans-serif', fontSize: 20, color: 'var(--text)', marginTop: 10 },
   barra: { width: 260, height: 8, background: 'var(--surface2)', borderRadius: 4, overflow: 'hidden' },
@@ -386,7 +386,7 @@ const S = {
   origen: { fontFamily: 'Barlow, sans-serif', fontSize: 12, color: 'var(--muted)', marginBottom: 6 },
   grid2: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 },
   campo: { display: 'flex', flexDirection: 'column', gap: 4 },
-  label: { fontFamily: 'Barlow Condensed, sans-serif', fontSize: 12, color: 'var(--accent)', letterSpacing: 1, fontWeight: 700 },
+  label: { fontFamily: 'Barlow Condensed, sans-serif', fontSize: 12, color:'var(--accent-text)', letterSpacing: 1, fontWeight: 700 },
   input: { background: 'var(--surface2)', border: '1.5px solid var(--border)', borderRadius: 8, color: 'var(--text)', fontFamily: 'Barlow, sans-serif', fontSize: 15, padding: '8px 10px', outline: 'none', minWidth: 0 },
   nota: { fontFamily: 'Barlow, sans-serif', fontSize: 13, color: 'var(--text)', background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.35)', borderRadius: 8, padding: '6px 10px', marginTop: 8 },
   check: { display: 'flex', alignItems: 'center', gap: 6, fontFamily: 'Barlow, sans-serif', fontSize: 13, color: 'var(--text)', marginTop: 6 },
@@ -416,7 +416,7 @@ const S = {
   pago: { display: 'flex', flexDirection: 'column', gap: 8, background: 'var(--surface2)', borderRadius: 10, padding: '10px 12px', marginTop: 4 },
   opcionesPago: { display: 'flex', gap: 8, flexWrap: 'wrap' },
   optPago: { flex: 1, minWidth: 120, padding: '10px', background: 'var(--bg)', border: '1.5px solid var(--border)', borderRadius: 8, color: 'var(--muted)', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 16, cursor: 'pointer' },
-  optPagoActivo: { borderColor: 'var(--accent)', color: 'var(--accent)', background: 'rgba(245,200,0,0.1)' },
+  optPagoActivo: { borderColor: 'var(--accent)', color:'var(--accent-text)', background: 'rgba(245,200,0,0.1)' },
   footer: { display: 'flex', alignItems: 'center', gap: 10, padding: '12px 18px calc(12px + env(safe-area-inset-bottom, 0px))', borderTop: '1px solid var(--border)', flexShrink: 0, flexWrap: 'wrap' },
   resumen: { flex: '1 1 160px', fontFamily: 'Barlow, sans-serif', fontSize: 14, color: 'var(--text)' },
   cancelBtn: { padding: '12px 16px', background: 'none', border: '1.5px solid var(--border)', borderRadius: 8, color: 'var(--muted)', fontFamily: 'Barlow, sans-serif', fontSize: 15, cursor: 'pointer' },

@@ -82,7 +82,7 @@ export default function PagosPorMes({ pagos }) {
               return [
                 <tr key={x.mes} style={{ cursor: 'pointer', ...(ab ? { background: 'rgba(245,200,0,0.06)' } : {}) }} onClick={() => setAbierto(ab ? null : x.mes)} data-mes={x.mes}>
                   <td style={{ ...S.td, textAlign: 'left', textTransform: 'capitalize' }}><span style={{ color: '#60a5fa' }}>{ab ? '▾ ' : '▸ '}</span>{nombreMes(x.mes)}</td>
-                  <td style={{ ...S.td, fontWeight: 700, color: 'var(--accent)' }}>{fmt$(x.comprado)}{x.fletes > 0 && <div style={{ fontSize: 11, fontWeight: 400, color: 'var(--muted)' }}>incluye {fmt$(x.fletes)} de fletes/gastos</div>}</td>
+                  <td style={{ ...S.td, fontWeight: 700, color:'var(--accent-text)' }}>{fmt$(x.comprado)}{x.fletes > 0 && <div style={{ fontSize: 11, fontWeight: 400, color: 'var(--muted)' }}>incluye {fmt$(x.fletes)} de fletes/gastos</div>}</td>
                   <td style={{ ...S.td, color: '#22c55e' }}>{fmt$(x.pagadoMerc)}</td>
                   <td style={{ ...S.td, color: x.falta > 0 ? '#f59e0b' : 'var(--muted)' }}>{x.falta > 0 ? fmt$(x.falta) : '✓'}</td>
                   <td style={{ ...S.td, color: 'var(--muted)' }}>{fmt$(x.gastos)}</td>
@@ -122,6 +122,6 @@ const S = {
   th: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 12, color: 'var(--muted)', letterSpacing: 1, textTransform: 'uppercase', padding: '8px 10px', borderBottom: '2px solid var(--border)', textAlign: 'right', whiteSpace: 'nowrap' },
   td: { fontFamily: 'Barlow, sans-serif', fontSize: 14, color: 'var(--text)', padding: '9px 10px', borderBottom: '1px solid var(--border)', textAlign: 'right', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' },
   detalle: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16, padding: '4px 0' },
-  detTitulo: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 12, color: 'var(--accent)', letterSpacing: 1, marginBottom: 4 },
+  detTitulo: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 12, color:'var(--accent-text)', letterSpacing: 1, marginBottom: 4 },
   detFila: { display: 'flex', justifyContent: 'space-between', gap: 10, fontFamily: 'Barlow, sans-serif', fontSize: 13, color: 'var(--text)', padding: '3px 0', borderBottom: '1px dashed var(--border)' },
 }

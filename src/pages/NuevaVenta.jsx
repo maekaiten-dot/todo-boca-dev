@@ -576,7 +576,7 @@ export default function NuevaVenta({ promos = [], articulos, loadingArticulos, o
       <div style={isMobile ? S.blockMobile : S.col}>
         <div style={S.colHeader}>
           <span style={S.colTitle}>PRODUCTOS</span>
-          {loadingArticulos && <span style={{color:'var(--accent)',fontSize:12}}>●</span>}
+          {loadingArticulos && <span style={{color:'var(--accent-text)',fontSize:12}}>●</span>}
         </div>
         <div style={S.searchWrap}>
           <span style={S.searchIcon}>⌕</span>
@@ -666,7 +666,7 @@ export default function NuevaVenta({ promos = [], articulos, loadingArticulos, o
             <span style={S.destinoTxt}>📅 Fecha de la venta:</span>
             <input type="date" style={S.fechaInput} value={fechaOtra.dia} max={hoyInput()} onChange={e => e.target.value && setFechaOtra(f => ({ ...f, dia: e.target.value }))} aria-label="Día de la venta" />
             <input type="time" style={S.fechaInput} value={fechaOtra.hora} onChange={e => e.target.value && setFechaOtra(f => ({ ...f, hora: e.target.value }))} aria-label="Hora de la venta" />
-            <span style={{...S.destinoTxt, color:'var(--accent)'}}>Se guarda con esta fecha y queda anotado que la cargaste vos.</span>
+            <span style={{...S.destinoTxt, color:'var(--accent-text)'}}>Se guarda con esta fecha y queda anotado que la cargaste vos.</span>
           </div>
         )}
         {modoCambio && (
@@ -828,7 +828,7 @@ export default function NuevaVenta({ promos = [], articulos, loadingArticulos, o
           )}
           {redondeoCalc.aplica && Math.round(redondeoCalc.redondeo) > 0 && (
             <div style={S.totalBrutoRow}>
-              <span style={{fontFamily:'Barlow,sans-serif',fontSize:14,color:'var(--accent)'}}>
+              <span style={{fontFamily:'Barlow,sans-serif',fontSize:14,color:'var(--accent-text)'}}>
                 🪙 Redondeo
                 <span style={{display:'block',fontSize:12,color:'var(--muted)'}}>${Math.round(redondeoCalc.antesRedondeo).toLocaleString('es-AR')} → ${Math.round(redondeoCalc.total).toLocaleString('es-AR')}</span>
               </span>
@@ -970,7 +970,7 @@ const S = {
   rapidoFoto: { width:44, height:44, objectFit:'contain', borderRadius:6 },
   rapidoFotoPH: { width:44, height:44, display:'flex', alignItems:'center', justifyContent:'center', fontSize:24 },
   rapidoNombre: { fontFamily:'Barlow, sans-serif', fontSize:12, lineHeight:1.15, textAlign:'center', overflowWrap:'anywhere', maxWidth:'100%', display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden' },
-  rapidoPrecio: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:14, color:'var(--accent)' },
+  rapidoPrecio: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:14, color:'var(--accent-text)' },
   rapidoCant: { position:'absolute', top:-7, right:-7, boxShadow:'0 0 0 2px var(--bg)', minWidth:22, height:22, borderRadius:11, background:'var(--accent)', color:'#000', fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:14, display:'flex', alignItems:'center', justifyContent:'center' },
   layout: { display:'grid', gridTemplateColumns:'1fr 1fr 1fr', height:'100%', width:'100%', overflow:'hidden', position:'relative' },
   layoutMobile: { display:'flex', flexDirection:'column', height:'100%', width:'100%', overflowY:'auto', position:'relative' },
@@ -980,13 +980,13 @@ const S = {
   toastError: { background:'#ef4444', color:'#fff' },
   col: { display:'flex', flexDirection:'column', borderRight:'2px solid var(--border)', overflow:'hidden' },
   colHeader: { display:'flex', alignItems:'center', gap:8, padding:'12px 16px 10px', borderBottom:'2px solid var(--accent)', background:'var(--surface2)', flexShrink:0 },
-  colTitle: { fontFamily:'Barlow Condensed,sans-serif', fontWeight:800, fontSize:16, color:'var(--accent)', textTransform:'uppercase', letterSpacing:2 },
+  colTitle: { fontFamily:'Barlow Condensed,sans-serif', fontWeight:800, fontSize:16, color:'var(--accent-text)', textTransform:'uppercase', letterSpacing:2 },
   badge: { background:'var(--accent)', color:'#000', fontFamily:'Barlow Condensed,sans-serif', fontWeight:800, fontSize:14, borderRadius:20, padding:'2px 10px' },
   searchWrap: { display:'flex', alignItems:'stretch', margin:'10px 12px 4px', background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, padding:'0 0 0 12px', flexShrink:0 },
   searchIcon: { fontSize:20, color:'var(--muted)', display:'flex', alignItems:'center' },
   searchInput: { flex:1, background:'none', border:'none', outline:'none', color:'var(--text)', fontFamily:'Barlow,sans-serif', fontSize:16, padding:'10px 6px' },
   clearBtn: { background:'none', border:'none', color:'var(--muted)', cursor:'pointer', fontSize:16, padding:'0 10px', display:'flex', alignItems:'center' },
-  scanBtn: { background:'none', border:'none', borderLeft:'1.5px solid var(--border)', color:'var(--accent)', cursor:'pointer', padding:'0 14px', display:'flex', alignItems:'center', justifyContent:'center' },
+  scanBtn: { background:'none', border:'none', borderLeft:'1.5px solid var(--border)', color:'var(--accent-text)', cursor:'pointer', padding:'0 14px', display:'flex', alignItems:'center', justifyContent:'center' },
   scrollList: { flex:1, overflowY:'auto' },
   scrollListMobile: { maxHeight:280, overflowY:'auto' },
   artRow: { width:'100%', display:'flex', alignItems:'center', gap:12, padding:'10px 14px', background:'none', border:'none', borderBottom:'1px solid var(--border)', cursor:'pointer', color:'var(--text)', textAlign:'left' },
@@ -999,7 +999,7 @@ const S = {
   artNombre: { fontFamily:'Barlow,sans-serif', fontWeight:600, fontSize:20, color:'var(--text)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' },
   artNombreMobile: { fontFamily:'Barlow,sans-serif', fontWeight:600, fontSize:15, color:'var(--text)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' },
   artSku: { fontFamily:'Barlow Condensed,sans-serif', fontSize:17, color:'var(--muted)' },
-  artPrecio: { fontFamily:'Barlow Condensed,sans-serif', fontWeight:800, fontSize:22, color:'var(--accent)', flexShrink:0 },
+  artPrecio: { fontFamily:'Barlow Condensed,sans-serif', fontWeight:800, fontSize:22, color:'var(--accent-text)', flexShrink:0 },
   emptyMsg: { padding:28, textAlign:'center', color:'var(--muted)', fontFamily:'Barlow,sans-serif', fontSize:16 },
   emptyCarrito: { display:'flex', flexDirection:'column', alignItems:'center', gap:12, padding:40, color:'var(--muted)', fontFamily:'Barlow,sans-serif', fontSize:16 },
   cartItem: { display:'flex', alignItems:'center', gap:12, padding:'10px 14px', borderBottom:'1px solid var(--border)' },
@@ -1007,21 +1007,21 @@ const S = {
   qtyRow: { display:'flex', alignItems:'center', gap:6 },
   qtyBtn: { width:32, height:32, background:'var(--border)', border:'none', borderRadius:6, color:'var(--text)', fontSize:20, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:700 },
   qty: { fontFamily:'Barlow Condensed,sans-serif', fontWeight:700, fontSize:20, minWidth:26, textAlign:'center', color:'var(--text)' },
-  cartTotal: { fontFamily:'Barlow Condensed,sans-serif', fontWeight:700, fontSize:18, color:'var(--accent)' },
+  cartTotal: { fontFamily:'Barlow Condensed,sans-serif', fontWeight:700, fontSize:18, color:'var(--accent-text)' },
   removeBtn: { background:'none', border:'none', color:'var(--muted)', cursor:'pointer', fontSize:16, padding:'2px 6px' },
   totalPanel: { flex:1, overflowY:'auto', padding:'16px', display:'flex', flexDirection:'column', gap:10 },
-  totalNeto: { fontFamily:'Barlow Condensed,sans-serif', fontWeight:800, fontSize:52, color:'var(--accent)', lineHeight:1 },
+  totalNeto: { fontFamily:'Barlow Condensed,sans-serif', fontWeight:800, fontSize:52, color:'var(--accent-text)', lineHeight:1 },
   totalNetoLabel: { fontFamily:'Barlow Condensed,sans-serif', fontSize:14, color:'var(--muted)', letterSpacing:2, marginBottom:4 },
   totalBrutoRow: { display:'flex', justifyContent:'space-between', alignItems:'center' },
   divider: { height:1, background:'var(--border)', margin:'6px 0' },
-  fieldLabel: { fontFamily:'Barlow Condensed,sans-serif', fontSize:14, color:'var(--accent)', letterSpacing:1, marginBottom:4, marginTop:4 },
+  fieldLabel: { fontFamily:'Barlow Condensed,sans-serif', fontSize:14, color:'var(--accent-text)', letterSpacing:1, marginBottom:4, marginTop:4 },
   metodosGrid: { display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:6, marginBottom:2 },
   metodoBtn: { display:'flex', flexDirection:'column', alignItems:'center', gap:3, padding:'8px 4px', background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, cursor:'pointer', color:'var(--muted)' },
-  metodoBtnActive: { background:'rgba(245,200,0,0.12)', border:'1.5px solid var(--accent)', color:'var(--accent)' },
+  metodoBtnActive: { background:'rgba(245,200,0,0.12)', border:'1.5px solid var(--accent)', color:'var(--accent-text)' },
   metodoBtnIcon: { fontSize:20 },
   metodoBtnLabel: { fontFamily:'Barlow Condensed,sans-serif', fontWeight:700, fontSize:15, letterSpacing:0.5, textAlign:'center', lineHeight:1.2 },
   empleadoBtn: { padding:'8px 6px', background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, cursor:'pointer', color:'var(--muted)', fontFamily:'Barlow Condensed,sans-serif', fontWeight:700, fontSize:15, letterSpacing:0.5, textAlign:'center' },
-  fechaBtnActivo: { border:'1.5px solid var(--accent)', color:'var(--accent)', background:'rgba(245,200,0,0.12)' },
+  fechaBtnActivo: { border:'1.5px solid var(--accent)', color:'var(--accent-text)', background:'rgba(245,200,0,0.12)' },
   fechaRow: { display:'flex', flexWrap:'wrap', alignItems:'center', gap:8, padding:'8px 16px', background:'rgba(245,200,0,0.08)', borderBottom:'1.5px solid var(--accent)' },
   fechaInput: { background:'var(--surface)', border:'1.5px solid var(--accent)', borderRadius:8, color:'var(--text)', fontFamily:'Barlow, sans-serif', fontSize:15, padding:'6px 8px', colorScheme:'dark' },
   cambioBtn: { marginLeft:'auto', padding:'4px 10px', background:'none', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--muted)', fontFamily:'Barlow Condensed,sans-serif', fontWeight:700, fontSize:14, cursor:'pointer', whiteSpace:'nowrap' },
@@ -1038,7 +1038,7 @@ const S = {
   dividirBtnActivo: { borderStyle:'solid', color:'var(--text)' },
   resumenDividido: { display:'flex', justifyContent:'space-between', gap:8, flexWrap:'wrap', marginTop:6, padding:'8px 10px', background:'var(--surface2)', borderRadius:8, fontFamily:'Barlow,sans-serif', fontSize:14, color:'var(--muted)' },
   divisaInputWrap: { display:'flex', alignItems:'center', background:'var(--surface2)', border:'1.5px solid var(--accent)', borderRadius:8, marginBottom:2 },
-  divisaSimbolo: { padding:'0 10px', fontFamily:'Barlow Condensed,sans-serif', fontWeight:700, fontSize:18, color:'var(--accent)', borderRight:'1.5px solid var(--border)' },
+  divisaSimbolo: { padding:'0 10px', fontFamily:'Barlow Condensed,sans-serif', fontWeight:700, fontSize:18, color:'var(--accent-text)', borderRight:'1.5px solid var(--border)' },
   divisaInput: { flex:1, background:'none', border:'none', outline:'none', color:'var(--text)', fontFamily:'Barlow Condensed,sans-serif', fontWeight:700, fontSize:20, padding:'10px 12px' },
   select: { width:'100%', background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--text)', fontFamily:'Barlow,sans-serif', fontSize:16, padding:'10px 12px', outline:'none', cursor:'pointer' },
   cerrarBtn: { width:'100%', padding:'16px 8px', background:'var(--accent)', border:'none', borderRadius:10, cursor:'pointer', fontFamily:'Barlow Condensed,sans-serif', fontWeight:800, fontSize:18, color:'#000', textTransform:'uppercase', letterSpacing:1, marginTop:4, boxShadow:'0 3px 12px rgba(245,200,0,0.3)' },
@@ -1065,7 +1065,7 @@ const S = {
   posnetSub: { fontFamily:'Barlow,sans-serif', fontWeight:400, fontSize:11, letterSpacing:0, opacity:0.75 },
   posnetAviso: { fontFamily:'Barlow,sans-serif', fontSize:12, color:'#f59e0b', marginTop:4 },
   efectivoBtnActivo: { background:'rgba(34,197,94,0.15)', border:'1.5px solid #22c55e', color:'#22c55e' },
-  socioBtnActivo: { background:'rgba(245,200,0,0.15)', border:'1.5px solid var(--accent)', color:'var(--accent)' },
+  socioBtnActivo: { background:'rgba(245,200,0,0.15)', border:'1.5px solid var(--accent)', color:'var(--accent-text)' },
   socioBtnSub: { fontFamily:'Barlow,sans-serif', fontWeight:400, fontSize:12, color:'var(--muted)', letterSpacing:0 },
   reiniciarBtn: { width:'100%', padding:'13px', background:'none', border:'1.5px solid var(--border)', borderRadius:10, cursor:'pointer', fontFamily:'Barlow Condensed,sans-serif', fontWeight:700, fontSize:15, color:'var(--muted)', textTransform:'uppercase', letterSpacing:1 },
   overlay: { position:'fixed', inset:0, background:'rgba(0,0,10,0.8)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:200, backdropFilter:'blur(6px)' },

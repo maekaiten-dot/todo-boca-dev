@@ -95,7 +95,7 @@ export default function AvisoPrecios({ cambios, onEntendido, onVerTutoriales }) 
 const S = {
   overlay: { position: 'fixed', inset: 0, zIndex: 10000, background: 'rgba(0,0,0,0.78)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 },
   box: { width: '100%', maxWidth: 560, maxHeight: '88dvh', display: 'flex', flexDirection: 'column', background: 'var(--surface)', border: '2px solid var(--accent)', borderRadius: 16, padding: 20, boxShadow: '0 10px 40px rgba(0,0,0,0.6)', boxSizing: 'border-box' },
-  titulo: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 30, color: 'var(--accent)', letterSpacing: 1, textTransform: 'uppercase', lineHeight: 1.1 },
+  titulo: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 30, color:'var(--accent-text)', letterSpacing: 1, textTransform: 'uppercase', lineHeight: 1.1 },
   sub: { fontFamily: 'Barlow, sans-serif', fontSize: 15, color: 'var(--muted)', marginTop: 6, marginBottom: 12 },
   lista: { overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 },
   seccion: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 16, letterSpacing: 1, textTransform: 'uppercase', marginTop: 4 },
@@ -105,7 +105,7 @@ const S = {
   nombre: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 19, color: 'var(--text)', lineHeight: 1.15 },
   codigo: { fontFamily: 'Barlow, sans-serif', fontSize: 12, color: 'var(--muted)', marginTop: 2 },
   antes: { fontFamily: 'Barlow Condensed, sans-serif', fontSize: 16, color: 'var(--muted)', textDecoration: 'line-through' },
-  ahora: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 26, color: 'var(--accent)', lineHeight: 1.1 },
+  ahora: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 26, color:'var(--accent-text)', lineHeight: 1.1 },
   btnSec: { flex: 1, padding: '16px', background: 'none', border: '2px solid #60a5fa', borderRadius: 10, color: '#60a5fa', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 18, letterSpacing: 1, cursor: 'pointer' },
   btn: { flex: 1, width: '100%', padding: '16px', background: 'var(--accent)', border: 'none', borderRadius: 10, color: '#000', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 20, letterSpacing: 1, cursor: 'pointer', flexShrink: 0 },
 }

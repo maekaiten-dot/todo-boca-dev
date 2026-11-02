@@ -55,7 +55,7 @@ export default function Ingresos() {
   const thOrden = col => {
     const c = COLUMNAS.find(x => x.id === col), activa = orden.col === col
     return (
-      <th key={col} style={{ ...S.th, cursor: 'pointer', userSelect: 'none', ...(activa ? { color: 'var(--accent)' } : {}) }} onClick={() => ordenarPor(col)} title="Tocá para ordenar" aria-sort={activa ? (orden.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+      <th key={col} style={{ ...S.th, cursor: 'pointer', userSelect: 'none', ...(activa ? { color:'var(--accent-text)' } : {}) }} onClick={() => ordenarPor(col)} title="Tocá para ordenar" aria-sort={activa ? (orden.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
         {c.label}<span style={{ marginLeft: 4, opacity: activa ? 1 : 0.3 }}>{activa ? (orden.dir === 'asc' ? '▲' : '▼') : '↕'}</span>
       </th>
     )
@@ -128,7 +128,7 @@ export default function Ingresos() {
                     </td>
                     <td style={{...S.td, textAlign:'center', fontWeight:700}}>{ing.cantidad}</td>
                     <td style={S.td}>${(ing.costoUnitario||0).toLocaleString('es-AR')}</td>
-                    <td style={{...S.td, color:'var(--accent)', fontWeight:700}}>${(ing.costoTotal||0).toLocaleString('es-AR')}</td>
+                    <td style={{...S.td, color:'var(--accent-text)', fontWeight:700}}>${(ing.costoTotal||0).toLocaleString('es-AR')}</td>
                     <td style={{...S.td, color:'var(--muted)'}}>{ing.proveedor}</td>
                     <td style={{...S.td, whiteSpace:'nowrap'}}>{ing.compra || <span style={{color:'var(--muted)'}}>—</span>}{ing.comprobante && <div style={{fontSize:11, color:'var(--muted)'}}>Nº {ing.comprobante}</div>}</td>
                     <td style={{...S.td, color:'var(--muted)'}}>{ing.empleado}</td>
@@ -151,7 +151,7 @@ const S = {
   errorText: { fontFamily:'Barlow, sans-serif', fontSize:16, color:'#ef4444', textAlign:'center' },
   retryBtn: { background:'var(--surface)', border:'1.5px solid var(--border)', borderRadius:10, color:'var(--text)', fontFamily:'Barlow, sans-serif', fontSize:15, padding:'10px 24px', cursor:'pointer' },
   header: { display:'flex', alignItems:'center', justifyContent:'space-between', padding:'16px 20px 12px', borderBottom:'2px solid var(--accent)', flexShrink:0 },
-  headerTitle: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:28, color:'var(--accent)', textTransform:'uppercase', letterSpacing:2 },
+  headerTitle: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:28, color:'var(--accent-text)', textTransform:'uppercase', letterSpacing:2 },
   refreshBtn: { background:'var(--surface)', border:'1.5px solid var(--border)', borderRadius:10, color:'var(--text)', fontSize:22, width:40, height:40, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' },
   infoBar: { margin:'10px 20px 0', background:'rgba(59,130,246,0.1)', border:'1px solid rgba(59,130,246,0.3)', borderRadius:8, padding:'8px 14px' },
   infoText: { fontFamily:'Barlow, sans-serif', fontSize:13, color:'#93c5fd' },

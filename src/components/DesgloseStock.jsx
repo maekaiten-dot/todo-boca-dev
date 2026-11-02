@@ -73,7 +73,7 @@ const S = {
   overlay: { position: 'fixed', inset: 0, background: 'rgba(0,0,10,0.85)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 520, backdropFilter: 'blur(6px)' },
   modal: { background: 'var(--surface)', borderRadius: '20px 20px 0 0', width: '100%', maxWidth: 620, maxHeight: '88vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '16px 20px 10px', borderBottom: '1px solid var(--border)' },
-  titulo: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 20, color: 'var(--accent)', letterSpacing: 1 },
+  titulo: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 20, color:'var(--accent-text)', letterSpacing: 1 },
   sub: { fontFamily: 'Barlow, sans-serif', fontSize: 13, color: 'var(--muted)', marginTop: 2 },
   cerrar: { background: 'none', border: 'none', color: 'var(--muted)', fontSize: 20, cursor: 'pointer' },
   cuerpo: { overflowY: 'auto', padding: '10px 20px 20px', display: 'flex', flexDirection: 'column', gap: 2 },

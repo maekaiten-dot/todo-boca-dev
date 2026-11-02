@@ -157,7 +157,7 @@ export default function Tutoriales({ esAdmin = false, perfilNombre = '', version
           <div style={S.confirmBox} onClick={e => e.stopPropagation()}>
             <div style={S.confirmTitle}>¿Quitar tutorial?</div>
             <div style={S.confirmSub}>
-              <strong style={{ color: 'var(--accent)' }}>{confirmQuitar.titulo}</strong><br />
+              <strong style={{ color:'var(--accent-text)' }}>{confirmQuitar.titulo}</strong><br />
               Deja de verse en la app. Queda guardado en la planilla.
             </div>
             <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
@@ -177,7 +177,7 @@ const S = {
   toastSuccess: { background: '#22c55e', color: '#000' },
   toastError: { background: '#ef4444', color: '#fff' },
   header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '16px 20px 12px', borderBottom: '2px solid var(--accent)', flexShrink: 0 },
-  headerTitle: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 28, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: 2 },
+  headerTitle: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 28, color:'var(--accent-text)', textTransform: 'uppercase', letterSpacing: 2 },
   headerSub: { fontFamily: 'Barlow, sans-serif', fontSize: 13, color: 'var(--muted)' },
   refreshBtn: { background: 'var(--surface)', border: '1.5px solid var(--border)', borderRadius: 10, color: 'var(--text)', fontSize: 24, width: 44, height: 44, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   agregarBtn: { background: 'var(--accent)', border: 'none', borderRadius: 10, color: '#000', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 17, padding: '0 16px', height: 44, cursor: 'pointer', whiteSpace: 'nowrap' },
@@ -197,7 +197,7 @@ const S = {
   itemTitulo: { display: 'block', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 20, color: 'var(--text)', lineHeight: 1.2 },
   itemDesc: { display: 'block', fontFamily: 'Barlow, sans-serif', fontSize: 14, color: 'var(--text)', opacity: 0.85, marginTop: 2 },
   itemMeta: { display: 'block', fontFamily: 'Barlow, sans-serif', fontSize: 12, color: 'var(--muted)', marginTop: 4 },
-  abrir: { flexShrink: 0, fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 16, color: 'var(--accent)', whiteSpace: 'nowrap' },
+  abrir: { flexShrink: 0, fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 16, color:'var(--accent-text)', whiteSpace: 'nowrap' },
   badgeNuevo: { fontSize: 11, fontWeight: 800, color: '#000', background: 'var(--accent)', borderRadius: 4, padding: '2px 6px', marginRight: 8, letterSpacing: 1, verticalAlign: 'middle' },
   quitarBtn: { alignSelf: 'center', marginRight: 12, background: 'none', border: '1px solid rgba(239,68,68,0.4)', borderRadius: 6, color: 'rgba(239,68,68,0.8)', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 11, padding: '3px 8px', cursor: 'pointer', letterSpacing: 0.5, textTransform: 'uppercase', flexShrink: 0 },
   muted: { fontFamily: 'Barlow, sans-serif', fontSize: 14, color: 'var(--muted)', padding: '8px 0' },

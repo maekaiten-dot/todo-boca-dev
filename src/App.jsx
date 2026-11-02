@@ -4,7 +4,10 @@ import NuevaVenta from './pages/NuevaVenta.jsx'
 import VentasDelDia from './pages/VentasDelDia.jsx'
 import FicharTablet from './components/FicharTablet.jsx'
 import AvisoPrecios, { totalCambios, resumenCambios } from './components/AvisoPrecios.jsx'
-import { getPromos, getAlias, getArticulos, getUsuarios, registrarLog, calcularStockTodos, leerArticulosVistos, guardarArticulosVistos, getTutoriales, leerTutorialesVistos, guardarTutorialesVistos } from './api/sheets.js'
+import { BotonModoPartido, BarraModoPartido } from './components/ModoPartido.jsx'
+import { escucharCola, procesarCola } from './lib/colaVentas.js'
+import { calcularMasVendidos } from './lib/masVendidos.js'
+import { getModoPartido, setModoPartido, setModoPartidoLog, getHistoricoVentas, getPromos, getAlias, getArticulos, getUsuarios, registrarLog, calcularStockTodos, leerArticulosVistos, guardarArticulosVistos, getTutoriales, leerTutorialesVistos, guardarTutorialesVistos } from './api/sheets.js'
 // Las solapas que no son Vender ni Hoy se bajan aparte (la app abre más rápido). Unos segundos
 // después de abrir se precargan en segundo plano, así al tocarlas ya están.
 const CARGAS = {
@@ -204,6 +207,61 @@ export default function App() {
   perfilRef.current = perfilGuardado
   const articulosRef = useRef([])
 
+  // ── Modo partido ─────────────────────────────────────────────────────────────
+  // Lo prende un Admin y lo toman todos los dispositivos (hoja CONFIG, se revisa cada 30 s).
+  // Prendido: las ventas van a una cola y se guardan en segundo plano, no se recalcula el stock
+  // después de cada venta, no se releen los artículos cada 90 s y el LOG no anota cada producto.
+  const [modo, setModo] = useState(() => { try { return JSON.parse(localStorage.getItem('tb_modo_partido')) || { activo: false, masVendidos: [] } } catch { return { activo: false, masVendidos: [] } } })
+  const modoRef = useRef(modo)
+  modoRef.current = modo
+  const [cambiandoModo, setCambiandoModo] = useState(false)
+  const [cola, setCola] = useState(null)
+  setModoPartidoLog(modo.activo)
+  function aplicarModo(m) {
+    const antes = modoRef.current.activo
+    setModo(m); modoRef.current = m
+    try { localStorage.setItem('tb_modo_partido', JSON.stringify(m)) } catch {}
+    setModoPartidoLog(m.activo)
+    // Al apagarlo se pone todo al día
+    if (antes && !m.activo) { setRefreshKey(k => k + 1); recalcularStock(articulosRef.current); refrescarArticulos() }
+  }
+  async function revisarModo() {
+    try { aplicarModo(await getModoPartido()) } catch (e) { console.warn('No se pudo leer el modo partido', e) }
+  }
+  useEffect(() => {
+    revisarModo()
+    const id = setInterval(() => { if (document.visibilityState === 'visible') revisarModo() }, 30 * 1000)
+    const alVolver = () => { if (document.visibilityState === 'visible') revisarModo() }
+    document.addEventListener('visibilitychange', alVolver)
+    return () => { clearInterval(id); document.removeEventListener('visibilitychange', alVolver) }
+  }, [])
+  async function cambiarModo(activo) {
+    setCambiandoModo(true)
+    try {
+      // Al prenderlo se arman los botones de lo más vendido (con las ventas de este dispositivo)
+      let masVendidos = null
+      if (activo) {
+        try { masVendidos = calcularMasVendidos(await getHistoricoVentas({ unificar: true }), articulosRef.current) }
+        catch (e) { console.warn('No se pudieron calcular los más vendidos', e) }
+      }
+      await setModoPartido(activo, perfilRef.current?.nombre || '', masVendidos)
+      await revisarModo()
+    } catch (e) { console.error(e); alert('No se pudo cambiar el modo partido. Revisá la conexión.') }
+    finally { setCambiandoModo(false) }
+  }
+  // Cola de ventas: se sigue guardando al abrir la app (si quedó algo de antes) y se muestra el estado.
+  // Cuando se vacía, Hoy se actualiza (como mucho una vez por minuto).
+  useEffect(() => {
+    let pendAntes = 0, ultimaRecarga = 0
+    const off = escucharCola(e => {
+      setCola(e)
+      if (pendAntes > 0 && e.pendientes === 0 && Date.now() - ultimaRecarga > 60 * 1000) { ultimaRecarga = Date.now(); setRefreshKey(k => k + 1) }
+      pendAntes = e.pendientes
+    })
+    procesarCola()
+    return off
+  }, [])
+
   useEffect(() => { cargarArticulos(); cargarUsuarios() }, [])
 
   // Compara los artículos activos con los que ya vio este dispositivo
@@ -288,8 +346,8 @@ export default function App() {
     cargarPromos()
   }
   useEffect(() => {
-    const id = setInterval(() => { if (document.visibilityState === 'visible') refrescarArticulos() }, INTERVALO_PRECIOS)
-    const alVolver = () => { if (document.visibilityState === 'visible') refrescarArticulos() }
+    const id = setInterval(() => { if (document.visibilityState === 'visible' && !modoRef.current.activo) refrescarArticulos() }, INTERVALO_PRECIOS)
+    const alVolver = () => { if (document.visibilityState === 'visible' && !modoRef.current.activo) refrescarArticulos() }
     document.addEventListener('visibilitychange', alVolver)
     return () => { clearInterval(id); document.removeEventListener('visibilitychange', alVolver) }
   }, [])
@@ -298,11 +356,11 @@ export default function App() {
   useEffect(() => {
     let ultimo = Date.now()
     const recalc = () => {
-      if (document.visibilityState !== 'visible' || !articulosRef.current.length || Date.now() - ultimo < 60 * 1000) return
+      if (document.visibilityState !== 'visible' || !articulosRef.current.length || Date.now() - ultimo < 60 * 1000 || modoRef.current.activo) return
       ultimo = Date.now(); recalcularStock(articulosRef.current)
     }
     const id = setInterval(recalc, 3 * 60 * 1000)
-    const pre = setTimeout(precargarSolapas, 5000)
+    const pre = setTimeout(() => { if (!modoRef.current.activo) precargarSolapas() }, 5000)
     document.addEventListener('visibilitychange', recalc)
     return () => { clearInterval(id); clearTimeout(pre); document.removeEventListener('visibilitychange', recalc) }
   }, [])
@@ -440,15 +498,20 @@ export default function App() {
                 📢 {resumenCambios(avisoCambios)}
               </button>
             )}
+            {esAdmin && <BotonModoPartido activo={modo.activo} cambiando={cambiandoModo} onCambiar={cambiarModo} />}
             <FicharTablet />
             <div style={S.perfilPill}><span style={S.perfilLabel}>{empleadoActual}</span></div>
             {loadingArticulos && <span style={S.loadingPill}>Cargando...</span>}
           </div>
         </div>
 
+        <BarraModoPartido activo={modo.activo} quien={modo.quien} cola={cola} esAdmin={esAdmin} perfilNombre={empleadoActual} />
+
         <div style={S.content}>
           <div style={tabStyle('venta')}>
-            <NuevaVenta promos={promos} articulos={articulos} loadingArticulos={loadingArticulos} usuarios={usuarios} stockMap={stockMap} empleadoFijo={esAdmin ? empleadoActual : null} esAdmin={esAdmin} cargadoPor={empleadoActual} onVentaRegistrada={() => { setRefreshKey(k => k + 1); recalcularStock(articulosRef.current) }} />
+            <NuevaVenta promos={promos} articulos={articulos} loadingArticulos={loadingArticulos} usuarios={usuarios} stockMap={stockMap} empleadoFijo={esAdmin ? empleadoActual : null} esAdmin={esAdmin} cargadoPor={empleadoActual}
+              modoPartido={modo.activo} masVendidos={modo.masVendidos || []}
+              onVentaRegistrada={() => { if (modoRef.current.activo) return; setRefreshKey(k => k + 1); recalcularStock(articulosRef.current) }} />
           </div>
           {tabsVisitadas.has('hoy') && (
             <div style={tabStyle('hoy')}><VentasDelDia refreshKey={refreshKey} puedeAnular={true} usuarios={usuarios} perfilNombre={empleadoActual} esAdmin={esAdmin} articulos={articulos} /></div>

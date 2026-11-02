@@ -202,7 +202,13 @@ function calcularDescuentoAlfajorItem(item, items, pausada = false) {
 
 // ── Exports ───────────────────────────────────────────────────────────────────
 
+// Modo partido: no se anota en el LOG cada producto tocado o escaneado (menos pedidos a internet)
+let _modoPartidoLog = false
+export function setModoPartidoLog(on) { _modoPartidoLog = !!on }
+const LOG_RUIDOSO = new Set(['PRODUCTO_AGREGADO', 'PRODUCTO_QUITADO', 'SCAN_EXITOSO', 'SCANNER_ABIERTO', 'CARRITO_REINICIADO', 'PAGO_DIVIDIDO_ACTIVADO', 'PAGO_DIVIDIDO_DESACTIVADO', 'DTO_SOCIO_ACTIVADO', 'DTO_SOCIO_DESACTIVADO', 'NAVEGACION'])
+
 export async function registrarLog({ accion, detalle, idReferencia = '', empleado = '', resultado = 'OK' }) {
+  if (_modoPartidoLog && LOG_RUIDOSO.has(accion)) return
   try {
     const dt = getArgentinaDate()
     const timestamp = new Date().toISOString()
@@ -342,13 +348,13 @@ function leerDetalle() {
   if (DV.filas && !DV.invalida && Date.now() - DV.tCola < DV_FRESCA_MS && Date.now() - DV.tCompleta < DV_COMPLETA_MS) return Promise.resolve(DV.filas)
   DV.promesa = (async () => {
     const completa = async () => {
-      const d = await sheetsGet('DETALLE DE VENTAS!A2:AM')
+      const d = await sheetsGet('DETALLE DE VENTAS!A2:AN')
       DV.filas = d.values || []; DV.tCompleta = DV.tCola = Date.now(); DV.invalida = false
     }
     if (!DV.filas || DV.invalida || Date.now() - DV.tCompleta >= DV_COMPLETA_MS) await completa()
     else {
       const desde = inicioColaDetalle(DV.filas)
-      const d = await sheetsGet(`DETALLE DE VENTAS!A${desde + 2}:AM`)
+      const d = await sheetsGet(`DETALLE DE VENTAS!A${desde + 2}:AN`)
       const cola = d.values || []
       const antes = String(DV.filas[desde]?.[0] || ''), ahora = String(cola[0]?.[0] || '')
       if (desde < DV.filas.length && antes !== ahora) await completa()   // la planilla se movió
@@ -608,7 +614,12 @@ export function calcularRedondeoSocio({ montoActual, metodoPago, socio }) {
 
 // fechaVenta: { fecha: 'd/m/aaaa', hora: 'hh:mm' } para cargar una venta de otro día (solo Admin).
 // Queda la constancia en EDICIONES: quién la cargó y cuándo.
-export async function registrarVenta({ items, devueltos = [], metodoPago, pagos = null, descCarrito = 0, empleado = '', notas = '', descuentoImanes = 0, descuentoPromo = 0, socio = false, descuentoXXXLEsperado = 0, totalEsperado = null, posnet = '', fechaVenta = null, cargadaPor = '', promos = [], descuentoPromosConfigEsperado = null }) {
+export async function registrarVenta({ items, devueltos = [], metodoPago, pagos = null, descCarrito = 0, empleado = '', notas = '', descuentoImanes = 0, descuentoPromo = 0, socio = false, descuentoXXXLEsperado = 0, totalEsperado = null, posnet = '', fechaVenta = null, cargadaPor = '', promos = [], descuentoPromosConfigEsperado = null, uid = '', momento = null, estadoXXXL = null }) {
+  // uid: clave única de esta carga (columna AN). Si la venta ya está en la planilla con esa clave
+  // (por ejemplo, se guardó pero se cortó internet antes de la respuesta), no se vuelve a cargar.
+  // momento: { fecha, hora } en que se cobró (ventas que esperaron en la cola del modo partido).
+  // estadoXXXL: lo que mostraba la pantalla de la promo XXXL (en la cola no se vuelve a consultar).
+  uid = uid || nuevoUid()
   // Pago con 2 medios: [{ metodo, monto }, { metodo }]. El segundo se lleva el resto del total.
   const dividido = Array.isArray(pagos) && pagos.length === 2
   if (dividido) {
@@ -621,7 +632,7 @@ export async function registrarVenta({ items, devueltos = [], metodoPago, pagos 
   const hayXXXL = items.some(i => REMERAS_XXXL.has(i.articulo || i.id) && (i.xxxl || 0) > 0)
   let promoXXXL = null
   if (hayXXXL) {
-    const estado = await getPromoXXXLEstado()
+    const estado = estadoXXXL && !estadoXXXL.error ? estadoXXXL : await getPromoXXXLEstado()
     promoXXXL = calcularPromoXXXL(items, estado.disponibles)
     if (Math.round(promoXXXL.descuento) !== Math.round(descuentoXXXLEsperado)) {
       const err = new Error('PROMO_XXXL_CAMBIO')
@@ -636,6 +647,11 @@ export async function registrarVenta({ items, devueltos = [], metodoPago, pagos 
   if (posnetVenta) await asegurarColumna(COL_POSNET, 'POSNET')
   const ahora = getArgentinaDate()
   let dt = ahora, constancia = ''
+  if (momento?.fecha && !fechaVenta?.fecha) {
+    const [d, m, a] = momento.fecha.split('/').map(Number)
+    const meses = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre']
+    dt = { fecha: momento.fecha, hora: momento.hora, mes: meses[m - 1], anio: a, raw: new Date(a, m - 1, d) }
+  }
   if (fechaVenta?.fecha) {
     const [d, m, a] = fechaVenta.fecha.split('/').map(Number)
     const [hh, mm] = String(fechaVenta.hora || '12:00').split(':').map(Number)
@@ -646,9 +662,14 @@ export async function registrarVenta({ items, devueltos = [], metodoPago, pagos 
     constancia = `${ahora.fecha} ${ahora.hora} ${cargadaPor || empleado || 'Admin'}: cargada después, con fecha ${dt.fecha} ${dt.hora.slice(0, 5)}`
     await asegurarColumna(COL_EDICIONES, 'EDICIONES')
   }
-  // Una sola lectura de A:B sirve para el código de la venta y para saber dónde termina la planilla
-  const filasAB = (await sheetsGet('DETALLE DE VENTAS!A2:B')).values || []
-  const idVenta = await generarIdVenta(dt.fecha !== ahora.fecha ? dt.fecha : null, filasAB)
+  // Se relee solo el final de la planilla (las ventas de hoy): alcanza para el código de la venta
+  // y para saber dónde termina. Antes se bajaba la columna entera (más de 20.000 filas) en cada venta.
+  await asegurarColumna(COL_UID, 'CLAVE CARGA')
+  const filasAB = await leerDetalleFresco()
+  const yaGuardada = filasAB.find(r => r[0] && String(r[IDX_UID] || '') === uid)
+  if (yaGuardada) return String(yaGuardada[1])
+  const fechaId = dt.fecha !== ahora.fecha ? dt.fecha : null
+  let idVenta = await generarIdVenta(fechaId, filasAB)
   const imanesPausados = fijaPausada(promos, 'FIJA-IMANES'), alfajoresPausados = fijaPausada(promos, 'FIJA-ALFAJORES')
   const dtosPorItem = calcularDescuentosImanesItems(items, imanesPausados)
   // Promos configurables (hoja PROMOS): no entran los artículos con promo fija ni las remeras del 2x1
@@ -789,21 +810,132 @@ export async function registrarVenta({ items, devueltos = [], metodoPago, pagos 
       ...extras.slice(0, ultimaExtra + 1),
     ])
   })
-  const ultimaCol = ['AD', COL_DTO_SOCIO, COL_DTO_XXXL, COL_DTO_EFECTIVO, COL_REDONDEO, COL_POSNET, COL_CORRECCION_POSNET, COL_PAGOS, COL_EDICIONES, COL_PROMOS][ultimaExtra + 1]
+  // Clave de la carga en AN (todas las filas de la venta)
+  rows.forEach(r => { while (r.length < IDX_UID) r.push(''); r[IDX_UID] = uid })
 
-  // Todos los renglones de la venta en un solo pedido
-  await sheetsBatchUpdate(rows.map((row, idx) => ({ range: `DETALLE DE VENTAS!A${nextRow+idx}:${ultimaCol}${nextRow+idx}`, values: [row] })))
-  detalleCambio()
+  // Se AGREGA al final de la planilla (Google pone las filas una después de otra aunque carguen
+  // varios dispositivos a la vez: nunca se pisan). Antes se escribía en "la fila siguiente" calculada
+  // en el dispositivo, y si dos cargaban en el mismo segundo una venta podía pisar a la otra.
+  const res = await sheetsAppend(`DETALLE DE VENTAS!A${lastDataRow}:${COL_UID}${lastDataRow}`, rows)
+  const primera = Number(String(res?.updates?.updatedRange || '').match(/![A-Z]+(\d+)/)?.[1]) || nextRow
+  detalleCambio([primera])
+  idVenta = await verificarCodigoVenta({ idVenta, primera, cantidad: rows.length, filasLeidas: filasAB })
 
   const totalVenta = rows.reduce((s, r) => s+(r[18]||0), 0)
   const totalDtoImanes = dtosPorItem.reduce((s, d) => s+d.descuentoImanes, 0)
   const totalDtoAlfajores = items.reduce((s, item) => s + calcularDescuentoAlfajorItem(item, items, alfajoresPausados), 0)
-  await registrarLog({
+  registrarLog({
     accion:'VENTA_REGISTRADA',
     detalle:`${constancia ? `CON FECHA ${dt.fecha} ${dt.hora.slice(0, 5)} (cargada por ${cargadaPor || empleado}) · ` : ''}${devs.length ? `CAMBIO · devuelve ${devs.map(d => `${d.cantidad}× ${d.id}`).join(', ')} · ` : ''}${items.length} producto(s) · ${textoPagosVenta || metodoPago}${posnetVenta?` · POSNET ${posnetVenta}`:''}${socio?' · SOCIO':''}${conRedondeo?` · REDONDEO $${Math.round(redondeoCalc.redondeo)}`:''}${conXXXL?` · 2x1 XXXL $${Math.round(promoXXXL.descuento)} (${promoXXXL.unidadesEnPromo}u)`:''}${descCarrito>0?` · DTO ${descCarrito}%`:''}${totalDtoImanes>0?` · DTO imanes $${totalDtoImanes}`:''}${descuentoPromo>0?` · DTO promos $${Math.round(descuentoPromo)}`:''}${totalDtoAlfajores>0?` · DTO alfajores $${Math.round(totalDtoAlfajores)}`:''}${conPromosCfg?` · PROMOS ${promosCfg.aplicadas.map(a => `${a.id} $${Math.round(a.descuento)}`).join(', ')}`:''} · Total $${Math.round(totalVenta).toLocaleString('es-AR')}`,
     idReferencia:idVenta, empleado, resultado:'OK',
-  })
+  }).catch(() => {})   // el LOG no frena la venta
   return idVenta
+}
+
+// Código definitivo de la venta: su número es el lugar que ocupa entre las ventas de ese día
+// (cuántas ventas distintas hay arriba + 1). Como Google pone cada venta en su propia fila, dos
+// ventas nunca ocupan el mismo lugar, así que el número no se repite aunque carguen los 3
+// dispositivos en el mismo segundo. Normalmente coincide con el que ya tenía y no se toca nada;
+// si otro dispositivo guardó en el medio, se corrige el código de esta venta (A y B).
+async function verificarCodigoVenta({ idVenta, primera, cantidad, filasLeidas }) {
+  const prefijo = idVenta.split('-')[0]
+  let desde = filasLeidas.findIndex(r => String(r[1] || '').startsWith(prefijo + '-'))
+  desde = desde >= 0 ? desde + 2 : primera
+  if (desde >= primera) return idVenta
+  const [colB, colUid] = await sheetsBatchGet([`DETALLE DE VENTAS!B${desde}:B${primera - 1}`, `DETALLE DE VENTAS!${COL_UID}${desde}:${COL_UID}${primera - 1}`])
+  const claves = new Set(), numeros = []
+  colB.forEach((r, k) => {
+    const id = String(r?.[0] || '')
+    if (!id.startsWith(prefijo + '-')) return
+    claves.add(String(colUid[k]?.[0] || '') || id)
+    numeros.push(Number(id.split('-')[1]) || 0)
+  })
+  let numero = claves.size + 1
+  // Si alguien borró filas a mano, el lugar puede coincidir con un número que ya está arriba
+  if (numeros.includes(numero)) numero = Math.max(...numeros) + 1
+  const nuevo = `${prefijo}-${String(numero).padStart(3, '0')}`
+  if (nuevo === idVenta) return idVenta
+  const data = []
+  for (let k = 0; k < cantidad; k++) data.push({ range: `DETALLE DE VENTAS!A${primera + k}:B${primera + k}`, values: [[`${nuevo}-${String(k + 1).padStart(2, '0')}`, nuevo]] })
+  await sheetsBatchUpdate(data)
+  registrarLog({ accion: 'VENTA_RENUMERADA', detalle: `${idVenta} → ${nuevo} (otro dispositivo guardó una venta al mismo tiempo)`, idReferencia: nuevo, resultado: 'OK' }).catch(() => {})
+  return nuevo
+}
+
+async function sheetsBatchGet(rangos) {
+  const token = await getAccessToken()
+  const q = rangos.map(r => `ranges=${encodeURIComponent(r)}`).join('&')
+  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchGet?${q}`, { headers: { Authorization: `Bearer ${token}` } })
+  if (!res.ok) throw new Error(`Sheets BATCHGET error: ${res.status}`)
+  return ((await res.json()).valueRanges || []).map(v => v.values || [])
+}
+
+// Lee el final de DETALLE DE VENTAS ahora (sin usar la copia en memoria de hace unos segundos)
+async function leerDetalleFresco() {
+  if (DV.promesa) await DV.promesa.catch(() => {})
+  DV.tCola = 0
+  return leerDetalle()
+}
+
+const COL_UID = 'AN'
+const IDX_UID = 39
+export function nuevoUid() {
+  const r = (globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`)
+  return r.replace(/-/g, '').slice(0, 16)
+}
+
+// ── Configuración compartida (hoja CONFIG): la ven todos los dispositivos ─────────
+// A: CLAVE · B: VALOR · C: CAMBIADO POR · D: CAMBIADO EL
+const HOJA_CONFIG = 'CONFIG'
+let _hojaConfigLista = false
+async function asegurarHojaConfig() {
+  if (_hojaConfigLista) return
+  const token = await getAccessToken()
+  const metaRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}?fields=sheets.properties.title`, { headers: { Authorization: `Bearer ${token}` } })
+  if (!metaRes.ok) throw new Error(`Sheets META error: ${metaRes.status}`)
+  const meta = await metaRes.json()
+  if (!(meta.sheets || []).some(s => s.properties?.title === HOJA_CONFIG)) {
+    const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}:batchUpdate`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requests: [{ addSheet: { properties: { title: HOJA_CONFIG } } }] }),
+    })
+    if (!res.ok) throw new Error(`Sheets ADD SHEET error: ${res.status}`)
+    await sheetsUpdate(`${HOJA_CONFIG}!A1:D1`, [['CLAVE', 'VALOR', 'CAMBIADO POR', 'CAMBIADO EL']])
+  }
+  _hojaConfigLista = true
+}
+export async function getConfig() {
+  let data
+  try { data = await sheetsGet(`${HOJA_CONFIG}!A2:D`) }
+  catch (e) { if (String(e.message).includes('400')) return {}; throw e }
+  const out = {}
+  ;(data.values || []).forEach((r, i) => { if (r[0]) out[String(r[0]).trim()] = { valor: String(r[1] ?? ''), quien: r[2] || '', cuando: r[3] || '', fila: i + 2 } })
+  return out
+}
+export async function setConfig(valores, quien = '') {
+  await asegurarHojaConfig()
+  const actual = await getConfig()
+  const { fecha, hora } = getArgentinaDate()
+  let siguiente = Math.max(1, ...Object.values(actual).map(x => x.fila)) + 1
+  const data = Object.entries(valores).map(([clave, valor]) => {
+    const fila = actual[clave]?.fila || siguiente++
+    return { range: `${HOJA_CONFIG}!A${fila}:D${fila}`, values: [[clave, String(valor), quien, `'${fecha} ${hora.slice(0, 5)}`]] }
+  })
+  await sheetsBatchUpdate(data)
+}
+
+// Modo partido: lo prende o apaga un admin y lo toman todos los dispositivos
+export async function getModoPartido() {
+  const c = await getConfig()
+  const m = c['MODO PARTIDO'] || {}
+  return {
+    activo: String(m.valor).toUpperCase() === 'SI', quien: m.quien || '', cuando: m.cuando || '',
+    masVendidos: String(c['MAS VENDIDOS PARTIDO']?.valor || '').split(',').map(x => x.trim()).filter(Boolean),
+  }
+}
+export async function setModoPartido(activo, quien = '', masVendidos = null) {
+  await setConfig({ 'MODO PARTIDO': activo ? 'SI' : 'NO', ...(masVendidos ? { 'MAS VENDIDOS PARTIDO': masVendidos.join(',') } : {}) }, quien)
+  registrarLog({ accion: activo ? 'MODO_PARTIDO_ACTIVADO' : 'MODO_PARTIDO_DESACTIVADO', detalle: '', empleado: quien, resultado: 'OK' }).catch(() => {})
 }
 
 // ── Editar una venta ya cerrada (solo Admin) ─────────────────────────────────────

@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 import { calcularPromosConfig, fijaPausada, promoVigente as promoConfigVigente, etiquetaPromo } from '../lib/promos.js'
 import { idCanonico, registrarVenta, registrarLog, REMERAS_XXXL, calcularPromoXXXL, getPromoXXXLEstado, POSNET_METODOS, posnetSugerido, socioPermitido, calcularRedondeoSocio, usaPosnet as metodoUsaPosnet, SEP_METODOS } from '../api/sheets.js'
 import BarcodeScanner from '../components/BarcodeScanner.jsx'
+import { encolarVenta } from '../lib/colaVentas.js'
 
 const METODOS_PAGO = [
   { valor: 'Efectivo Pesos',    icon: '💵', label: 'Efectivo $' },
@@ -221,7 +222,7 @@ function XXXLControl({ item, estado, onCambiar }) {
   )
 }
 
-export default function NuevaVenta({ promos = [], articulos, loadingArticulos, onVentaRegistrada, usuarios: usuariosProp, stockMap = {}, empleadoFijo = null, esAdmin = false, cargadoPor = '' }) {
+export default function NuevaVenta({ promos = [], articulos, loadingArticulos, onVentaRegistrada, usuarios: usuariosProp, stockMap = {}, empleadoFijo = null, esAdmin = false, cargadoPor = '', modoPartido = false, masVendidos = [] }) {
   // Fecha de la venta (solo Admin): por defecto es "ahora". Se cambia a mano para cargar una venta de
   // otro día, y después de guardarla vuelve sola a "ahora".
   const [fechaOtra, setFechaOtra] = useState(null) // null | { dia: 'aaaa-mm-dd', hora: 'hh:mm' }
@@ -430,15 +431,54 @@ export default function NuevaVenta({ promos = [], articulos, loadingArticulos, o
     registrarLog({ accion: nuevo ? 'DTO_SOCIO_ACTIVADO' : 'DTO_SOCIO_DESACTIVADO', detalle: `Descuento socio ${DTO_SOCIO}%`, empleado, resultado:'OK' })
   }
 
+  // Modo partido: lo que no se usa (cambio, fecha de otro día) se apaga solo
+  useEffect(() => { if (modoPartido) { setModoCambio(false); setDevueltos([]); setFechaOtra(null) } }, [modoPartido])
+
+  function limpiarDespuesDeCerrar() {
+    setFechaOtra(null)
+    setModoCambio(false); setDevueltos([])
+    setCarrito([])
+    setSocio(false)
+    setMontoDivisa('')
+    setDividido(false); setMetodo2(''); setMonto1(''); setMontoDivisa2('')
+  }
+
   async function cerrarVenta() {
     if (carrito.length === 0) return
     if (errorCambio) { showToast(errorCambio, 'error'); return }
     if (errorDividido) { showToast(errorDividido, 'error'); return }
+    if (modoPartido) {
+      // Se cobra y se sigue: la venta queda en la cola y se guarda sola en segundo plano
+      if (totales.promoXXXL.totalMarcadas > 0 && (!promoXXXLEstado || promoXXXLEstado.error)) { showToast('Esperá un segundo: se está consultando la promo XXXL.', 'error'); return }
+      const params = armarVenta()
+      const unidades = carrito.reduce((s, i) => s + i.cantidad, 0)
+      const total = Math.round(redondeoCalc.aplica ? redondeoCalc.total : totalFinal)
+      encolarVenta(params, `${empleado} · ${unidades} u. · ${labelMetodo(metodoPago)}${dividido && metodo2 ? ' + ' + labelMetodo(metodo2) : ''} · $${total.toLocaleString('es-AR')}`)
+      // La promo XXXL: se descuentan en este dispositivo las unidades que usó esta venta
+      if (totales.promoXXXL.unidadesEnPromo > 0) setPromoXXXLEstado(e => e ? { ...e, disponibles: Math.max(0, e.disponibles - totales.promoXXXL.unidadesEnPromo) } : e)
+      limpiarDespuesDeCerrar()
+      showToast(`Venta de $${total.toLocaleString('es-AR')} cobrada ✓ · se guarda sola`, 'success')
+      return
+    }
     setSaving(true)
     try {
+      const idVenta = await registrarVenta(armarVenta())
+      showToast((modoCambio ? 'Cambio ' : 'Venta ') + idVenta + ' registrado ✓' + (fechaOtra ? ` con fecha ${fechaOtraTexto}` : ''), 'success')
+      const habiaXXXL = totales.promoXXXL.totalMarcadas > 0
+      limpiarDespuesDeCerrar()
+      if (habiaXXXL) actualizarPromoXXXL()
+      onVentaRegistrada?.()
+    } catch (e) {
+      manejarErrorCierre(e)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function armarVenta() {
       const notaDivisa = (d, monto) => d && monto ? `${d.prefijo || ''}${d.code} ${monto}` : ''
       const notas = [modoCambio ? 'CAMBIO' : '', ...(cobraAlgo ? [notaDivisa(divisaActual, montoDivisa), notaDivisa(divisa2, montoDivisa2)] : [])].filter(Boolean).join(' · ')
-      const idVenta = await registrarVenta({
+      return {
         items: carrito,
         devueltos: modoCambio ? devueltos : [],
         metodoPago: cobraAlgo ? metodoPago : 'Cambio',
@@ -455,17 +495,13 @@ export default function NuevaVenta({ promos = [], articulos, loadingArticulos, o
         promos,
         descuentoPromosConfigEsperado: totales.descuentoPromosCfg,
         ...(esAdmin && fechaOtra ? { fechaVenta: { fecha: fechaOtraTexto.split(' ')[0], hora: fechaOtra.hora }, cargadaPor: cargadoPor } : {}),
-      })
-      showToast((modoCambio ? 'Cambio ' : 'Venta ') + idVenta + ' registrado ✓' + (fechaOtra ? ` con fecha ${fechaOtraTexto}` : ''), 'success')
-      setFechaOtra(null)
-      setModoCambio(false); setDevueltos([])
-      setCarrito([])
-      setSocio(false)
-      setMontoDivisa('')
-      setDividido(false); setMetodo2(''); setMonto1(''); setMontoDivisa2('')
-      if (totales.promoXXXL.totalMarcadas > 0) actualizarPromoXXXL()
-      onVentaRegistrada?.()
-    } catch (e) {
+        // En la cola no se vuelve a consultar la promo XXXL: vale lo que se mostró al cobrar
+        ...(modoPartido && promoXXXLEstado && !promoXXXLEstado.error ? { estadoXXXL: promoXXXLEstado } : {}),
+      }
+  }
+
+  function manejarErrorCierre(e) {
+    {
       if (e?.message === 'PROMO_XXXL_CAMBIO') {
         // Otra venta usó unidades de la promo mientras tanto: se actualiza el total y no se guarda
         setPromoXXXLEstado(e.estadoPromoXXXL)
@@ -502,8 +538,6 @@ export default function NuevaVenta({ promos = [], articulos, loadingArticulos, o
       showToast('Error al guardar. Revisá la conexión.', 'error')
       registrarLog({ accion:'ERROR_CERRAR_VENTA', detalle:e?.message||'Error desconocido', empleado, resultado:'ERROR' })
       console.error(e)
-    } finally {
-      setSaving(false)
     }
   }
 
@@ -524,6 +558,8 @@ export default function NuevaVenta({ promos = [], articulos, loadingArticulos, o
     setTimeout(() => setToast(null), 3500)
   }
 
+  const porIdArt = Object.fromEntries(articulos.map(a => [a.id, a]))
+  const botonesRapidos = modoPartido ? masVendidos.map(id => porIdArt[idCanonico(id)] || porIdArt[id]).filter(Boolean).slice(0, isMobile ? 12 : 16) : []
   const promoVigente = promosActivas()
   const cantLlavCarrito = carrito.filter(i => LLAVEROS_PROMO.has(i.id)).reduce((s,i) => s+i.cantidad, 0)
   // Promos configurables vigentes: qué artículo está en cuál (para mostrar la etiqueta en el buscador)
@@ -559,6 +595,24 @@ export default function NuevaVenta({ promos = [], articulos, loadingArticulos, o
             </svg>
           </button>
         </div>
+        {modoPartido && botonesRapidos.length > 0 && !busqueda && (
+          <div style={S.rapidosWrap}>
+            <div style={S.rapidosTitulo}>⚡ MÁS VENDIDOS</div>
+            <div style={{...S.rapidosGrid, gridTemplateColumns: `repeat(${isMobile ? 3 : 4}, minmax(0, 1fr))`}}>
+              {botonesRapidos.map(art => {
+                const enCarrito = carrito.find(i => i.id === art.id)?.cantidad || 0
+                return (
+                  <button key={art.id} style={{...S.rapidoBtn, ...(enCarrito ? S.rapidoBtnActivo : {})}} onClick={() => agregarAlCarrito(art)} aria-label={`Agregar ${art.nombre}`}>
+                    {art.foto ? <img src={art.foto} alt="" style={S.rapidoFoto} onError={e => e.target.style.display='none'} /> : <div style={S.rapidoFotoPH}>📦</div>}
+                    <span style={S.rapidoNombre}>{art.nombre}</span>
+                    <span style={S.rapidoPrecio}>${art.precioUnitario.toLocaleString('es-AR')}</span>
+                    {enCarrito > 0 && <span style={S.rapidoCant}>{enCarrito}</span>}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )}
         <div style={isMobile ? S.scrollListMobile : S.scrollList}>
           {articulosFiltrados.map(art => {
             const stock = stockMap[art.id]
@@ -598,10 +652,10 @@ export default function NuevaVenta({ promos = [], articulos, loadingArticulos, o
         <div style={S.colHeader}>
           <span style={S.colTitle}>{modoCambio ? '🔄 CAMBIO' : 'DETALLE ÚLTIMA VENTA'}</span>
           {carrito.length > 0 && <span style={S.badge}>{carrito.reduce((s,i)=>s+i.cantidad,0)}</span>}
-          <button style={{...S.cambioBtn, ...(modoCambio ? S.cambioBtnActivo : {})}} onClick={() => activarCambio(!modoCambio)} aria-pressed={modoCambio}>
+          {!modoPartido && <button style={{...S.cambioBtn, ...(modoCambio ? S.cambioBtnActivo : {})}} onClick={() => activarCambio(!modoCambio)} aria-pressed={modoCambio}>
             {modoCambio ? '✕ Salir de cambio' : '🔄 Cambio'}
-          </button>
-          {esAdmin && (
+          </button>}
+          {esAdmin && !modoPartido && (
             <button style={{...S.cambioBtn, marginLeft: 0, ...(fechaOtra ? S.fechaBtnActivo : {})}} onClick={() => setFechaOtra(f => f ? null : { dia: hoyInput(), hora: horaAhora() })} aria-pressed={!!fechaOtra} title="Fecha de la venta (para cargar una venta de otro día)">
               📅 {fechaOtra ? '✕ Volver a hoy' : 'Hoy'}
             </button>
@@ -908,6 +962,16 @@ export default function NuevaVenta({ promos = [], articulos, loadingArticulos, o
 }
 
 const S = {
+  rapidosWrap: { padding:'8px 10px 10px', borderBottom:'1px solid var(--border)', background:'rgba(249,115,22,0.07)', flexShrink:0 },
+  rapidosTitulo: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:13, letterSpacing:1.5, color:'#f97316', marginBottom:6 },
+  rapidosGrid: { display:'grid', gap:6 },
+  rapidoBtn: { position:'relative', display:'flex', flexDirection:'column', alignItems:'center', gap:2, padding:'6px 4px', minHeight:96, background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:10, cursor:'pointer', color:'var(--text)' },
+  rapidoBtnActivo: { borderColor:'var(--accent)' },
+  rapidoFoto: { width:44, height:44, objectFit:'contain', borderRadius:6 },
+  rapidoFotoPH: { width:44, height:44, display:'flex', alignItems:'center', justifyContent:'center', fontSize:24 },
+  rapidoNombre: { fontFamily:'Barlow, sans-serif', fontSize:12, lineHeight:1.15, textAlign:'center', overflowWrap:'anywhere', maxWidth:'100%', display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden' },
+  rapidoPrecio: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:14, color:'var(--accent)' },
+  rapidoCant: { position:'absolute', top:-7, right:-7, boxShadow:'0 0 0 2px var(--bg)', minWidth:22, height:22, borderRadius:11, background:'var(--accent)', color:'#000', fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:14, display:'flex', alignItems:'center', justifyContent:'center' },
   layout: { display:'grid', gridTemplateColumns:'1fr 1fr 1fr', height:'100%', width:'100%', overflow:'hidden', position:'relative' },
   layoutMobile: { display:'flex', flexDirection:'column', height:'100%', width:'100%', overflowY:'auto', position:'relative' },
   blockMobile: { display:'flex', flexDirection:'column', borderBottom:'2px solid var(--border)', flexShrink:0 },

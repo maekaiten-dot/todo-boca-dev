@@ -1,9 +1,10 @@
 // src/components/EditarVentaModal.jsx
 // Editar una venta ya cerrada (solo Admin): artículos (agregar, quitar, cambiar), cantidades, precios,
-// totales, medio de pago (uno o dos), posnet, notas y vendedor. Queda constancia de quién y qué cambió.
+// totales, medio de pago (uno o dos), posnet, notas y vendedor, o anularla entera. Siempre con motivo:
+// queda constancia de quién, por qué y qué cambió. Es el único lugar para corregir una venta cerrada.
 import { useState, useMemo } from 'react'
 import { parseMonto as num } from '../lib/montos.js'
-import { editarVenta, POSNETS, usaPosnet, metodosDe, SEP_METODOS } from '../api/sheets.js'
+import { editarVenta, anularVentaConMotivo, MOTIVOS_EDICION, POSNETS, usaPosnet, metodosDe, SEP_METODOS } from '../api/sheets.js'
 
 const METODOS = ['Efectivo Pesos', 'Efectivo Dólares', 'Efectivo Reales', 'Efectivo Euros', 'Tarjeta de Crédito', 'Tarjeta de Débito', 'QR', 'Transferencia', 'Pix']
 const fmt$ = n => (n < 0 ? '−$' : '$') + Math.abs(Math.round(n || 0)).toLocaleString('es-AR')
@@ -48,6 +49,10 @@ export default function EditarVentaModal({ venta, articulos = [], usuarios = [],
   const [agregando, setAgregando] = useState(false)
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState('')
+  const [motivo, setMotivo] = useState('')
+  const [detalleMotivo, setDetalleMotivo] = useState('')
+  const [confirmarAnular, setConfirmarAnular] = useState(false)
+  const faltaMotivo = !motivo || (motivo === 'Otro' && !detalleMotivo.trim())
 
   const totalAntes = activos.reduce((s, i) => s + (i.precioTotalFinal || i.precioTotal || 0), 0)
   const total = lineas.filter(l => !l.quitar).reduce((s, l) => s + Math.round(num(l.precioTotalFinal)), 0)
@@ -69,9 +74,19 @@ export default function EditarVentaModal({ venta, articulos = [], usuarios = [],
     setAgregando(false)
   }
 
+  async function anularTodo() {
+    setError('')
+    if (faltaMotivo) { setError(motivo === 'Otro' ? 'Escribí el motivo' : 'Elegí por qué se anula la venta'); setConfirmarAnular(false); return }
+    setGuardando(true)
+    try { await anularVentaConMotivo({ venta, motivo, detalleMotivo, editor }); await onGuardado('Venta anulada ✓') }
+    catch (e) { setError(e.message?.startsWith('La planilla') ? e.message : 'No se pudo anular') }
+    finally { setGuardando(false); setConfirmarAnular(false) }
+  }
+
   async function guardar() {
     setError('')
-    if (!lineas.some(l => !l.quitar)) { setError('La venta tiene que quedar con al menos un artículo. Para anularla entera, usá Anular.'); return }
+    if (faltaMotivo) { setError(motivo === 'Otro' ? 'Escribí el motivo' : 'Elegí por qué se edita la venta'); return }
+    if (!lineas.some(l => !l.quitar)) { setError('La venta tiene que quedar con al menos un artículo. Para anularla entera, usá 🗑 Anular venta.'); return }
     if (lineas.some(l => !l.quitar && !(num(l.cantidad) !== 0))) { setError('Hay un artículo con cantidad 0'); return }
     if (dividido && (!metodo2 || metodo2 === metodo1)) { setError('Elegí dos medios de pago distintos'); return }
     const m1 = Math.round(num(monto1))
@@ -83,11 +98,11 @@ export default function EditarVentaModal({ venta, articulos = [], usuarios = [],
         venta,
         lineas: lineas.filter(l => !(l.nueva && l.quitar)).map(l => ({ ...l, cantidad: num(l.cantidad), precioUnitario: num(l.precioUnitario), precioTotalFinal: Math.round(num(l.precioTotalFinal)) })),
         metodoPago: metodo1, pagos: dividido ? [{ metodo: metodo1, monto: m1 }, { metodo: metodo2, monto: total - m1 }] : null,
-        posnet: conPosnet ? posnet : '', notas: notas.trim(), vendedor, editor,
+        posnet: conPosnet ? posnet : '', notas: notas.trim(), vendedor, editor, motivo, detalleMotivo,
       })
       await onGuardado(registro ? 'Venta editada ✓' : 'No había cambios')
     } catch (e) {
-      setError(e.message === 'PAGOS_MONTO' ? 'Revisá el reparto entre los dos medios de pago' : e.message === 'VENTA_VACIA' ? 'La venta no puede quedar vacía' : e.message?.startsWith('La planilla') ? e.message : 'No se pudo guardar')
+      setError(e.message === 'FALTA_MOTIVO' ? 'Elegí el motivo' : e.message === 'PAGOS_MONTO' ? 'Revisá el reparto entre los dos medios de pago' : e.message === 'VENTA_VACIA' ? 'La venta no puede quedar vacía' : e.message?.startsWith('La planilla') ? e.message : 'No se pudo guardar')
     } finally { setGuardando(false) }
   }
 
@@ -102,6 +117,13 @@ export default function EditarVentaModal({ venta, articulos = [], usuarios = [],
           <button style={S.cerrar} onClick={onCerrar} aria-label="Cerrar">✕</button>
         </div>
         <div style={S.cuerpo}>
+          <div style={{ ...S.caja, borderColor: faltaMotivo ? 'var(--accent)' : 'var(--border)' }} aria-label="Motivo de la edición">
+            <span style={S.label}>¿POR QUÉ SE CORRIGE ESTA VENTA? *</span>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {MOTIVOS_EDICION.map(m => <button key={m} style={{ ...S.mini, fontSize: 13, padding: '6px 10px', ...(motivo === m ? S.activo : {}) }} onClick={() => setMotivo(m)} aria-pressed={motivo === m}>{m}</button>)}
+            </div>
+            <input style={S.input} value={detalleMotivo} onChange={e => setDetalleMotivo(e.target.value)} placeholder={motivo === 'Otro' ? 'Contá qué pasó (obligatorio)' : 'Detalle (opcional)'} aria-label="Detalle del motivo" />
+          </div>
           {lineas.map((l, k) => (
             <div key={l.idDetalle || `n${k}`} style={{ ...S.linea, ...(l.quitar ? { opacity: 0.45 } : {}), ...(l.nueva ? { borderColor: '#22c55e' } : {}) }} data-linea={l.articulo}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'flex-start' }}>
@@ -161,6 +183,9 @@ export default function EditarVentaModal({ venta, articulos = [], usuarios = [],
           {error && <div style={S.error}>{error}</div>}
         </div>
         <div style={S.pie}>
+          {confirmarAnular
+            ? <button style={{ ...S.btnSec, color: '#fff', background: '#ef4444', borderColor: '#ef4444' }} onClick={anularTodo} disabled={guardando}>¿Seguro? Anular toda</button>
+            : <button style={{ ...S.btnSec, color: '#ef4444', borderColor: 'rgba(239,68,68,0.5)' }} onClick={() => setConfirmarAnular(true)} disabled={guardando}>🗑 Anular venta</button>}
           <button style={S.btnSec} onClick={onCerrar} disabled={guardando}>Cancelar</button>
           <button style={S.btn} onClick={guardar} disabled={guardando}>{guardando ? 'Guardando…' : 'GUARDAR CAMBIOS'}</button>
         </div>

@@ -1,7 +1,6 @@
 // src/pages/VentasDelDia.jsx
 import { useState, useEffect, Fragment } from 'react'
 import { getVentasHoy, anularVenta, registrarLog, getGastosCajaHoy, POSNET_METODOS, usaPosnet, metodosDe, repartoPago, montoConMetodo } from '../api/sheets.js'
-import CorregirPosnetModal from '../components/CorregirPosnetModal.jsx'
 import DetalleVentaModal from '../components/DetalleVentaModal.jsx'
 
 const METODO_ICONS = {
@@ -279,16 +278,7 @@ export default function VentasDelDia({ refreshKey, usuarios = [], perfilNombre =
                         ) : (
                           `$${Math.round(v.total).toLocaleString('es-AR')}`
                         )}
-                        {esAdmin && !v.anulado && usaPosnet(v.metodoPago) && (
-                          <button style={S.posnetBtnInline} title={v.correccionPosnet ? `Corregido: ${v.correccionPosnet}` : 'Corregir el posnet registrado'} onClick={e => { e.stopPropagation(); setCorrigiendo(v) }}>
-                            Posnet{v.correccionPosnet ? ' ✎' : ''}
-                          </button>
-                        )}
-                        {!v.anulado && (
-                          <button style={S.anularBtnInline} onClick={e => { e.stopPropagation(); setConfirmAnular(v.idVenta) }}>
-                            Anular
-                          </button>
-                        )}
+                        {v.items.some(it => it.ediciones) && <span style={{ fontSize: 12, color: '#60a5fa', marginLeft: 6 }} title="Venta corregida: tocala para ver qué se cambió">✎</span>}
                       </td>
                     </tr>
                     {v.items.map((item, i) => {
@@ -345,31 +335,6 @@ export default function VentasDelDia({ refreshKey, usuarios = [], perfilNombre =
           </table>
         )}
       </div>
-
-      {corrigiendo && (
-        <CorregirPosnetModal
-          venta={corrigiendo} usuarios={usuarios} perfilNombre={perfilNombre}
-          onCerrar={() => setCorrigiendo(null)}
-          onGuardado={nuevo => { showToast(`Posnet corregido a ${nuevo.toLowerCase()}`, 'success'); setCorrigiendo(null); cargar() }}
-        />
-      )}
-
-      {confirmAnular && (
-        <div style={S.overlay} onClick={() => !anulando && setConfirmAnular(null)}>
-          <div style={S.confirmBox} onClick={e => e.stopPropagation()}>
-            <div style={S.confirmTitle}>¿Anular venta?</div>
-            <div style={S.confirmSub}>
-              Se va a marcar la venta <strong style={{color:'var(--accent)'}}>{confirmAnular}</strong> como anulada.
-            </div>
-            <div style={{display:'flex', gap:10, marginTop:20}}>
-              <button style={S.confirmCancel} onClick={() => setConfirmAnular(null)} disabled={anulando}>Cancelar</button>
-              <button style={S.confirmOk} onClick={confirmarAnulacion} disabled={anulando}>
-                {anulando ? 'Anulando...' : 'Sí, anular'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {ventaSeleccionada && (
         <DetalleVentaModal

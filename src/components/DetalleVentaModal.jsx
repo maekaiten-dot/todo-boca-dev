@@ -81,7 +81,10 @@ export default function DetalleVentaModal({ venta, onClose, onActualizar, esAdmi
         </div>
 
         {esAdmin && !venta.anulado && (
-          <button style={S.editarBtn} onClick={() => setEditando(true)}>✏️ Editar venta</button>
+          <button style={S.editarBtn} onClick={() => setEditando(true)}>✏️ Editar o anular venta</button>
+        )}
+        {!esAdmin && !venta.anulado && (
+          <div style={{ fontFamily: 'Barlow, sans-serif', fontSize: 13, color: 'var(--muted)', margin: '4px 0 8px' }}>¿Hay que corregir o anular esta venta? Avisale a un admin.</div>
         )}
         {ediciones.length > 0 && (
           <div style={S.edicionesBox} aria-label="Ediciones de la venta">
@@ -138,12 +141,7 @@ export default function DetalleVentaModal({ venta, onClose, onActualizar, esAdmi
                 <div style={{...S.itemTotal, ...(item.anulado ? S.strikethrough : {})}}>
                   {m$(item.precioTotalFinal || item.precioTotal || 0)}
                 </div>
-                {item.anulado
-                  ? <div style={S.anuladoTag}>ANULADO</div>
-                  : <button style={S.anularItemBtn} onClick={() => setConfirmItem(item.idDetalle)}>
-                      Anular
-                    </button>
-                }
+                {item.anulado && <div style={S.anuladoTag}>ANULADO</div>}
               </div>
             </div>
           ))}

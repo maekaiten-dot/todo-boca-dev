@@ -816,7 +816,15 @@ const COL_PROMOS = 'AM'
 const fmtPesos = n => '$' + Math.round(n || 0).toLocaleString('es-AR')
 // lineas: [{ idDetalle (si ya existía), articulo, nombre, foto, cantidad, precioUnitario, precioTotalFinal, costoUnitario, quitar }]
 // pagos: null (un medio) o [{ metodo, monto }, { metodo, monto }]
-export async function editarVenta({ venta, lineas, metodoPago, pagos = null, posnet = '', notas = '', vendedor = '', editor = '' }) {
+// Motivos para editar o anular una venta ya cerrada (solo Admin). "Otro" pide detalle.
+export const MOTIVOS_EDICION = ['Posnet equivocado', 'Faltó cargar un producto', 'Producto equivocado', 'Precio o descuento mal', 'Método de pago mal', 'Cliente devolvió o cambió', 'Venta cargada dos veces', 'El cliente no la llevó', 'Otro']
+function textoMotivo(motivo = '', detalle = '') {
+  if (!motivo || (motivo === 'Otro' && !String(detalle).trim())) throw new Error('FALTA_MOTIVO')
+  return `motivo: ${motivo}${String(detalle).trim() ? ` (${String(detalle).trim()})` : ''}`
+}
+
+export async function editarVenta({ venta, lineas, metodoPago, pagos = null, posnet = '', notas = '', vendedor = '', editor = '', motivo = '', detalleMotivo = '' }) {
+  const porQue = textoMotivo(motivo, detalleMotivo)
   const items = venta.items || []
   const activos = items.filter(i => !i.anulado)
   const dividido = Array.isArray(pagos) && pagos.length === 2
@@ -858,7 +866,7 @@ export async function editarVenta({ venta, lineas, metodoPago, pagos = null, pos
   if (!cambios.length) return ''
 
   const dt = getArgentinaDate()
-  const registro = `${dt.fecha} ${dt.hora} ${editor || 'Admin'}: ${cambios.join('; ')}`
+  const registro = `${dt.fecha} ${dt.hora} ${editor || 'Admin'}: ${cambios.join('; ')} · ${porQue}`
   const ediciones = [items.find(i => i.ediciones)?.ediciones, registro].filter(Boolean).join(' | ')
 
   await asegurarColumna(COL_POSNET, 'POSNET')
@@ -910,6 +918,32 @@ export async function editarVenta({ venta, lineas, metodoPago, pagos = null, pos
   await sheetsBatchUpdate(data)
   detalleCambio(data.map(d => Number(String(d.range).match(/(\d+)$/)?.[1]) || 0))
   await registrarLog({ accion: 'VENTA_EDITADA', detalle: `${venta.idVenta} · ${registro} · Total ${fmtPesos(total)}`, idReferencia: venta.idVenta, empleado: editor, resultado: 'OK' })
+  return registro
+}
+
+// Anular una venta entera desde Editar (solo Admin), con motivo: marca ANULADO en todos sus renglones
+// y deja la constancia en EDICIONES (AL), igual que una edición.
+export async function anularVentaConMotivo({ venta, motivo = '', detalleMotivo = '', editor = '' }) {
+  const porQue = textoMotivo(motivo, detalleMotivo)
+  const items = venta.items || []
+  const dt = getArgentinaDate()
+  const total = items.filter(i => !i.anulado).reduce((s, i) => s + (i.precioTotalFinal || i.precioTotal || 0), 0)
+  const registro = `${dt.fecha} ${dt.hora} ${editor || 'Admin'}: anuló la venta (${fmtPesos(total)}) · ${porQue}`
+  const ediciones = [items.find(i => i.ediciones)?.ediciones, registro].filter(Boolean).join(' | ')
+  await asegurarColumna(COL_EDICIONES, 'EDICIONES')
+  const colA = (await sheetsGet('DETALLE DE VENTAS!A:A')).values || []
+  const filaDe = {}
+  colA.forEach((r, i) => { const v = String(r[0] || '').trim(); if (v) filaDe[v] = i + 1 })
+  const data = []
+  for (const it of items) {
+    const fila = filaDe[it.idDetalle]
+    if (!fila) throw new Error('La planilla cambió: recargá y probá de nuevo')
+    data.push({ range: `DETALLE DE VENTAS!U${fila}`, values: [['TRUE']] })
+    data.push({ range: `DETALLE DE VENTAS!${COL_EDICIONES}${fila}`, values: [[ediciones]] })
+  }
+  await sheetsBatchUpdate(data)
+  detalleCambio(data.map(d => Number(String(d.range).match(/(\d+)$/)?.[1]) || 0))
+  await registrarLog({ accion: 'VENTA_ANULADA', detalle: `${venta.idVenta} · ${registro}`, idReferencia: venta.idVenta, empleado: editor, resultado: 'OK' })
   return registro
 }
 

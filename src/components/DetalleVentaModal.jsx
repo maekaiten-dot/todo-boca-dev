@@ -5,7 +5,7 @@ import EditarVentaModal from './EditarVentaModal.jsx'
 
 const m$ = n => (n < 0 ? '−$' : '$') + Math.abs(Math.round(n || 0)).toLocaleString('es-AR')  // monto con signo (los cambios tienen renglones en negativo)
 
-export default function DetalleVentaModal({ venta, onClose, onActualizar, esAdmin = false, articulos = [], usuarios = [], editor = '' }) {
+export default function DetalleVentaModal({ venta, onClose, onActualizar, esAdmin = false, soloLectura = false, articulos = [], usuarios = [], editor = '' }) {
   const [confirmItem, setConfirmItem] = useState(null)
   const [editando, setEditando] = useState(false)
   // Historial de ediciones (columna EDICIONES): "fecha hora Quién: qué cambió | …"
@@ -80,10 +80,10 @@ export default function DetalleVentaModal({ venta, onClose, onActualizar, esAdmi
           <button style={S.closeBtn} onClick={onClose}>✕</button>
         </div>
 
-        {esAdmin && !venta.anulado && (
+        {esAdmin && !soloLectura && !venta.anulado && (
           <button style={S.editarBtn} onClick={() => setEditando(true)}>✏️ Editar o anular venta</button>
         )}
-        {!esAdmin && !venta.anulado && (
+        {(!esAdmin || soloLectura) && !venta.anulado && (
           <div style={{ fontFamily: 'Barlow, sans-serif', fontSize: 13, color: 'var(--muted)', margin: '4px 0 8px' }}>¿Hay que corregir o anular esta venta? Avisale a un admin.</div>
         )}
         {ediciones.length > 0 && (

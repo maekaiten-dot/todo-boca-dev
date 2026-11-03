@@ -46,6 +46,9 @@ const LOCALES = {
     fichar: true,
     // Barra inferior con letra e íconos más grandes
     barraGrande: false,
+    // Rol Supervisor (TIPO "Supervisor" en USUARIOS): ve lo mismo que un Admin pero no puede
+    // modificar artículos ni editar o anular ventas cerradas
+    supervisor: false,
   },
   mitad: {
     id: 'mitad',
@@ -68,6 +71,7 @@ const LOCALES = {
     // Las fichadas son de la Esquina: por ahora no se muestran acá
     fichar: false,
     barraGrande: true,
+    supervisor: true,
     // Vendedores para elegir en la pantalla simple (perfiles Caja de USUARIOS, sin "Tablet")
     pedirVendedor: true,
   },

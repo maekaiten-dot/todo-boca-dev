@@ -424,7 +424,7 @@ export default function App() {
   }
 
   function elegirUsuario(usuario) {
-    if (usuario.tipo?.toLowerCase() === 'admin') setPinPendiente(usuario)
+    if (usuario.tipo?.toLowerCase() === 'admin' || (LOCAL.supervisor && usuario.tipo?.toLowerCase() === 'supervisor')) setPinPendiente(usuario)
     else confirmarPerfil(usuario)
   }
 
@@ -463,15 +463,18 @@ export default function App() {
   }
 
   const esAdmin = perfilGuardado?.tipo?.toLowerCase() === 'admin'
+  // Supervisor (solo donde el local lo habilita): ve todo lo del Admin, pero sin modificar
+  const esSupervisor = !!LOCAL.supervisor && perfilGuardado?.tipo?.toLowerCase() === 'supervisor'
+  const veAdmin = esAdmin || esSupervisor
   const esAdrian = perfilGuardado?.nombre?.toLowerCase() === 'adrián' || perfilGuardado?.nombre?.toLowerCase() === 'adrian'
-  const tipoKey = esAdmin ? 'Admin' : 'Caja'
+  const tipoKey = veAdmin ? 'Admin' : 'Caja'
   const tabsBase = tabsDelLocal(tipoKey)
   // Gastos Fijos visible para todos los Admin, editable solo por Adrián
   const tabs = tabsBase
-  const tabsMas = tabsMasDelLocal(esAdmin)
+  const tabsMas = tabsMasDelLocal(veAdmin)
   const tabMasActiva = tabsMas.find(t => t.id === tab)
   const empleadoActual = perfilGuardado?.nombre || ''
-  const usuariosLogin = usuarios.filter(u => u.tipo?.toLowerCase() === 'admin' || u.nombre === 'Tablet')
+  const usuariosLogin = usuarios.filter(u => u.tipo?.toLowerCase() === 'admin' || (LOCAL.supervisor && u.tipo?.toLowerCase() === 'supervisor') || u.nombre === 'Tablet')
 
   const tabStyle = (tabId) => ({
     display: tab === tabId ? 'flex' : 'none',
@@ -493,7 +496,7 @@ export default function App() {
               {usuariosLogin.map(u => (
                 <button key={u.id} style={S.setupBtn} onClick={() => elegirUsuario(u)}>
                   <span style={S.setupBtnLabel}>{u.nombre}</span>
-                  <span style={S.setupBtnDesc}>{u.tipo?.toLowerCase()==='admin' ? 'Admin · requiere código' : u.tipo||'Caja'}</span>
+                  <span style={S.setupBtnDesc}>{u.tipo?.toLowerCase()==='admin' ? 'Admin · requiere código' : u.tipo?.toLowerCase()==='supervisor' ? 'Supervisor · requiere código' : u.tipo||'Caja'}</span>
                 </button>
               ))}
             </div>
@@ -507,7 +510,7 @@ export default function App() {
   return (
     <>
       <style>{CSS_GLOBAL}</style>
-      <AvisoPrecios cambios={!esAdmin || verAvisoPrecios ? avisoCambios : null} onEntendido={entendidoPrecios}
+      <AvisoPrecios cambios={!veAdmin || verAvisoPrecios ? avisoCambios : null} onEntendido={entendidoPrecios}
         onVerTutoriales={() => { entendidoPrecios(); handleTabChange('tutos') }} />
       <div style={S.app}>
         <div style={S.header}>
@@ -515,7 +518,7 @@ export default function App() {
             <span style={{ ...S.logoTodo, color:'var(--header-text)' }}>{LOCAL.logo[0]}</span><span style={{ ...S.logoBoca, color:'var(--accent)' }}>{LOCAL.logo[1]}</span>
           </div>
           <div style={S.headerRight}>
-            {esAdmin && totalCambios(avisoCambios) > 0 && (
+            {veAdmin && totalCambios(avisoCambios) > 0 && (
               <button style={S.avisoPreciosPill} onClick={() => setVerAvisoPrecios(true)} title="Ver qué cambió en los artículos">
                 📢 {resumenCambios(avisoCambios)}
               </button>
@@ -527,62 +530,62 @@ export default function App() {
           </div>
         </div>
 
-        <BarraModoPartido activo={modo.activo} quien={modo.quien} cola={cola} esAdmin={esAdmin} perfilNombre={empleadoActual} />
+        <BarraModoPartido activo={modo.activo} quien={modo.quien} cola={cola} esAdmin={veAdmin} perfilNombre={empleadoActual} />
 
         <div style={S.content}>
           <div style={tabStyle('venta')}>
             {LOCAL.venderSimple ? (
-              <VenderSimple articulos={articulos} loadingArticulos={loadingArticulos} usuarios={usuarios} stockMap={stockMap} perfilNombre={empleadoActual} esAdmin={esAdmin}
+              <VenderSimple articulos={articulos} loadingArticulos={loadingArticulos} usuarios={usuarios} stockMap={stockMap} perfilNombre={empleadoActual} esAdmin={veAdmin}
                 onVentaRegistrada={() => { setRefreshKey(k => k + 1); recalcularStock(articulosRef.current) }} />
             ) : (
-            <NuevaVenta promos={promos} articulos={articulos} loadingArticulos={loadingArticulos} usuarios={usuarios} stockMap={stockMap} empleadoFijo={esAdmin ? empleadoActual : null} esAdmin={esAdmin} cargadoPor={empleadoActual}
+            <NuevaVenta promos={promos} articulos={articulos} loadingArticulos={loadingArticulos} usuarios={usuarios} stockMap={stockMap} empleadoFijo={veAdmin ? empleadoActual : null} esAdmin={veAdmin} cargadoPor={empleadoActual}
               modoPartido={modo.activo} masVendidos={modo.masVendidos || []}
               onVentaRegistrada={() => { if (modoRef.current.activo) return; setRefreshKey(k => k + 1); recalcularStock(articulosRef.current) }} />
             )}
           </div>
           {tabsVisitadas.has('hoy') && (
-            <div style={tabStyle('hoy')}>{LOCAL.hoySimple && !esAdmin ? <HoySimple refreshKey={refreshKey} articulos={articulos} /> : <VentasDelDia refreshKey={refreshKey} puedeAnular={true} usuarios={usuarios} perfilNombre={empleadoActual} esAdmin={esAdmin} articulos={articulos} />}</div>
+            <div style={tabStyle('hoy')}>{LOCAL.hoySimple && !veAdmin ? <HoySimple refreshKey={refreshKey} articulos={articulos} /> : <VentasDelDia soloLectura={esSupervisor} refreshKey={refreshKey} puedeAnular={true} usuarios={usuarios} perfilNombre={empleadoActual} esAdmin={veAdmin} articulos={articulos} />}</div>
           )}
           {tabsVisitadas.has('caja') && (
             <div style={tabStyle('caja')}><Suspense fallback={<CargandoSolapa />}><GastosCaja usuarios={usuarios} perfilNombre={empleadoActual} onRegistrado={() => setRefreshKey(k => k + 1)} /></Suspense></div>
           )}
-          {esAdmin && tabsVisitadas.has('log') && (
-            <div style={tabStyle('log')}><Suspense fallback={<CargandoSolapa />}><LogVentas esAdmin={esAdmin} articulos={articulos} usuarios={usuarios} perfilNombre={empleadoActual} /></Suspense></div>
+          {veAdmin && tabsVisitadas.has('log') && (
+            <div style={tabStyle('log')}><Suspense fallback={<CargandoSolapa />}><LogVentas soloLectura={esSupervisor} esAdmin={veAdmin} articulos={articulos} usuarios={usuarios} perfilNombre={empleadoActual} /></Suspense></div>
           )}
-          {esAdmin && tabsVisitadas.has('stats') && (
-            <div style={tabStyle('stats')}><Suspense fallback={<CargandoSolapa />}><Estadisticas esAdmin={esAdmin} usuarios={usuarios} perfilNombre={empleadoActual} /></Suspense></div>
+          {veAdmin && tabsVisitadas.has('stats') && (
+            <div style={tabStyle('stats')}><Suspense fallback={<CargandoSolapa />}><Estadisticas esAdmin={veAdmin} usuarios={usuarios} perfilNombre={empleadoActual} /></Suspense></div>
           )}
           {tabsVisitadas.has('arts') && (
-            <div style={tabStyle('arts')}><Suspense fallback={<CargandoSolapa />}><Articulos empleado={empleadoActual} esAdmin={esAdmin} /></Suspense></div>
+            <div style={tabStyle('arts')}><Suspense fallback={<CargandoSolapa />}><Articulos soloLectura={esSupervisor} empleado={empleadoActual} esAdmin={veAdmin} /></Suspense></div>
           )}
           {tabsVisitadas.has('conteo') && (
-            <div style={tabStyle('conteo')}><Suspense fallback={<CargandoSolapa />}><Conteo articulos={articulos} usuarios={usuarios} perfilNombre={empleadoActual} esAdmin={esAdmin} onActualizado={() => recalcularStock()} /></Suspense></div>
+            <div style={tabStyle('conteo')}><Suspense fallback={<CargandoSolapa />}><Conteo articulos={articulos} usuarios={usuarios} perfilNombre={empleadoActual} esAdmin={veAdmin} onActualizado={() => recalcularStock()} /></Suspense></div>
           )}
           {tabsVisitadas.has('tutos') && (
-            <div style={tabStyle('tutos')}><Suspense fallback={<CargandoSolapa />}><Tutoriales esAdmin={esAdmin} perfilNombre={empleadoActual} version={versionTutos} /></Suspense></div>
+            <div style={tabStyle('tutos')}><Suspense fallback={<CargandoSolapa />}><Tutoriales esAdmin={veAdmin} perfilNombre={empleadoActual} version={versionTutos} /></Suspense></div>
           )}
-          {esAdmin && tabsVisitadas.has('rota') && (
+          {veAdmin && tabsVisitadas.has('rota') && (
             <div style={tabStyle('rota')}><Suspense fallback={<CargandoSolapa />}><Rotacion articulos={articulos} stockMap={stockMap} /></Suspense></div>
           )}
-          {esAdmin && tabsVisitadas.has('promos') && (
+          {veAdmin && tabsVisitadas.has('promos') && (
             <div style={tabStyle('promos')}><Suspense fallback={<CargandoSolapa />}><Promos promos={promos} articulos={articulos} perfilNombre={empleadoActual} onCambio={cargarPromos} /></Suspense></div>
           )}
-          {esAdmin && tabsVisitadas.has('ing') && (
+          {veAdmin && tabsVisitadas.has('ing') && (
             <div style={tabStyle('ing')}><Suspense fallback={<CargandoSolapa />}><Ingresos /></Suspense></div>
           )}
-          {esAdmin && tabsVisitadas.has('pagos') && (
+          {veAdmin && tabsVisitadas.has('pagos') && (
             <div style={tabStyle('pagos')}><Suspense fallback={<CargandoSolapa />}><Pagos empleado={empleadoActual} empleadoFijo={empleadoActual} usuarios={usuarios} /></Suspense></div>
           )}
           {tabsVisitadas.has('asis') && (
-            <div style={tabStyle('asis')}><Suspense fallback={<CargandoSolapa />}><Asistencia usuarios={usuarios} esAdmin={esAdmin} /></Suspense></div>
+            <div style={tabStyle('asis')}><Suspense fallback={<CargandoSolapa />}><Asistencia usuarios={usuarios} esAdmin={veAdmin} /></Suspense></div>
           )}
-          {esAdmin && tabsVisitadas.has('fich') && (
+          {veAdmin && tabsVisitadas.has('fich') && (
             <div style={tabStyle('fich')}><Suspense fallback={<CargandoSolapa />}><Fichadas usuarios={usuarios} /></Suspense></div>
           )}
-          {esAdmin && tabsVisitadas.has('admin') && (
+          {veAdmin && tabsVisitadas.has('admin') && (
             <div style={tabStyle('admin')}><Suspense fallback={<CargandoSolapa />}><Administracion perfilNombre={empleadoActual} /></Suspense></div>
           )}
-          {esAdmin && tabsVisitadas.has('gastos') && (
+          {veAdmin && tabsVisitadas.has('gastos') && (
             <div style={tabStyle('gastos')}><Suspense fallback={<CargandoSolapa />}><GastosFijos soloLectura={!esAdrian} /></Suspense></div>
           )}
         </div>

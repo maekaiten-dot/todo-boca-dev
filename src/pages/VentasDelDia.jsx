@@ -21,7 +21,7 @@ const iconos = m => metodosDe(m).map(x => METODO_ICONS[x] || '💰').join('') ||
 // "Efectivo Pesos $20.000 + Tarjeta de Débito $15.000" (montos de toda la venta)
 const textoPagos = pagos => pagos.map(p => `${p.metodo} $${Math.round(p.monto).toLocaleString('es-AR')}`).join(' + ')
 
-export default function VentasDelDia({ refreshKey, usuarios = [], perfilNombre = '', esAdmin = false, articulos = [] }) {
+export default function VentasDelDia({ refreshKey, usuarios = [], perfilNombre = '', esAdmin = false, soloLectura = false, articulos = [] }) {
   const [ventas, setVentas] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -339,7 +339,7 @@ export default function VentasDelDia({ refreshKey, usuarios = [], perfilNombre =
       {ventaSeleccionada && (
         <DetalleVentaModal
           venta={ventaSeleccionada}
-          esAdmin={esAdmin} articulos={articulos} usuarios={usuarios} editor={perfilNombre}
+          esAdmin={esAdmin} soloLectura={soloLectura} articulos={articulos} usuarios={usuarios} editor={perfilNombre}
           onClose={() => setVentaSeleccionada(null)}
           onActualizar={async msg => {
             await cargar()

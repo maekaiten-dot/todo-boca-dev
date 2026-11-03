@@ -29,7 +29,9 @@ async function subirFotoCloudinary(file) {
   return data.secure_url
 }
 
-export default function Articulos({ empleado = '', esAdmin = false }) {
+export default function Articulos({ empleado = '', esAdmin = false, soloLectura = false }) {
+  // soloLectura (Supervisor): ve todo como un Admin, pero sin crear ni editar artículos
+  const puedeEditar = esAdmin && !soloLectura
   const [articulos, setArticulos] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -216,7 +218,7 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
         <div style={S.headerTitle}>ARTÍCULOS</div>
         <div style={{display:'flex', gap:8}}>
           <button style={S.refreshBtn} onClick={cargar}>↻</button>
-          {esAdmin && <button style={S.newBtn} onClick={abrirNuevo}>+ Nuevo</button>}
+          {puedeEditar && <button style={S.newBtn} onClick={abrirNuevo}>+ Nuevo</button>}
         </div>
       </div>
 
@@ -244,7 +246,7 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
         )}
       </div>
 
-      {esAdmin && !loading && articulos.length > 0 && !articulos.some(a => a.grupo) && (
+      {puedeEditar && !loading && articulos.length > 0 && !articulos.some(a => a.grupo) && (
         <div style={S.gruposBanner}>
           <div style={{ flex: 1 }}>
             <b>🔗 Grupos listos para cargar:</b> {Object.entries(GRUPOS_INICIALES).map(([g, ids]) => `${g} (${ids.length})`).join(' · ')}.
@@ -272,7 +274,7 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
               {esAdmin && thOrden('costo')}
               {thOrden('stock')}
               {thOrden('estado')}
-              {esAdmin && <th style={S.th}></th>}
+              {puedeEditar && <th style={S.th}></th>}
             </tr>
           </thead>
           <tbody>
@@ -318,7 +320,7 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
                     {/* Solo se muestra: el estado se cambia desde ✏️ Editar (así no se toca por error) */}
                     <span style={{...S.toggleBtn, ...(activo ? S.toggleActivo : S.toggleInactivo), cursor:'default'}}>{activo ? 'ACTIVO' : 'INACTIVO'}</span>
                   </td>
-                  {esAdmin && <td style={S.td}>
+                  {puedeEditar && <td style={S.td}>
                     <button style={S.editBtn} onClick={() => abrirEditar(art)}>✏️</button>
                   </td>}
                 </tr>

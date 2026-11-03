@@ -375,7 +375,7 @@ export default function Rotacion({ articulos = [], stockMap = {} }) {
         <Segmento opciones={TOPS.map(n => ({ v: n, label: `Top ${n}` }))} valor={top} onChange={setTop} />
         <Segmento opciones={[{ v: 'modelo', label: 'Por modelo' }, { v: 'grupo', label: `Por grupo${nGrupos ? ` (${nGrupos})` : ''}` }]} valor={vista} onChange={setVista} />
       </div>
-      {vista === 'grupo' && !nGrupos && <div style={{ ...S.legend, paddingTop: 10, color: 'var(--accent)' }}>Todavía no hay grupos: se arman en Arts., editando cada artículo (campo GRUPO).</div>}
+      {vista === 'grupo' && !nGrupos && <div style={{ ...S.legend, paddingTop: 10, color:'var(--accent-text)' }}>Todavía no hay grupos: se arman en Arts., editando cada artículo (campo GRUPO).</div>}
       {porGrupo && <div style={{ ...S.legend, paddingTop: 10 }}>🔗 Los modelos con el mismo GRUPO se suman como un solo producto. Tocá un grupo en las tablas para ver sus modelos.</div>}
 
       <div style={S.statsRow}>
@@ -625,7 +625,7 @@ function Tendencia({ r }) {
 function coberturaColor(dias) {
   if (dias == null) return {}
   if (dias < 7) return { color: '#ef4444', fontWeight: 700 }
-  if (dias < DIAS_COBERTURA) return { color: 'var(--accent)', fontWeight: 700 }
+  if (dias < DIAS_COBERTURA) return { color:'var(--accent-text)', fontWeight: 700 }
   return {}
 }
 
@@ -637,7 +637,7 @@ const S = {
   errorText: { fontFamily: 'Barlow, sans-serif', fontSize: 16, color: '#ef4444', textAlign: 'center' },
   retryBtn: { background: 'var(--surface)', border: '1.5px solid var(--border)', borderRadius: 10, color: 'var(--text)', fontFamily: 'Barlow, sans-serif', fontSize: 15, padding: '10px 24px', cursor: 'pointer' },
   header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px 12px', borderBottom: '2px solid var(--accent)', flexShrink: 0 },
-  headerTitle: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 28, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: 2 },
+  headerTitle: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 28, color:'var(--accent-text)', textTransform: 'uppercase', letterSpacing: 2 },
   headerSub: { fontFamily: 'Barlow, sans-serif', fontSize: 12, color: 'var(--muted)' },
   refreshBtn: { background: 'var(--surface)', border: '1.5px solid var(--border)', borderRadius: 10, color: 'var(--text)', fontSize: 24, width: 44, height: 44, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' },
   controls: { display: 'flex', flexWrap: 'wrap', gap: 10, padding: '14px 20px 0' },
@@ -647,7 +647,7 @@ const S = {
   segBtnActivo: { background: 'var(--accent)', color: '#000' },
   statsRow: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, padding: '14px 20px 10px' },
   statCard: { background: 'var(--surface)', borderRadius: 12, padding: '12px 14px', border: '1.5px solid var(--border)' },
-  statValue: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 24, color: 'var(--accent)' },
+  statValue: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 24, color:'var(--accent-text)' },
   statLabel: { fontFamily: 'Barlow, sans-serif', fontSize: 12, color: 'var(--muted)', marginTop: 2 },
   legend: { display: 'flex', flexWrap: 'wrap', gap: '6px 18px', padding: '0 20px 12px', fontFamily: 'Barlow, sans-serif', fontSize: 12, color: 'var(--muted)' },
   legendDot: { display: 'inline-block', width: 14, height: 8, borderRadius: '0 4px 4px 0', marginRight: 6, verticalAlign: 'middle' },
@@ -661,7 +661,7 @@ const S = {
   barLine: { display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 },
   bar: { height: 8, borderRadius: '0 4px 4px 0', minWidth: 2 },
   barVal: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 14, color: 'var(--text)', whiteSpace: 'nowrap' },
-  seccion: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 20, color: 'var(--accent)', letterSpacing: 1.5, padding: '8px 20px 6px' },
+  seccion: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 20, color:'var(--accent-text)', letterSpacing: 1.5, padding: '8px 20px 6px' },
   barExtra: { fontFamily: 'Barlow, sans-serif', fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
   nota: { fontFamily: 'Barlow, sans-serif', fontSize: 12, color: 'var(--muted)', lineHeight: 1.5, marginBottom: 8 },
   search: { fontFamily: 'Barlow, sans-serif', fontSize: 15, padding: '10px 14px', background: 'var(--bg)', border: '1.5px solid var(--border)', borderRadius: 10, color: 'var(--text)', marginBottom: 8, width: '100%', maxWidth: 360 },
@@ -670,13 +670,13 @@ const S = {
   th: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 12, color: 'var(--muted)', letterSpacing: 1, textTransform: 'uppercase', padding: '8px', borderBottom: '1.5px solid var(--border)', cursor: 'pointer', whiteSpace: 'nowrap', userSelect: 'none' },
   td: { fontFamily: 'Barlow, sans-serif', fontSize: 14, color: 'var(--text)', padding: '8px', borderBottom: '1px solid var(--border)', textAlign: 'right', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' },
   tdNombre: { textAlign: 'left', whiteSpace: 'normal', minWidth: 200, maxWidth: 300 },
-  tdReponer: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 17, color: 'var(--accent)' },
+  tdReponer: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 17, color:'var(--accent-text)' },
   codigo: { fontSize: 11, color: 'var(--muted)', marginTop: 2 },
   chip: { display: 'inline-block', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 12, padding: '2px 8px', borderRadius: 999 },
   chipSube: { background: 'rgba(34,197,94,0.15)', color: '#22c55e' },
   chipBaja: { background: 'rgba(106,140,204,0.15)', color: 'var(--muted)' },
   chipEstable: { border: '1px solid var(--border)', color: 'var(--muted)' },
-  chipNuevo: { background: 'rgba(245,200,0,0.15)', color: 'var(--accent)' },
+  chipNuevo: { background: 'rgba(245,200,0,0.15)', color:'var(--accent-text)' },
   revisar: { fontSize: 11, color: '#f59e0b', marginTop: 2, fontWeight: 600 },
   recBarra: { width: 90, height: 8, background: 'var(--surface2)', borderRadius: 4, overflow: 'hidden', marginLeft: 'auto' },
   recBarraFill: { height: '100%', borderRadius: 4 },

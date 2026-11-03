@@ -299,7 +299,7 @@ function EditorHorarios({ usuarios, empleadas, cargando, error, onGuardar, onCan
 
 const S = {
   page: { flex: 1, overflowY: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 720, width: '100%', margin: '0 auto' },
-  titulo: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 26, color: 'var(--accent)', letterSpacing: 1.5, textTransform: 'uppercase' },
+  titulo: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 26, color:'var(--accent-text)', letterSpacing: 1.5, textTransform: 'uppercase' },
   filaTitulo: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 },
   fila: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' },
   card: { background: 'var(--surface)', border: '1.5px solid var(--border)', borderRadius: 14, padding: 14, display: 'flex', flexDirection: 'column', gap: 10 },
@@ -329,7 +329,7 @@ const S = {
   cambioBox: { display: 'flex', flexDirection: 'column', gap: 10, padding: 12, background: 'var(--surface2)', borderRadius: 10 },
   opciones: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 },
   opcion: { padding: '12px 10px', background: 'var(--surface2)', border: '1.5px solid var(--border)', borderRadius: 10, color: 'var(--text)', fontFamily: 'Barlow, sans-serif', fontSize: 14, cursor: 'pointer' },
-  opcionActiva: { borderColor: 'var(--accent)', color: 'var(--accent)' },
+  opcionActiva: { borderColor: 'var(--accent)', color:'var(--accent-text)' },
   gridDias: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(92px, 1fr))', gap: 8 },
   labelDia: { display: 'flex', flexDirection: 'column', gap: 3, fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 13, color: 'var(--muted)' },
   inputDia: { padding: '9px 8px', background: 'var(--surface2)', border: '1.5px solid var(--border)', borderRadius: 8, color: 'var(--text)', fontFamily: 'Barlow, sans-serif', fontSize: 14, width: '100%' },

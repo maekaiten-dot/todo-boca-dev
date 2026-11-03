@@ -243,7 +243,7 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
   const thOrden = col => {
     const c = COLUMNAS.find(x => x.id === col), activa = orden.col === col
     return (
-      <th style={{ ...S.th, ...S.thOrden, ...(activa ? { color: 'var(--accent)' } : {}) }} onClick={() => ordenarPor(col)} title="Tocá para ordenar" aria-sort={activa ? (orden.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+      <th style={{ ...S.th, ...S.thOrden, ...(activa ? { color:'var(--accent-text)' } : {}) }} onClick={() => ordenarPor(col)} title="Tocá para ordenar" aria-sort={activa ? (orden.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
         {c.label}<span style={{ marginLeft: 4, opacity: activa ? 1 : 0.3 }}>{activa ? (orden.dir === 'asc' ? '▲' : '▼') : '↕'}</span>
       </th>
     )
@@ -352,7 +352,7 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
         <div style={S.headerTitle}>PAGOS</div>
         <div style={{display:'flex', gap:8}}>
           <button style={S.refreshBtn} onClick={cargar}>↻</button>
-          <button style={{...S.newBtn, background:'none', border:'1.5px solid var(--accent)', color:'var(--accent)'}} onClick={() => setEscaneando(true)}>📷 Escanear factura</button>
+          <button style={{...S.newBtn, background:'none', border:'1.5px solid var(--accent)', color:'var(--accent-text)'}} onClick={() => setEscaneando(true)}>📷 Escanear factura</button>
           <button style={S.newBtn} onClick={abrirNuevo}>+ Nuevo</button>
         </div>
       </div>
@@ -507,7 +507,7 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
                     <td style={S.td}>{p.fechaPago || <span style={{color:'var(--muted)'}}>—</span>}</td>
                     <td style={{...S.td, textAlign:'center'}}>{p.cantidad || '—'}</td>
                     <td style={S.td}>${(p.costoTotal||0).toLocaleString('es-AR')}</td>
-                    <td style={{...S.td, fontWeight:700, color:'var(--accent)'}}>${(p.montoPagado||0).toLocaleString('es-AR')}</td>
+                    <td style={{...S.td, fontWeight:700, color:'var(--accent-text)'}}>${(p.montoPagado||0).toLocaleString('es-AR')}</td>
                     <td style={{...S.td, color:'var(--muted)'}}>{p.proveedor}</td>
                     <td style={{...S.td, color:'var(--muted)'}}>{p.empleado}</td>
                     <td style={{...S.td, color:'var(--muted)', whiteSpace:'nowrap', fontSize:12}} title={p.modificado ? `Modificado ${p.modificado}` : 'Fecha de carga (según el ID)'}>
@@ -654,7 +654,7 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
               {form.tipo === 'MERCADERÍA' && costoTotal > 0 && (
                 <div style={S.costoTotalWrap}>
                   <span style={{fontFamily:'Barlow Condensed, sans-serif', fontSize:14, color:'var(--muted)'}}>COSTO TOTAL</span>
-                  <span style={{fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:22, color:'var(--accent)'}}>
+                  <span style={{fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:22, color:'var(--accent-text)'}}>
                     ${costoTotal.toLocaleString('es-AR')}
                   </span>
                 </div>
@@ -779,7 +779,7 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
             <div style={S.modalFooter}>
               <button style={S.cancelBtn} onClick={() => setModalAbierto(false)} disabled={saving}>Cancelar</button>
               {!editando && form.tipo === 'MERCADERÍA' && (
-                <button style={{...S.cancelBtn, color:'var(--accent)', borderColor:'var(--accent)', opacity: saving ? 0.6 : 1}} onClick={() => guardar(true)} disabled={saving} title="Guarda y deja listo para otro producto de la misma compra">
+                <button style={{...S.cancelBtn, color:'var(--accent-text)', borderColor:'var(--accent)', opacity: saving ? 0.6 : 1}} onClick={() => guardar(true)} disabled={saving} title="Guarda y deja listo para otro producto de la misma compra">
                   Guardar y sumar otro
                 </button>
               )}
@@ -797,7 +797,7 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
           <div style={S.confirmBox} onClick={e => e.stopPropagation()}>
             <div style={S.confirmTitle}>¿Anular pago?</div>
             <div style={S.confirmSub}>
-              <strong style={{color:'var(--accent)'}}>{confirmAnular.idPago}</strong><br/>
+              <strong style={{color:'var(--accent-text)'}}>{confirmAnular.idPago}</strong><br/>
               {confirmAnular.articuloNombre || confirmAnular.descripcion}
             </div>
             <div style={{display:'flex', gap:10, marginTop:20}}>
@@ -829,12 +829,12 @@ const S = {
   toastSuccess: { background:'#22c55e', color:'#000' },
   toastError: { background:'#ef4444', color:'#fff' },
   header: { display:'flex', alignItems:'center', justifyContent:'space-between', padding:'16px 20px 12px', borderBottom:'2px solid var(--accent)', flexShrink:0 },
-  headerTitle: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:28, color:'var(--accent)', textTransform:'uppercase', letterSpacing:2 },
+  headerTitle: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:28, color:'var(--accent-text)', textTransform:'uppercase', letterSpacing:2 },
   refreshBtn: { background:'var(--surface)', border:'1.5px solid var(--border)', borderRadius:10, color:'var(--text)', fontSize:22, width:40, height:40, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' },
   newBtn: { background:'var(--accent)', border:'none', borderRadius:10, color:'#000', fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:15, padding:'0 16px', height:40, cursor:'pointer', letterSpacing:1 },
   resumenRow: { display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, padding:'14px 20px 10px' },
   resumenCard: { background:'var(--surface)', borderRadius:12, padding:'12px 16px', border:'1.5px solid var(--border)' },
-  resumenValue: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:28, color:'var(--accent)' },
+  resumenValue: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:28, color:'var(--accent-text)' },
   resumenLabel: { fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)', marginTop:2 },
   referencias: { margin:'0 20px 10px', background:'var(--surface)', borderRadius:10, border:'1.5px solid var(--border)', padding:'10px 14px' },
   refTitle: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:11, color:'var(--muted)', letterSpacing:1, marginBottom:8 },
@@ -849,7 +849,7 @@ const S = {
   clearBtn: { background:'none', border:'none', color:'var(--muted)', cursor:'pointer', fontSize:14 },
   filtroTabs: { display:'flex', gap:4 },
   filtroTab: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:13, padding:'7px 12px', background:'var(--surface)', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--muted)', cursor:'pointer' },
-  filtroTabActive: { background:'rgba(245,200,0,0.12)', border:'1.5px solid var(--accent)', color:'var(--accent)' },
+  filtroTabActive: { background:'rgba(245,200,0,0.12)', border:'1.5px solid var(--accent)', color:'var(--accent-text)' },
   tableWrap: { flex:1, overflowX:'auto', padding:'0 20px 20px' },
   table: { width:'100%', borderCollapse:'collapse' },
   th: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:12, color:'var(--muted)', letterSpacing:1, textTransform:'uppercase', padding:'8px 10px', borderBottom:'2px solid var(--border)', textAlign:'left', background:'var(--surface)', position:'sticky', top:0, zIndex:1, whiteSpace:'nowrap' },
@@ -857,9 +857,9 @@ const S = {
   artCostoBox: { display:'flex', flexDirection:'column', gap:8, padding:'10px 12px', border:'1.5px dashed var(--border)', borderRadius:8 },
   checkLabel: { display:'flex', alignItems:'center', gap:8, fontFamily:'Barlow, sans-serif', fontSize:14, color:'var(--text)', cursor:'pointer' },
   precioLinea: { display:'flex', alignItems:'center', justifyContent:'space-between', gap:10, flexWrap:'wrap', fontFamily:'Barlow, sans-serif', fontSize:14, color:'var(--muted)' },
-  linkBtn: { background:'none', border:'none', padding:0, color:'var(--accent)', fontFamily:'Barlow, sans-serif', fontSize:13, cursor:'pointer', textDecoration:'underline' },
+  linkBtn: { background:'none', border:'none', padding:0, color:'var(--accent-text)', fontFamily:'Barlow, sans-serif', fontSize:13, cursor:'pointer', textDecoration:'underline' },
   vistaRow: { display:'flex', gap:6, padding:'0 20px 8px' },
-  compraLink: { background:'none', border:'none', padding:0, color:'var(--accent)', fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:14, cursor:'pointer', textDecoration:'underline', textUnderlineOffset:2 },
+  compraLink: { background:'none', border:'none', padding:0, color:'var(--accent-text)', fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:14, cursor:'pointer', textDecoration:'underline', textUnderlineOffset:2 },
   pagarBtn: { background:'var(--accent)', border:'none', borderRadius:8, color:'#000', fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:14, padding:'6px 14px', cursor:'pointer' },
   compraOpciones: { display:'flex', flexDirection:'column', gap:6 },
   compraOpcion: { textAlign:'left', background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--text)', fontFamily:'Barlow, sans-serif', fontSize:14, padding:'9px 12px', cursor:'pointer' },
@@ -877,24 +877,24 @@ const S = {
   overlay: { position:'fixed', inset:0, background:'rgba(0,0,10,0.85)', display:'flex', alignItems:'flex-end', justifyContent:'center', zIndex:300, backdropFilter:'blur(6px)' },
   modal: { background:'var(--surface)', borderRadius:'20px 20px 0 0', width:'100%', maxWidth:580, maxHeight:'90vh', display:'flex', flexDirection:'column', overflow:'hidden' },
   modalHeader: { display:'flex', justifyContent:'space-between', alignItems:'center', padding:'20px 24px 14px', borderBottom:'1px solid var(--border)', flexShrink:0 },
-  modalTitle: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:22, color:'var(--accent)', letterSpacing:1 },
+  modalTitle: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:22, color:'var(--accent-text)', letterSpacing:1 },
   closeBtn: { background:'none', border:'none', color:'var(--muted)', fontSize:20, cursor:'pointer' },
   formScroll: { flex:1, overflowY:'auto', padding:'16px 24px', display:'flex', flexDirection:'column', gap:14 },
   fieldGroup: { display:'flex', flexDirection:'column', gap:6 },
   fieldRow: { display:'grid', gridTemplateColumns:'minmax(0,1fr) minmax(0,1fr)', gap:12 },
-  label: { fontFamily:'Barlow Condensed, sans-serif', fontSize:13, color:'var(--accent)', letterSpacing:1, fontWeight:700 },
+  label: { fontFamily:'Barlow Condensed, sans-serif', fontSize:13, color:'var(--accent-text)', letterSpacing:1, fontWeight:700 },
   input: { background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--text)', fontFamily:'Barlow, sans-serif', fontSize:16, padding:'10px 12px', outline:'none', minWidth:0, width:'100%', boxSizing:'border-box' },
   inputDate: { background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--text)', fontFamily:'Barlow, sans-serif', fontSize:16, padding:'10px 12px', outline:'none', colorScheme:'dark' },
   tipoBtns: { display:'flex', gap:8 },
   tipoBtn: { flex:1, padding:'10px', background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--muted)', fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:15, cursor:'pointer', letterSpacing:0.5 },
-  tipoBtnActive: { background:'rgba(245,200,0,0.12)', border:'1.5px solid var(--accent)', color:'var(--accent)' },
+  tipoBtnActive: { background:'rgba(245,200,0,0.12)', border:'1.5px solid var(--accent)', color:'var(--accent-text)' },
   hoyBtn: { background:'none', border:'none', color:'var(--muted)', fontFamily:'Barlow Condensed, sans-serif', fontSize:12, cursor:'pointer', textAlign:'left', padding:'2px 0', textDecoration:'underline' },
   artSeleccionado: { display:'flex', alignItems:'center', gap:10, background:'var(--surface2)', border:'1.5px solid var(--accent)', borderRadius:8, padding:'10px 12px' },
   artFoto: { width:40, height:40, objectFit:'cover', borderRadius:6, flexShrink:0 },
   cambiarBtn: { background:'none', border:'1px solid var(--border)', borderRadius:6, color:'var(--muted)', fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:12, padding:'4px 10px', cursor:'pointer' },
   artSearchWrap: { display:'flex', alignItems:'stretch', background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, overflow:'hidden' },
   artSearchInput: { flex:1, background:'none', border:'none', outline:'none', color:'var(--text)', fontFamily:'Barlow, sans-serif', fontSize:16, padding:'10px 12px' },
-  artScanBtn: { background:'none', border:'none', borderLeft:'1.5px solid var(--border)', color:'var(--accent)', cursor:'pointer', padding:'0 14px', display:'flex', alignItems:'center', justifyContent:'center' },
+  artScanBtn: { background:'none', border:'none', borderLeft:'1.5px solid var(--border)', color:'var(--accent-text)', cursor:'pointer', padding:'0 14px', display:'flex', alignItems:'center', justifyContent:'center' },
   artDropdown: { position:'absolute', top:'100%', left:0, right:0, background:'var(--surface)', border:'1.5px solid var(--border)', borderRadius:8, zIndex:10, maxHeight:280, overflowY:'auto', boxShadow:'0 8px 24px rgba(0,0,0,0.4)' },
   artDropdownItem: { width:'100%', display:'flex', alignItems:'center', gap:10, padding:'10px 14px', background:'none', border:'none', borderBottom:'1px solid var(--border)', cursor:'pointer', textAlign:'left', color:'var(--text)' },
   artDropdownFoto: { width:36, height:36, objectFit:'cover', borderRadius:5, flexShrink:0 },
@@ -904,7 +904,7 @@ const S = {
   costoTotalWrap: { display:'flex', justifyContent:'space-between', alignItems:'center', background:'var(--surface2)', borderRadius:8, padding:'10px 14px', border:'1.5px solid var(--border)' },
   empBtns: { display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:6 },
   empBtn: { padding:'8px 6px', background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, cursor:'pointer', color:'var(--muted)', fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:14, letterSpacing:0.5, textAlign:'center' },
-  empBtnActive: { background:'rgba(245,200,0,0.12)', border:'1.5px solid var(--accent)', color:'var(--accent)' },
+  empBtnActive: { background:'rgba(245,200,0,0.12)', border:'1.5px solid var(--accent)', color:'var(--accent-text)' },
   modalFooter: { display:'flex', gap:10, padding:'14px 24px', borderTop:'1px solid var(--border)', flexShrink:0 },
   cancelBtn: { flex:1, padding:'13px', background:'none', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--muted)', fontFamily:'Barlow, sans-serif', fontSize:15, cursor:'pointer' },
   saveBtn: { flex:2, padding:'13px', background:'var(--accent)', border:'none', borderRadius:8, color:'#000', fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:17, cursor:'pointer', letterSpacing:1 },

@@ -171,6 +171,6 @@ const styles = {
     fontFamily: 'Barlow Condensed, sans-serif',
     fontWeight: 700,
     fontSize: 16,
-    color: 'var(--accent)',
+    color:'var(--accent-text)',
   },
 }

@@ -68,7 +68,8 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
         setLoadingStock(false)
       }).catch(() => setLoadingStock(false))
     } catch (e) {
-      setError('No se pudo cargar los artículos.')
+      console.error(e)
+      setError(`No se pudo cargar los artículos. (${e?.message || 'error desconocido'})`)
     } finally {
       setLoading(false)
     }

@@ -242,7 +242,7 @@ function armarAlias(rows) {
   return out
 }
 async function asegurarAlias() {
-  if (!_aliasPromesa) _aliasPromesa = sheetsGet('ARTICULOS!A1:N').then(d => armarAlias(d.values || [])).catch(e => { console.warn('No se pudieron leer los unificados', e); _aliasPromesa = null; return {} })
+  if (!_aliasPromesa) _aliasPromesa = sheetsGet('ARTICULOS').then(d => armarAlias(d.values || [])).catch(e => { console.warn('No se pudieron leer los unificados', e); _aliasPromesa = null; return {} })
   return _aliasPromesa
 }
 export const getAlias = () => _alias
@@ -257,7 +257,7 @@ export function idCanonico(id) {
 export const unificadosEn = id => Object.keys(_alias).filter(k => k !== id && idCanonico(k) === id)
 
 export async function getArticulos() {
-  const data = await sheetsGet('ARTICULOS!A1:Z')
+  const data = await sheetsGet('ARTICULOS')
   const rows = data.values || []
   if (rows.length === 0) return []
   const headers = rows[0].map(h => h?.toString().toUpperCase().trim() ?? '')
@@ -1235,10 +1235,13 @@ async function historicoSeguro(fn, id, empleado) {
 export const esCostoEstimado = origen => /^costo estimado/i.test(String(origen || '').trim())
 
 export async function getArticulosAdmin() {
-  const data = await sheetsGet('ARTICULOS!A1:P')
+  // Se lee la hoja entera (sin poner hasta qué columna): si se pide una columna que la planilla no
+  // tiene, Google da error. La planilla de Mitad de cuadra tiene menos columnas que la de la Esquina.
+  const data = await sheetsGet('ARTICULOS')
   const rows = data.values || []
   if (rows.length===0) return []
   armarAlias(rows)
+  const iOrigen = (rows[0] || []).findIndex(h => String(h || '').trim().toUpperCase() === 'ORIGEN DEL COSTO')
   return rows.slice(1).map((r, idx) => ({
     rowNum:idx+2, id:r[0]||'', nombre:r[1]||'', stockInicial:r[2]||'0', info:r[3]||'',
     disponibilidad:r[4]||'ACTIVO', foto:r[5]||'', precioUnitario:r[6]||'0',
@@ -1247,7 +1250,7 @@ export async function getArticulosAdmin() {
     unificadoEn:String(r[12]||'').trim(), unificadoEl:String(r[13]||'').replace(/^'/, '').trim(),
     tipoManual:String(r[14]||'').trim(),
     // P: ORIGEN DEL COSTO ("Costo estimado 31/10/2026 (similares …)" si lo puso el script de costos)
-    origenCosto:String(r[15]||'').trim(),
+    origenCosto: iOrigen >= 0 ? String(r[iOrigen]||'').trim() : '',
   })).filter(r => r.id)
 }
 
@@ -1392,9 +1395,10 @@ export async function editarArticulo(rowNum, art, empleado = '') {
   // Valores que había en la planilla justo antes del cambio (para el histórico)
   let anterior = null
   try {
-    const prev = await sheetsGet(`ARTICULOS!A${rowNum}:P${rowNum}`)
+    const [prev, enc] = await Promise.all([sheetsGet(`ARTICULOS!${rowNum}:${rowNum}`), sheetsGet('ARTICULOS!1:1')])
     const r = (prev.values || [])[0] || []
-    if (r[0] === art.id) anterior = { precio: r[6], costo: r[7], origenCosto: String(r[15] || '') }
+    const iOrigen = ((enc.values || [])[0] || []).findIndex(h => String(h || '').trim().toUpperCase() === 'ORIGEN DEL COSTO')
+    if (r[0] === art.id) anterior = { precio: r[6], costo: r[7], origenCosto: iOrigen === 15 ? String(r[15] || '') : '' }
   } catch (e) { console.error(e) }
   const row = filaArticulo(art)
   if (art.grupo) await asegurarColumnaGrupo()

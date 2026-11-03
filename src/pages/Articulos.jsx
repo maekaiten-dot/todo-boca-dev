@@ -4,7 +4,7 @@ import { parseMonto as numArs } from '../lib/montos.js'
 import ModalArticulo from '../components/ModalArticulo.jsx'
 import DesgloseStock from '../components/DesgloseStock.jsx'
 import { GRUPOS_INICIALES } from '../lib/gruposIniciales.js'
-import { cargarGruposIniciales, getArticulosAdmin, generarIdArticulo, agregarArticulo, editarArticulo, calcularStockTodos } from '../api/sheets.js'
+import { cargarGruposIniciales, getArticulosAdmin, generarIdArticulo, agregarArticulo, editarArticulo, calcularStockTodos, esCostoEstimado } from '../api/sheets.js'
 
 const CLOUDINARY_CLOUD = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
 const CLOUDINARY_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET
@@ -141,6 +141,11 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
   // Sin costo = costo vacío o en $0 (solo se marca para administradores)
   const sinCosto = a => numArs(a.costoUnitario) <= 0
   const [soloSinCosto, setSoloSinCosto] = useState(false)
+  // Costo estimado = el costo lo puso el script de costos (columna P de ARTICULOS)
+  const [soloEstimado, setSoloEstimado] = useState(false)
+  const enFiltroDisp = a => filtroDisp === 'TODOS' || (filtroDisp === 'ACTIVO') === (a.disponibilidad?.toUpperCase() === 'ACTIVO')
+  const cantEstimados = articulos.filter(a => esCostoEstimado(a.origenCosto) && enFiltroDisp(a)).length
+  const hayEstimados = articulos.some(a => esCostoEstimado(a.origenCosto))
 
   const nombreDe = id => articulos.find(a => a.id === id)?.nombre || ''
   const normalizr = str => str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -166,7 +171,7 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
   const thOrden = col => {
     const activa = orden.col === col
     return (
-      <th style={{ ...S.th, cursor: 'pointer', userSelect: 'none', ...(activa ? { color: 'var(--accent)' } : {}) }} onClick={() => ordenarPor(col)} title="Tocá para ordenar" aria-sort={activa ? (orden.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+      <th style={{ ...S.th, cursor: 'pointer', userSelect: 'none', ...(activa ? { color:'var(--accent-text)' } : {}) }} onClick={() => ordenarPor(col)} title="Tocá para ordenar" aria-sort={activa ? (orden.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
         {COLS[col].label}<span style={{ marginLeft: 4, opacity: activa ? 1 : 0.3 }}>{activa ? (orden.dir === 'asc' ? '▲' : '▼') : '↕'}</span>
       </th>
     )
@@ -180,6 +185,7 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
       return true
     })
     .filter(a => !(esAdmin && soloSinCosto) || sinCosto(a))
+    .filter(a => !(esAdmin && soloEstimado) || esCostoEstimado(a.origenCosto))
     .filter(a => {
       if (!busqueda.trim()) return true
       const q = normalizr(busqueda)
@@ -225,8 +231,14 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
           ))}
         </div>}
         {esAdmin && (
-          <button style={{...S.dispTab, ...S.sinCostoTab, ...(soloSinCosto ? S.sinCostoTabActivo : {})}} onClick={() => setSoloSinCosto(v => !v)} aria-pressed={soloSinCosto}>
-            SIN COSTO ({articulos.filter(a => sinCosto(a) && (filtroDisp === 'TODOS' || (filtroDisp === 'ACTIVO') === (a.disponibilidad?.toUpperCase() === 'ACTIVO'))).length})
+          <button style={{...S.dispTab, ...S.sinCostoTab, ...(soloSinCosto ? S.sinCostoTabActivo : {})}} onClick={() => { setSoloSinCosto(v => !v); setSoloEstimado(false) }} aria-pressed={soloSinCosto}>
+            SIN COSTO ({articulos.filter(a => sinCosto(a) && enFiltroDisp(a)).length})
+          </button>
+        )}
+        {esAdmin && hayEstimados && (
+          <button style={{...S.dispTab, ...S.estimadoTab, ...(soloEstimado ? S.estimadoTabActivo : {})}} onClick={() => { setSoloEstimado(v => !v); setSoloSinCosto(false) }} aria-pressed={soloEstimado}
+            title="Artículos cuyo costo lo calculó el script de costos estimados. Al cargarles el costo real, salen de esta lista.">
+            COSTO ESTIMADO ({cantEstimados})
           </button>
         )}
       </div>
@@ -281,7 +293,10 @@ export default function Articulos({ empleado = '', esAdmin = false }) {
                     {esAdmin && sinCosto(art) && <div style={S.avisoSinCosto}>⚠ Sin costo unitario cargado</div>}
                   </td>
                   <td style={S.td}>${numArs(art.precioUnitario).toLocaleString('es-AR')}</td>
-                  {esAdmin && <td style={{...S.td, color:'var(--muted)'}}>${numArs(art.costoUnitario).toLocaleString('es-AR')}</td>}
+                  {esAdmin && <td style={{...S.td, color:'var(--muted)'}} title={art.origenCosto || undefined}>
+                    ${numArs(art.costoUnitario).toLocaleString('es-AR')}
+                    {esCostoEstimado(art.origenCosto) && <div style={S.estimadoTag}>estimado</div>}
+                  </td>}
                   <td style={{...S.td, textAlign:'center'}}>
                     {art.unificadoEn ? <span style={{color:'var(--muted)', fontSize:12}} title="Su stock se suma al artículo en el que se unificó">→ {art.unificadoEn}</span> : loadingStock
                       ? <span style={{color:'var(--muted)', fontSize:12}}>...</span>
@@ -341,7 +356,7 @@ const S = {
   toastSuccess: { background:'#22c55e', color:'#000' },
   toastError: { background:'#ef4444', color:'#fff' },
   header: { display:'flex', alignItems:'center', justifyContent:'space-between', padding:'16px 20px 12px', borderBottom:'2px solid var(--accent)', flexShrink:0 },
-  headerTitle: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:28, color:'var(--accent)', textTransform:'uppercase', letterSpacing:2 },
+  headerTitle: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:28, color:'var(--accent-text)', textTransform:'uppercase', letterSpacing:2 },
   refreshBtn: { background:'var(--surface)', border:'1.5px solid var(--border)', borderRadius:10, color:'var(--text)', fontSize:22, width:40, height:40, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' },
   newBtn: { background:'var(--accent)', border:'none', borderRadius:10, color:'#000', fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:16, padding:'0 20px', height:40, cursor:'pointer', letterSpacing:1 },
   filtrosRow: { display:'flex', alignItems:'center', gap:10, padding:'10px 20px 6px', flexWrap:'wrap' },
@@ -351,7 +366,7 @@ const S = {
   clearBtn: { background:'none', border:'none', color:'var(--muted)', cursor:'pointer', fontSize:14 },
   dispTabs: { display:'flex', gap:4 },
   dispTab: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:13, padding:'7px 14px', background:'var(--surface)', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--muted)', cursor:'pointer', letterSpacing:1 },
-  dispTabActive: { background:'rgba(245,200,0,0.12)', border:'1.5px solid var(--accent)', color:'var(--accent)' },
+  dispTabActive: { background:'rgba(245,200,0,0.12)', border:'1.5px solid var(--accent)', color:'var(--accent-text)' },
   conteo: { fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)', padding:'2px 20px 6px' },
   tableWrap: { flex:1, overflowX:'auto', padding:'0 20px 20px' },
   table: { width:'100%', borderCollapse:'collapse' },
@@ -371,17 +386,17 @@ const S = {
   overlay: { position:'fixed', inset:0, background:'rgba(0,0,10,0.85)', display:'flex', alignItems:'flex-end', justifyContent:'center', zIndex:300, backdropFilter:'blur(6px)' },
   modal: { background:'var(--surface)', borderRadius:'20px 20px 0 0', width:'100%', maxWidth:600, maxHeight:'90vh', display:'flex', flexDirection:'column', overflow:'hidden' },
   modalHeader: { display:'flex', justifyContent:'space-between', alignItems:'center', padding:'20px 24px 14px', borderBottom:'1px solid var(--border)', flexShrink:0 },
-  modalTitle: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:22, color:'var(--accent)', letterSpacing:1 },
+  modalTitle: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:22, color:'var(--accent-text)', letterSpacing:1 },
   closeBtn: { background:'none', border:'none', color:'var(--muted)', fontSize:20, cursor:'pointer' },
   formScroll: { flex:1, overflowY:'auto', padding:'16px 24px', display:'flex', flexDirection:'column', gap:14 },
   fieldGroup: { display:'flex', flexDirection:'column', gap:6 },
   fieldRow: { display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 },
-  label: { fontFamily:'Barlow Condensed, sans-serif', fontSize:13, color:'var(--accent)', letterSpacing:1, fontWeight:700 },
+  label: { fontFamily:'Barlow Condensed, sans-serif', fontSize:13, color:'var(--accent-text)', letterSpacing:1, fontWeight:700 },
   input: { background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--text)', fontFamily:'Barlow, sans-serif', fontSize:16, padding:'10px 12px', outline:'none' },
   textarea: { background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--text)', fontFamily:'Barlow, sans-serif', fontSize:15, padding:'10px 12px', outline:'none', resize:'vertical' },
   dispBtns: { display:'flex', gap:8 },
   dispBtnOpt: { flex:1, padding:'10px', background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--muted)', fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:15, cursor:'pointer', letterSpacing:1 },
-  dispBtnOptActive: { background:'rgba(245,200,0,0.12)', border:'1.5px solid var(--accent)', color:'var(--accent)' },
+  dispBtnOptActive: { background:'rgba(245,200,0,0.12)', border:'1.5px solid var(--accent)', color:'var(--accent-text)' },
   fotoPreviewWrap: { width:'100%', height:160, borderRadius:10, overflow:'hidden', background:'var(--surface2)', border:'1.5px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'center' },
   fotoPreviewImg: { width:'100%', height:'100%', objectFit:'cover' },
   fotoPreviewVacio: { display:'flex', alignItems:'center', justifyContent:'center', width:'100%', height:'100%' },
@@ -394,4 +409,7 @@ const S = {
   avisoSinCosto: { fontFamily:'Barlow, sans-serif', fontSize:12, fontWeight:600, color:'#f59e0b', marginTop:3 },
   sinCostoTab: { borderColor:'rgba(245,158,11,0.5)', color:'#f59e0b' },
   sinCostoTabActivo: { background:'rgba(245,158,11,0.15)', borderColor:'#f59e0b', color:'#f59e0b' },
+  estimadoTab: { borderColor:'rgba(96,165,250,0.5)', color:'#60a5fa' },
+  estimadoTabActivo: { background:'rgba(96,165,250,0.15)', borderColor:'#60a5fa', color:'#60a5fa' },
+  estimadoTag: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:11, letterSpacing:0.5, color:'#60a5fa', textTransform:'uppercase' },
 }

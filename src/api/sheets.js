@@ -1,6 +1,9 @@
 // src/api/sheets.js
 import { parseMonto } from '../lib/montos.js'
 import { calcularPromosConfig, fijaPausada } from '../lib/promos.js'
+import { LOCAL } from '../config/local.js'
+// Promos fijas por código (imanes, alfajores, llaveros/remeras/chombas, 2x1 XXXL): solo en los locales que las usan
+const PROMOS_FIJAS = LOCAL.promosFijas !== false
 const SHEET_ID = import.meta.env.VITE_SHEET_ID
 const CLIENT_EMAIL = import.meta.env.VITE_GOOGLE_CLIENT_EMAIL
 const PRIVATE_KEY = import.meta.env.VITE_GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n')
@@ -119,7 +122,7 @@ const ALFAJORES_PROMO = new Set(['TB01118','TB01117','TB01098'])
 const ALFAJORES_PRECIO_GRUPO = 13000
 const ALFAJORES_CANT_GRUPO = 6
 
-function _promosActivas() { return Date.now() < PROMO_EXPIRY.getTime() }
+function _promosActivas() { return PROMOS_FIJAS && Date.now() < PROMO_EXPIRY.getTime() }
 function _precioLlaveroPromo(cantTotal) {
   if (cantTotal >= 6) return 4667
   if (cantTotal >= 3) return 5000
@@ -127,7 +130,7 @@ function _precioLlaveroPromo(cantTotal) {
 }
 
 function calcularDescuentosImanesItems(items, pausada = false) {
-  if (pausada) items = items.map(i => ({ ...i, articulo: '~', id: '~' }))
+  if (pausada || !PROMOS_FIJAS) items = items.map(i => ({ ...i, articulo: '~', id: '~' }))
   const itemsA = items.filter(i => IMANES_A.has(i.articulo || i.id))
   const itemsB = items.filter(i => IMANES_B.has(i.articulo || i.id))
   const cantA = itemsA.reduce((s, i) => s + i.cantidad, 0)
@@ -179,7 +182,7 @@ function calcularDescuentoPromoItem(item, items) {
 // front-end (NuevaVenta.jsx) para que lo cobrado coincida con lo mostrado en pantalla.
 function calcularDescuentoAlfajorItem(item, items, pausada = false) {
   const sku = item.articulo || item.id
-  if (pausada || !ALFAJORES_PROMO.has(sku)) return 0
+  if (pausada || !PROMOS_FIJAS || !ALFAJORES_PROMO.has(sku)) return 0
   const itemsAlf = items.filter(i => ALFAJORES_PROMO.has(i.articulo || i.id))
   const cantTotal = itemsAlf.reduce((s, i) => s + i.cantidad, 0)
   const grupos = Math.floor(cantTotal / ALFAJORES_CANT_GRUPO)
@@ -276,6 +279,8 @@ export async function getArticulos() {
   const iStockA = col('STOCK ACTUAL','ACTUAL')
   const iGrupo = headers.findIndex(h => h === 'GRUPO')
   const iTipo = headers.findIndex(h => h === 'TIPO')
+  // CATEGORÍA: botones de categoría de la pantalla simple de Vender (opcional)
+  const iCat = headers.findIndex(h => h === 'CATEGORIA' || h === 'CATEGORÍA')
   armarAlias(rows)
   const idx = (found, fallback) => found >= 0 ? found : fallback
   const parseNum = v => parseMonto(v)
@@ -290,6 +295,7 @@ export async function getArticulos() {
       stockActual: parseNum(r[idx(iStockA,10)]),
       grupo: String(r[idx(iGrupo,11)] || '').trim(),
       tipoManual: String(r[idx(iTipo,14)] || '').trim(),
+      categoria: iCat >= 0 ? String(r[iCat] || '').trim() : '',
     }))
     .filter(a => { const d = a.disponibilidad?.toString().toUpperCase(); return !d||d==='ACTIVO'||d==='SI'||d==='TRUE'||d==='1' })
 }
@@ -1226,8 +1232,10 @@ async function historicoSeguro(fn, id, empleado) {
   }
 }
 
+export const esCostoEstimado = origen => /^costo estimado/i.test(String(origen || '').trim())
+
 export async function getArticulosAdmin() {
-  const data = await sheetsGet('ARTICULOS!A1:O')
+  const data = await sheetsGet('ARTICULOS!A1:P')
   const rows = data.values || []
   if (rows.length===0) return []
   armarAlias(rows)
@@ -1238,6 +1246,8 @@ export async function getArticulosAdmin() {
     grupo:String(r[11]||'').trim(),
     unificadoEn:String(r[12]||'').trim(), unificadoEl:String(r[13]||'').replace(/^'/, '').trim(),
     tipoManual:String(r[14]||'').trim(),
+    // P: ORIGEN DEL COSTO ("Costo estimado 31/10/2026 (similares …)" si lo puso el script de costos)
+    origenCosto:String(r[15]||'').trim(),
   })).filter(r => r.id)
 }
 
@@ -1382,14 +1392,19 @@ export async function editarArticulo(rowNum, art, empleado = '') {
   // Valores que había en la planilla justo antes del cambio (para el histórico)
   let anterior = null
   try {
-    const prev = await sheetsGet(`ARTICULOS!A${rowNum}:H${rowNum}`)
+    const prev = await sheetsGet(`ARTICULOS!A${rowNum}:P${rowNum}`)
     const r = (prev.values || [])[0] || []
-    if (r[0] === art.id) anterior = { precio: r[6], costo: r[7] }
+    if (r[0] === art.id) anterior = { precio: r[6], costo: r[7], origenCosto: String(r[15] || '') }
   } catch (e) { console.error(e) }
   const row = filaArticulo(art)
   if (art.grupo) await asegurarColumnaGrupo()
   await sheetsUpdate(`ARTICULOS!A${rowNum}:${row.length > 11 ? 'L' : 'K'}${rowNum}`, [row])
   await guardarTipoManual(rowNum, art)
+  // Si tenía un costo estimado y se cargó otro a mano, deja de figurar como estimado
+  if (anterior && esCostoEstimado(anterior.origenCosto) && parsePrecio(anterior.costo) !== parsePrecio(art.costoUnitario)) {
+    try { await sheetsUpdate(`ARTICULOS!P${rowNum}`, [[`Costo cargado a mano ${getArgentinaDate().fecha} por ${empleado || 'Admin'}`]]) }
+    catch (e) { console.warn('No se pudo actualizar el origen del costo', e) }
+  }
   marcarArticuloVisto(art)
   await registrarLog({ accion:'ARTICULO_EDITADO', detalle:`${art.id} · ${art.nombre} · $${art.precioUnitario}`, idReferencia:art.id, empleado, resultado:'OK' })
   if (anterior) {

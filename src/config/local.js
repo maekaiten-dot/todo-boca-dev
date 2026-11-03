@@ -55,8 +55,8 @@ const LOCALES = {
     solapas: {
       Caja: ['venta', 'hoy'],
       Admin: ['venta', 'hoy', 'log', 'arts'],
-      // Menú "Más" del Admin
-      mas: ['stats', 'conteo', 'ing'],
+      // Menú "Más" del Admin (vacío = no aparece el botón "Más")
+      mas: [],
     },
     // Pantallas grandes y simples (las del prototipo)
     venderSimple: true,   // para todos los perfiles

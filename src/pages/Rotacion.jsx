@@ -94,15 +94,15 @@ function calcularRotacion(ventas, articulos, agr = null) {
 // Recupero de la última compra: para cada artículo toma su última compra (los ingresos del mismo día
 // se suman como una sola compra) y acumula lo facturado de ese artículo desde ese día. Cuando lo
 // facturado alcanza el costo total de la compra, esa es la cantidad de días que tardó en recuperarse.
-// Si todavía no llegó, estima cuánto falta al ritmo que viene vendiendo desde la compra.
-// Por grupo: la última compra es el último día en que entró cualquier modelo del grupo (se suman
-// todos los modelos que entraron ese día) y se cuentan las ventas de todos los modelos.
+// Si todavía no llegó, estima cuánto falta al ritmo que viene vendiendo desde que empezó a venderse.
+// Ahora se calcula cada compra (las ventas se reparten en orden de llegada) y la fila principal es la
+// compra que se está vendiendo; abriendo el artículo se ven todas sus compras.
+// Por grupo: se suman las compras de todos sus modelos y se cuentan las ventas de todos los modelos.
 function calcularRecupero(ventas, ingresos, articulos, hoy, agr = null) {
   const arts = Object.fromEntries(articulos.map(a => [a.id, a]))
   const claveDe = id => agr?.deArt[id] || id
   // Cada compra: los ingresos con el mismo código de COMPRA; los viejos sin código, los del mismo día.
-  // La última compra de cada artículo (o grupo) es la que tiene el ingreso más reciente; arranca el
-  // día de su primer ingreso (por si se cargó en dos días).
+  // Cada compra arranca el día de su primer ingreso (por si se cargó en dos días).
   const porArt = {}
   const horaNum = h => { const [a, b, c] = String(h || '').replace(/^'/, '').split(':').map(Number); return (a || 0) * 3600 + (b || 0) * 60 + (c || 0) }
   for (const i of ingresos) {
@@ -118,44 +118,72 @@ function calcularRecupero(ventas, ingresos, articulos, hoy, agr = null) {
     c.costo += i.costoTotal || i.cantidad * (i.costoUnitario || parseArs(arts[i.articuloId]?.costoUnitario))
     if (i.proveedor && !c.proveedor.includes(i.proveedor)) c.proveedor = c.proveedor ? `${c.proveedor}, ${i.proveedor}` : i.proveedor
   }
-  const compras = Object.fromEntries(Object.entries(porArt).map(([k, cs]) => [k, Object.values(cs).sort((a, b) => b.ultimo - a.ultimo)[0]]))
+  // Todas las compras de cada artículo (o grupo), de la más vieja a la más nueva
+  const compras = Object.fromEntries(Object.entries(porArt).map(([k, cs]) => [k, Object.values(cs).sort((a, b) => a.dia - b.dia || a.ultimo - b.ultimo)]))
   const porDia = {}
   for (const v of ventas) {
     const k = claveDe(v.articulo)
-    const c = compras[k]
-    if (!c || v.anulado) continue
+    const cs = compras[k]
+    if (!cs || v.anulado) continue
     const dia = diaDesdeFecha(v.fecha)
-    if (dia == null || dia < c.dia) continue
+    if (dia == null || dia < cs[0].dia) continue
     const m = (porDia[k] ||= {})
     const d = (m[dia] ||= { r: 0, u: 0 })
     d.r += v.precioTotalFinal || v.precioTotal || 0
     d.u += v.cantidad || 0
   }
-  // El recupero se mide solo con las unidades de esa compra: si entraron 10, cuentan las primeras 10
-  // vendidas desde ese día (lo que se venda de más viene de stock anterior o de compras sin cargar).
-  return Object.entries(compras).filter(([, c]) => c.costo > 0).map(([id, c]) => {
-    let facturado = 0, unidades = 0, factCompra = 0, uCompra = 0, diaRecupero = null, diaAgotada = null
-    for (const [dia, d] of Object.entries(porDia[id] || {}).sort((a, b) => a[0] - b[0])) {
-      facturado += d.r; unidades += d.u
-      const toma = Math.max(0, Math.min(d.u, c.cantidad - uCompra))
-      if (toma > 0 && d.u > 0) { factCompra += d.r * toma / d.u; uCompra += toma }
-      if (diaRecupero == null && factCompra >= c.costo - 0.5) diaRecupero = Number(dia)
-      if (diaAgotada == null && uCompra >= c.cantidad) diaAgotada = Number(dia)
+  // Las ventas se reparten entre las compras en orden de llegada (primero se termina la compra más
+  // vieja): si entraron 50 y después 1, las ventas van a las 50 y la de 1 espera su turno. Lo que se
+  // vende cuando no queda nada de ninguna compra (stock anterior o compras sin cargar) queda como
+  // "de más" en la última compra que había llegado.
+  const resultado = []
+  for (const [id, cs] of Object.entries(compras)) {
+    const lotes = cs.map(c => ({ ...c, factCompra: 0, uCompra: 0, excedente: 0, factExcedente: 0, diaRecupero: null, diaAgotada: null, primerVenta: null }))
+    for (const [diaTxt, d] of Object.entries(porDia[id] || {}).sort((a, b) => a[0] - b[0])) {
+      const dia = Number(diaTxt)
+      if (!(d.u > 0)) continue
+      const pu = d.r / d.u
+      let resto = d.u
+      const llegados = lotes.filter(l => l.dia <= dia)
+      for (const l of llegados) {
+        if (resto <= 0) break
+        const toma = Math.min(resto, l.cantidad - l.uCompra)
+        if (toma <= 0) continue
+        l.uCompra += toma; l.factCompra += pu * toma; resto -= toma
+        if (l.primerVenta == null) l.primerVenta = dia
+        if (l.diaRecupero == null && l.costo > 0 && l.factCompra >= l.costo - 0.5) l.diaRecupero = dia
+        if (l.diaAgotada == null && l.uCompra >= l.cantidad) l.diaAgotada = dia
+      }
+      if (resto > 0 && llegados.length) { const u = llegados[llegados.length - 1]; u.excedente += resto; u.factExcedente += pu * resto }
     }
-    const transcurridos = hoy - c.dia
-    const recuperado = diaRecupero != null
-    const agotadaSinCubrir = !recuperado && diaAgotada != null // vendió todas las unidades y no llegó al costo
-    const ritmo = factCompra / Math.max(1, transcurridos + 1) // $ por día desde la compra
-    const faltan = recuperado || agotadaSinCubrir ? (recuperado ? 0 : null) : (ritmo > 0 ? Math.ceil((c.costo - factCompra) / ritmo) : null)
-    return {
-      id, compra: c.compra, nombre: agr?.grupos[id]?.nombre || arts[id]?.nombre || id, esGrupo: !!agr?.grupos[id], nModelos: agr?.grupos[id]?.modelos.length || 1, compraDia: c.dia, compraCant: c.cantidad, compraCosto: c.costo, proveedor: c.proveedor,
-      facturado, unidades, factCompra, uCompra, pct: Math.min(1, factCompra / c.costo), veces: facturado / c.costo, recuperado, agotadaSinCubrir,
-      excedente: unidades > c.cantidad ? unidades - c.cantidad : 0,
-      dias: recuperado ? diaRecupero - c.dia : agotadaSinCubrir ? diaAgotada - c.dia : transcurridos, faltan,
-      diasTotal: recuperado ? diaRecupero - c.dia : (faltan != null ? transcurridos + faltan : null),
-      porRecuperar: recuperado || agotadaSinCubrir ? 0 : c.costo - factCompra,
+    const nombre = agr?.grupos[id]?.nombre || arts[id]?.nombre || id
+    const filaDe = (c, enEspera) => {
+      const transcurridos = hoy - c.dia
+      const recuperado = c.diaRecupero != null
+      const agotadaSinCubrir = !recuperado && c.diaAgotada != null // vendió todas las unidades y no llegó al costo
+      // Ritmo desde que empezó a venderse esta compra (una compra en espera todavía no vende)
+      const ritmo = c.primerVenta == null ? 0 : c.factCompra / Math.max(1, hoy - c.primerVenta + 1)
+      const faltan = recuperado ? 0 : agotadaSinCubrir || enEspera ? null : (ritmo > 0 ? Math.ceil((c.costo - c.factCompra) / ritmo) : null)
+      return {
+        id, compra: c.compra, nombre, esGrupo: !!agr?.grupos[id], nModelos: agr?.grupos[id]?.modelos.length || 1, compraDia: c.dia, compraCant: c.cantidad, compraCosto: c.costo, proveedor: c.proveedor,
+        facturado: c.factCompra + c.factExcedente, unidades: c.uCompra + c.excedente, factCompra: c.factCompra, uCompra: c.uCompra,
+        pct: Math.min(1, c.factCompra / c.costo), veces: (c.factCompra + c.factExcedente) / c.costo, recuperado, agotadaSinCubrir, enEspera,
+        excedente: c.excedente,
+        dias: recuperado ? c.diaRecupero - c.dia : agotadaSinCubrir ? c.diaAgotada - c.dia : transcurridos, faltan,
+        diasTotal: recuperado ? c.diaRecupero - c.dia : (faltan != null ? transcurridos + faltan : null),
+        porRecuperar: recuperado || agotadaSinCubrir ? 0 : c.costo - c.factCompra,
+      }
     }
-  })
+    const conCosto = lotes.filter(l => l.costo > 0)
+    if (!conCosto.length) continue
+    // La fila principal es la compra que se está vendiendo ahora: la más vieja que todavía tiene
+    // unidades. Si todas se terminaron, la última.
+    const actual = conCosto.find(l => l.uCompra < l.cantidad) || conCosto[conCosto.length - 1]
+    const filas = conCosto.map(l => filaDe(l, l !== actual && l.uCompra === 0 && l.dia > actual.dia))
+    const principal = filas[conCosto.indexOf(actual)]
+    resultado.push({ ...principal, compras: filas.slice().reverse(), nCompras: filas.length })
+  }
+  return resultado
 }
 
 // Ritmo de venta y reposición de cada fila (artículo o grupo)
@@ -318,9 +346,16 @@ export default function Rotacion({ articulos = [], stockMap = {} }) {
       : { ...r, modelos: agr.grupos[r.id].modelos.map(id => porId[id]).filter(Boolean).sort((a, b) => b.compraDia - a.compraDia || b.facturado - a.facturado) })
   }, [porGrupo, recModelo, ventas, ingresos, articulos, hoy, agr])
   const recResumen = useMemo(() => {
-    const rec = recupero.filter(r => r.recuperado).map(r => r.dias).sort((a, b) => a - b)
+    // La mediana y lo que falta recuperar usan TODAS las compras (no solo la que se está vendiendo)
+    const todas = recupero.flatMap(r => r.compras || [r])
+    const rec = todas.filter(c => c.recuperado).map(c => c.dias).sort((a, b) => a - b)
     const curso = recupero.filter(r => !r.recuperado)
-    return { nRec: rec.length, mediana: rec.length ? rec[Math.floor((rec.length - 1) / 2)] : null, nCurso: curso.length, porRecuperar: curso.reduce((s, r) => s + r.porRecuperar, 0), sinVentas: curso.filter(r => r.facturado <= 0).length, nRevisar: recupero.filter(r => r.excedente > 0 || r.agotadaSinCubrir).length }
+    return {
+      nRec: recupero.filter(r => r.recuperado).length, nRecCompras: rec.length, mediana: rec.length ? rec[Math.floor((rec.length - 1) / 2)] : null,
+      nCurso: curso.length, nCursoCompras: todas.filter(c => !c.recuperado && !c.agotadaSinCubrir).length,
+      porRecuperar: todas.reduce((s, c) => s + c.porRecuperar, 0),
+      sinVentas: curso.filter(r => r.facturado <= 0).length, nRevisar: recupero.filter(r => r.excedente > 0 || r.agotadaSinCubrir).length,
+    }
   }, [recupero])
   const recVisibles = useMemo(() => {
     const q = normalizar(recBusqueda.trim())
@@ -460,17 +495,18 @@ export default function Rotacion({ articulos = [], stockMap = {} }) {
         })}
       </div>
 
-      <div style={S.seccion}>RECUPERO DE LA ÚLTIMA COMPRA</div>
+      <div style={S.seccion}>RECUPERO DE LAS COMPRAS</div>
       <div style={S.statsRow}>
-        <div style={S.statCard}><div style={S.statValue}>{recResumen.mediana == null ? '–' : `${fmtN(recResumen.mediana)} días`}</div><div style={S.statLabel}>Tarda en recuperarse una compra (mediana de {fmtN(recResumen.nRec)} ya recuperadas)</div></div>
-        <div style={S.statCard}><div style={S.statValue}>{fmtM(recResumen.porRecuperar)}</div><div style={S.statLabel}>Falta recuperar de {fmtN(recResumen.nCurso)} compras en curso</div></div>
+        <div style={S.statCard}><div style={S.statValue}>{recResumen.mediana == null ? '–' : `${fmtN(recResumen.mediana)} días`}</div><div style={S.statLabel}>Tarda en recuperarse una compra (mediana de {fmtN(recResumen.nRecCompras)} compras ya recuperadas)</div></div>
+        <div style={S.statCard}><div style={S.statValue}>{fmtM(recResumen.porRecuperar)}</div><div style={S.statLabel}>Falta recuperar de {fmtN(recResumen.nCursoCompras)} compras en curso o en espera</div></div>
         <div style={S.statCard}><div style={{ ...S.statValue, color: recResumen.sinVentas ? '#ef4444' : 'var(--accent)' }}>{fmtN(recResumen.sinVentas)}</div><div style={S.statLabel}>Compras sin ninguna venta desde que entraron</div></div>
         <div style={S.statCard}><div style={{ ...S.statValue, color: recResumen.nRevisar ? '#f59e0b' : 'var(--accent)' }}>{fmtN(recResumen.nRevisar)}</div><div style={S.statLabel}>Para revisar: vendieron más de lo que entró (falta cargar compras o había stock) o no cubrieron el costo</div></div>
       </div>
       <div style={S.chartCard}>
         <div style={S.nota}>
-          Para cada artículo se toma su última compra (lo que entró por Ingresos) y se suman las ventas de esas unidades: si entraron 10, cuentan las primeras 10 vendidas desde ese día.
-          "Recuperado en" son los días que tardaron esas ventas en llegar al costo total de la compra; el % llega como máximo a 100. Si todavía no llegó, se estima cuánto falta al ritmo que viene vendiendo.
+          Cada compra (lo que entró por Ingresos) se mide con las ventas de sus unidades, en orden de llegada: primero se termina la compra más vieja y recién después se empieza a vender la siguiente. Así, una compra chica nueva no tapa a una grande anterior.
+          En cada artículo se muestra la compra que se está vendiendo ahora; tocando el artículo (▸) se ven todas sus compras, cada una con su recupero.
+          "Recuperado en" son los días desde la compra hasta que sus ventas llegaron a su costo; el % llega como máximo a 100. Si todavía no llegó, se estima cuánto falta al ritmo que viene vendiendo.
           En naranja, los que vendieron más unidades de las que entraron: había stock de antes o falta cargar compras más nuevas.
           {porGrupo && ' En un grupo, la última compra es el último día que entró cualquiera de sus modelos (se suman todos los que entraron ese día) y se cuentan las ventas de todos los modelos. Abriendo el grupo se ve cada modelo con su propia última compra.'}
         </div>
@@ -482,7 +518,7 @@ export default function Rotacion({ articulos = [], stockMap = {} }) {
           <table style={S.table}>
             <thead>
               <tr>
-                {[['nombre', 'Artículo', true], ['compraDia', 'Última compra'], ['compraCosto', 'Costo compra'], ['facturado', 'Vendido desde'], ['pct', 'Recuperado'], ['diasTotal', 'Tarda']].map(([k, label, left]) => (
+                {[['nombre', 'Artículo', true], ['compraDia', 'Compra'], ['compraCosto', 'Costo compra'], ['facturado', 'Vendido desde'], ['pct', 'Recuperado'], ['diasTotal', 'Tarda']].map(([k, label, left]) => (
                   <th key={k} style={{ ...S.th, textAlign: left ? 'left' : 'right' }} onClick={() => recOrdenarPor(k)}>{label}{recOrden.k === k ? (recOrden.dir > 0 ? ' ▲' : ' ▼') : ''}</th>
                 ))}
               </tr>
@@ -490,8 +526,12 @@ export default function Rotacion({ articulos = [], stockMap = {} }) {
             <tbody>
               {recVisibles.slice(0, recMostrar).map(r => {
                 const abierto = r.esGrupo && abiertos.has('rec' + r.id)
+                // Artículo con más de una compra: se abre para ver todas
+                const conCompras = !r.esGrupo && r.nCompras > 1
+                const abiertoCompras = conCompras && abiertos.has('cmp' + r.id)
                 return [
-                  <FilaRecupero key={r.id} r={r} abierto={abierto} onClick={r.esGrupo ? () => alternar('rec' + r.id) : undefined} />,
+                  <FilaRecupero key={r.id} r={r} abierto={abierto || abiertoCompras} expandible={conCompras} onClick={r.esGrupo ? () => alternar('rec' + r.id) : conCompras ? () => alternar('cmp' + r.id) : undefined} />,
+                  ...(abiertoCompras ? r.compras.map((c, k) => <FilaRecupero key={r.id + '-c' + k} r={c} compra actual={c.compraDia === r.compraDia && c.compraCant === r.compraCant && c.compra === r.compra} />) : []),
                   ...(abierto ? r.modelos.map(m => <FilaRecupero key={r.id + m.id} r={m} modelo />) : []),
                   ...(abierto && !r.modelos.length ? [<tr key={r.id + '-'}><td style={{ ...S.td, ...S.tdModelo, textAlign: 'left' }} colSpan={6}>Ningún modelo tiene compras cargadas en Ingresos.</td></tr>] : []),
                 ]
@@ -549,10 +589,10 @@ export default function Rotacion({ articulos = [], stockMap = {} }) {
   )
 }
 
-function NombreFila({ r, abierto, modelo, extra }) {
+function NombreFila({ r, abierto, modelo, extra, expandible }) {
   return (
     <td style={{ ...S.td, ...S.tdNombre, ...(modelo ? S.tdModelo : {}) }}>
-      {r.esGrupo && <span style={S.flecha}>{abierto ? '▾' : '▸'}</span>}
+      {(r.esGrupo || expandible) && <span style={S.flecha}>{abierto ? '▾' : '▸'}</span>}
       {modelo && <span style={{ color: 'var(--muted)' }}>└ </span>}
       {r.esGrupo && '🔗 '}{r.nombre}
       <div style={S.codigo}>{r.esGrupo ? `${r.nModelos} ${r.nModelos === 1 ? 'modelo' : 'modelos'}` : r.id}{extra}</div>
@@ -579,10 +619,15 @@ function FilaRitmo({ r, abierto, modelo, onClick }) {
   )
 }
 
-function FilaRecupero({ r, abierto, modelo, onClick }) {
+function FilaRecupero({ r, abierto, modelo, compra, actual, expandible, onClick }) {
   return (
-    <tr onClick={onClick} style={{ ...(onClick ? { cursor: 'pointer' } : {}), ...(r.esGrupo ? S.trGrupo : {}) }} data-grupo={r.esGrupo ? r.nombre : undefined}>
-      <NombreFila r={r} abierto={abierto} modelo={modelo} extra={r.proveedor ? ` · ${r.proveedor}` : ''} />
+    <tr onClick={onClick} style={{ ...(onClick ? { cursor: 'pointer' } : {}), ...(r.esGrupo ? S.trGrupo : {}), ...(compra ? S.trCompra : {}) }} data-grupo={r.esGrupo ? r.nombre : undefined}>
+      {compra
+        ? <td style={{ ...S.td, ...S.tdNombre, ...S.tdModelo }}>
+            <span style={{ color: 'var(--muted)' }}>└ </span>Compra del {fechaDeDia(r.compraDia)}
+            <div style={S.codigo}>{r.uCompra >= r.compraCant ? 'terminada' : actual ? 'se está vendiendo ahora' : r.enEspera ? 'en espera: se vende cuando se termine la anterior' : ''}{r.proveedor ? ` · ${r.proveedor}` : ''}</div>
+          </td>
+        : <NombreFila r={r} abierto={abierto} modelo={modelo} expandible={expandible} extra={`${r.nCompras > 1 ? ` · ${r.nCompras} compras` : ''}${r.proveedor ? ` · ${r.proveedor}` : ''}`} />}
       <td style={S.td}>{fechaDeDia(r.compraDia)}<div style={S.codigo}>{fmtN(r.compraCant)} u.{r.compra ? ` · ${r.compra}` : ""}</div></td>
       <td style={S.td}>${fmtN(r.compraCosto)}</td>
       <td style={S.td}>${fmtN(r.facturado)}
@@ -596,6 +641,7 @@ function FilaRecupero({ r, abierto, modelo, onClick }) {
       <td style={{ ...S.td, ...(r.recuperado ? { color: '#22c55e', fontWeight: 700 } : {}) }}>
         {r.recuperado ? (r.dias === 0 ? 'el mismo día' : `en ${fmtN(r.dias)} ${r.dias === 1 ? 'día' : 'días'}`)
           : r.agotadaSinCubrir ? <span style={{ color: '#ef4444' }}>no cubrió el costo</span>
+          : r.enEspera ? <span style={{ color: 'var(--muted)' }}>en espera</span>
           : r.faltan == null ? <span style={{ color: '#ef4444' }}>sin ventas</span>
           : r.diasTotal > 365 ? 'más de 1 año' : `≈ ${fmtN(r.diasTotal)} días`}
         <div style={S.codigo}>{r.recuperado ? 'recuperado' : r.agotadaSinCubrir ? `vendió las ${fmtN(r.compraCant)} u. y juntó $${fmtN(r.factCompra)} (¿descuentos, o costo o precio mal cargado?)` : `lleva ${fmtN(r.dias)} ${r.dias === 1 ? 'día' : 'días'}${r.faltan != null && r.diasTotal <= 365 ? ` · faltan ≈ ${fmtN(r.faltan)}` : ''}`}</div>
@@ -687,6 +733,7 @@ const S = {
   recBarraFill: { height: '100%', borderRadius: 4 },
   trGrupo: { background: 'rgba(96,165,250,0.06)' },
   tdModelo: { paddingLeft: 26, fontSize: 13, color: 'var(--muted)' },
+  trCompra: { background: 'rgba(96,165,250,0.04)' },
   flecha: { display: 'inline-block', width: 16, color: '#60a5fa' },
   nMod: { color: 'var(--muted)', fontSize: 11 },
   masBtn: { alignSelf: 'flex-start', marginTop: 10, background: 'var(--surface2)', border: '1.5px solid var(--border)', borderRadius: 10, color: 'var(--text)', fontFamily: 'Barlow, sans-serif', fontSize: 14, padding: '8px 16px', cursor: 'pointer' },

@@ -12,7 +12,34 @@ const u1 = n => !n ? '–' : n < 0.1 ? '<0,1' : n.toLocaleString('es-AR', { maxi
 const COLOR = { POPULAR: '#22c55e', ESTANDAR: '#60a5fa', PREMIUM: '#f5c800' }
 const norm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
 
-export default function TiposPrecio({ articulos, ventas, ingresos, historico = [], hoy }) {
+// Fila de un grupo (columna GRUPO de ARTICULOS): suma los modelos que pasaron los filtros
+function armarFilaGrupo(nombre, modelos) {
+  const conU = modelos.filter(m => m.pctTurista != null && m.u > 0)
+  const uTot = conU.reduce((s, m) => s + m.u, 0)
+  const conCosto = modelos.filter(m => m.margen != null)
+  const vtaSem = conCosto.reduce((s, m) => s + m.precio * m.uSem, 0)
+  const tipos = {}
+  modelos.forEach(m => { tipos[m.tipo] = (tipos[m.tipo] || 0) + 1 })
+  const acciones = {}
+  modelos.forEach(m => { if (m.accion) acciones[m.accion] = (acciones[m.accion] || 0) + 1 })
+  const [accion, nAccion] = Object.entries(acciones).sort((a, b) => b[1] - a[1])[0] || ['', 0]
+  const precios = modelos.map(m => m.precio)
+  return {
+    id: 'G:' + nombre.toLowerCase(), esGrupo: true, nombre, modelos, grupo: nombre,
+    tipo: Object.entries(tipos).sort((a, b) => b[1] - a[1])[0][0], tipos,
+    precio: Math.min(...precios), precioMax: Math.max(...precios),
+    // Margen del grupo: ganancia / venta por semana (pesa más lo que más se vende)
+    margen: vtaSem > 0 ? conCosto.reduce((s, m) => s + (m.precio - m.costo) * m.uSem, 0) / vtaSem
+      : conCosto.length ? conCosto.map(m => m.margen).sort((a, b) => a - b)[Math.floor(conCosto.length / 2)] : null,
+    uSem: modelos.reduce((s, m) => s + m.uSem, 0),
+    ganSem: modelos.some(m => m.ganSem != null) ? modelos.reduce((s, m) => s + (m.ganSem || 0), 0) : null,
+    pctTurista: uTot ? conU.reduce((s, m) => s + m.pctTurista * m.u, 0) / uTot : null,
+    pctLocal: uTot ? conU.reduce((s, m) => s + m.pctLocal * m.u, 0) / uTot : null,
+    accion: modelos.length > 1 && nAccion < modelos.length ? `${accion} (${nAccion} de ${modelos.length})` : accion,
+  }
+}
+
+export default function TiposPrecio({ articulos, ventas, ingresos, historico = [], hoy, vista = 'modelo', onVista }) {
   const { cortes, filas } = useMemo(() => clasificarArticulos({ articulos, ventas, ingresos, historico, hoy, metodosDe }), [articulos, ventas, ingresos, historico, hoy])
   const [sel, setSel] = useState(null)       // { tipo, nivel } o null = todos
   const [busq, setBusq] = useState('')
@@ -41,6 +68,25 @@ export default function TiposPrecio({ articulos, ventas, ingresos, historico = [
     const v = r => { const x = r[orden.k]; return x == null ? -Infinity : typeof x === 'string' ? x : x }
     return l.sort((a, b) => { const x = v(a), y = v(b); return (typeof x === 'string' ? x.localeCompare(y) : x - y) * orden.dir })
   }, [filas, sel, busq, orden])
+  // Por grupo: los modelos con el mismo GRUPO se juntan en una fila (los que no tienen grupo quedan solos)
+  const nGrupos = useMemo(() => new Set(filas.map(f => String(f.grupo || '').trim().toLowerCase()).filter(Boolean)).size, [filas])
+  const porGrupo = vista === 'grupo' && nGrupos > 0
+  const [abiertos, setAbiertos] = useState(() => new Set())
+  const filasTabla = useMemo(() => {
+    if (!porGrupo) return visibles
+    const grupos = new Map(), sueltos = []
+    for (const f of visibles) {
+      const g = String(f.grupo || '').trim()
+      if (!g) { sueltos.push(f); continue }
+      const k = g.toLowerCase()
+      if (!grupos.has(k)) grupos.set(k, { nombre: g, modelos: [] })
+      grupos.get(k).modelos.push(f)
+    }
+    const l = [...sueltos, ...[...grupos.values()].map(g => armarFilaGrupo(g.nombre, g.modelos))]
+    const v = r => { const x = r[orden.k]; return x == null ? -Infinity : x }
+    return l.sort((a, b) => { const x = v(a), y = v(b); return (typeof x === 'string' ? x.localeCompare(y) : x - y) * orden.dir })
+  }, [porGrupo, visibles, orden])
+  const alternar = id => setAbiertos(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
   const ordenar = k => setOrden(o => ({ k, dir: o.k === k ? -o.dir : (k === 'nombre' ? 1 : -1) }))
   const flecha = k => orden.k === k ? (orden.dir > 0 ? ' ▲' : ' ▼') : ''
 
@@ -93,8 +139,17 @@ export default function TiposPrecio({ articulos, ventas, ingresos, historico = [
       <div style={S.filtros}>
         <input style={S.search} placeholder="Buscar artículo…" value={busq} onChange={e => setBusq(e.target.value)} aria-label="Buscar artículo" />
         {sel && <button style={S.chipSel} onClick={() => setSel(null)}>{NOMBRE_TIPO[sel.tipo]} · {NOMBRE_NIVEL[sel.nivel]} ✕</button>}
-        <span style={S.cuenta}>{visibles.length} artículos</span>
+        <span style={S.cuenta}>{visibles.length} artículos{porGrupo ? ` · ${filasTabla.length} filas` : ''}</span>
+        {onVista && (
+          <div style={S.seg} role="group" aria-label="Ver por artículo o por grupo">
+            {[['modelo', 'Por artículo'], ['grupo', `Por grupo${nGrupos ? ` (${nGrupos})` : ''}`]].map(([v, l], i) => (
+              <button key={v} style={{ ...S.segBtn, ...(i ? S.segSep : {}), ...(vista === v ? S.segActivo : {}) }} onClick={() => onVista(v)} aria-pressed={vista === v}>{l}</button>
+            ))}
+          </div>
+        )}
       </div>
+      {vista === 'grupo' && !nGrupos && <div style={S.nota}>Todavía no hay grupos: se arman en Arts., editando cada artículo (campo GRUPO).</div>}
+      {porGrupo && <div style={S.nota}>🔗 Los artículos con el mismo GRUPO van en una sola fila: precio de menor a mayor, unidades y ganancia sumadas, margen pesado por lo que más se vende. Tocá el grupo para ver sus artículos. La matriz y los totales de arriba siguen siendo por artículo.</div>}
       <div style={S.tablaWrap}>
         <table style={S.tabla}>
           <thead><tr>
@@ -103,9 +158,31 @@ export default function TiposPrecio({ articulos, ventas, ingresos, historico = [
             ))}
           </tr></thead>
           <tbody>
-            {visibles.slice(0, 300).map(f => (
-              <tr key={f.id}>
-                <td style={{ ...S.td, textAlign: 'left', whiteSpace: 'normal', minWidth: 180 }}>{f.nombre}<div style={S.cod}>{f.id}{f.grupo ? ` · ${f.grupo}` : ''}</div></td>
+            {filasTabla.slice(0, 300).flatMap(f => f.esGrupo ? [
+              <tr key={f.id} onClick={() => alternar(f.id)} style={{ cursor: 'pointer', background: 'rgba(96,165,250,0.06)' }} aria-expanded={abiertos.has(f.id)}>
+                <td style={{ ...S.td, textAlign: 'left', whiteSpace: 'normal', minWidth: 180, fontWeight: 700 }}><span style={{ color: 'var(--muted)', marginRight: 6 }}>{abiertos.has(f.id) ? '▾' : '▸'}</span>🔗 {f.nombre}<div style={{ ...S.cod, fontWeight: 400 }}>{f.modelos.length} {f.modelos.length === 1 ? 'artículo' : 'artículos'}</div></td>
+                <td style={S.td}>{TIPOS.filter(t => f.tipos[t]).map(t => <div key={t} style={{ color: COLOR[t] }}>{f.tipos[t]} {NOMBRE_TIPO[t]}</div>)}</td>
+                <td style={S.td}>{f.precio === f.precioMax ? $(f.precio) : <>{$(f.precio)}<div style={S.cod}>a {$(f.precioMax)}</div></>}</td>
+                <td style={{ ...S.td, color: f.margen == null ? 'var(--muted)' : f.margen < 0.4 ? '#f59e0b' : 'var(--text)' }}>{pct(f.margen)}</td>
+                <td style={S.td}>{u1(f.uSem)}</td>
+                <td style={{ ...S.td, fontWeight: 700 }}>{f.ganSem == null ? '–' : $(f.ganSem)}</td>
+                <td style={S.td}>{pct(f.pctTurista)}</td>
+                <td style={S.td}>{pct(f.pctLocal)}</td>
+                <td style={{ ...S.td, textAlign: 'left', whiteSpace: 'normal', minWidth: 170 }}>{f.accion}</td>
+              </tr>,
+              ...(abiertos.has(f.id) ? f.modelos.slice().sort((a, b) => (b.ganSem || 0) - (a.ganSem || 0)).map(m => filaArticulo(m, true)) : []),
+            ] : [filaArticulo(f, false)])}
+          </tbody>
+        </table>
+      </div>
+      {filasTabla.length > 300 && <div style={S.nota}>Se muestran las primeras 300 filas. Usá la búsqueda o tocá un casillero de la matriz.</div>}
+    </div>
+  )
+
+  function filaArticulo(f, modelo) {
+    return (
+              <tr key={f.id} style={modelo ? { background: 'rgba(96,165,250,0.03)' } : undefined}>
+                <td style={{ ...S.td, textAlign: 'left', whiteSpace: 'normal', minWidth: 180, ...(modelo ? { paddingLeft: 26 } : {}) }}>{modelo && <span style={{ color: 'var(--muted)' }}>└ </span>}{f.nombre}<div style={S.cod}>{f.id}{f.grupo && !modelo ? ` · ${f.grupo}` : ''}</div></td>
                 <td style={{ ...S.td, color: COLOR[f.tipo] }}>{NOMBRE_TIPO[f.tipo]}{f.manual && <span title={`Forzado a mano (por precio sería ${NOMBRE_TIPO[f.tipoAuto] || '–'})`}> ✋</span>}<div style={S.cod}>{NOMBRE_NIVEL[f.nivel]}</div>
                   {f.cambioPrecio && <div style={{ ...S.cod, color: '#60a5fa', whiteSpace: 'normal', maxWidth: 190 }} title="La rotación cuenta solo lo vendido al precio actual">{$(f.cambioPrecio.precioAntes)} → {$(f.precio)} hace {f.cambioPrecio.dias} d · antes {u1(f.cambioPrecio.uSemAntes)}/sem, ahora {u1(f.cambioPrecio.uSemDesde)}/sem</div>}</td>
                 <td style={S.td}>{$(f.precio)}</td>
@@ -116,13 +193,8 @@ export default function TiposPrecio({ articulos, ventas, ingresos, historico = [
                 <td style={S.td}>{pct(f.pctLocal)}</td>
                 <td style={{ ...S.td, textAlign: 'left', whiteSpace: 'normal', minWidth: 170 }}>{f.accion}{f.aviso && <div style={S.aviso}>{f.aviso}</div>}</td>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {visibles.length > 300 && <div style={S.nota}>Se muestran los primeros 300. Usá la búsqueda o tocá un casillero de la matriz.</div>}
-    </div>
-  )
+    )
+  }
 }
 
 const S = {
@@ -153,4 +225,8 @@ const S = {
   td: { fontFamily: 'Barlow, sans-serif', fontSize: 14, color: 'var(--text)', padding: '8px', borderBottom: '1px solid var(--border)', textAlign: 'right', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', verticalAlign: 'top' },
   cod: { fontSize: 11, color: 'var(--muted)', marginTop: 2 },
   aviso: { fontSize: 11, color: '#f59e0b', marginTop: 2, fontWeight: 600 },
+  seg: { display: 'inline-flex', border: '1.5px solid var(--border)', borderRadius: 10, overflow: 'hidden', marginLeft: 'auto' },
+  segBtn: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 14, letterSpacing: 0.5, padding: '7px 14px', background: 'transparent', color: 'var(--muted)', border: 'none', cursor: 'pointer' },
+  segSep: { borderLeft: '1.5px solid var(--border)' },
+  segActivo: { background: 'rgba(245,200,0,0.14)', color: 'var(--accent-text)' },
 }

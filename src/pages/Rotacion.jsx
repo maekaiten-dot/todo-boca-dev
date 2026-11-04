@@ -409,7 +409,7 @@ export default function Rotacion({ articulos = [], stockMap = {} }) {
       <div style={S.controls}>
         <Segmento opciones={[{ v: 'rotacion', label: 'Rotación y reposición' }, { v: 'tipos', label: 'Tipos y precios' }]} valor={seccion} onChange={setSeccion} />
       </div>
-      {seccion === 'tipos' ? <TiposPrecio articulos={articulos} ventas={ventas} ingresos={ingresos} historico={historicoPrecios} hoy={hoy} /> : <>
+      {seccion === 'tipos' ? <TiposPrecio articulos={articulos} ventas={ventas} ingresos={ingresos} historico={historicoPrecios} hoy={hoy} vista={vista} onVista={setVista} /> : <>
       <div style={S.controls}>
         <Segmento opciones={METRICAS.map(m => ({ v: m.id, label: m.label }))} valor={metrica} onChange={setMetrica} />
         <Segmento opciones={TOPS.map(n => ({ v: n, label: `Top ${n}` }))} valor={top} onChange={setTop} />

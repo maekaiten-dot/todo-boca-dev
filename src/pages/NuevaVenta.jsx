@@ -996,8 +996,9 @@ const S = {
   thumbPH: { width:88, height:88, display:'flex', alignItems:'center', justifyContent:'center', background:'var(--surface2)', borderRadius:8, fontSize:32, flexShrink:0, border:'1px solid var(--border)' },
   thumbPHMobile: { width:52, height:52, display:'flex', alignItems:'center', justifyContent:'center', background:'var(--surface2)', borderRadius:6, fontSize:22, flexShrink:0, border:'1px solid var(--border)' },
   artInfo: { flex:1, minWidth:0 },
-  artNombre: { fontFamily:'Barlow,sans-serif', fontWeight:600, fontSize:20, color:'var(--text)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' },
-  artNombreMobile: { fontFamily:'Barlow,sans-serif', fontWeight:600, fontSize:15, color:'var(--text)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' },
+  // El nombre completo, en varias líneas si hace falta (antes se cortaba con "…")
+  artNombre: { fontFamily:'Barlow,sans-serif', fontWeight:600, fontSize:20, lineHeight:1.2, color:'var(--text)', whiteSpace:'normal', overflowWrap:'anywhere' },
+  artNombreMobile: { fontFamily:'Barlow,sans-serif', fontWeight:600, fontSize:15, lineHeight:1.2, color:'var(--text)', whiteSpace:'normal', overflowWrap:'anywhere' },
   artSku: { fontFamily:'Barlow Condensed,sans-serif', fontSize:17, color:'var(--muted)' },
   artPrecio: { fontFamily:'Barlow Condensed,sans-serif', fontWeight:800, fontSize:22, color:'var(--accent-text)', flexShrink:0 },
   emptyMsg: { padding:28, textAlign:'center', color:'var(--muted)', fontFamily:'Barlow,sans-serif', fontSize:16 },

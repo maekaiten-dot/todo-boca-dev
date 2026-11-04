@@ -10,7 +10,7 @@ import AvisoPrecios, { totalCambios, resumenCambios } from './components/AvisoPr
 import { BotonModoPartido, BarraModoPartido } from './components/ModoPartido.jsx'
 import { escucharCola, procesarCola } from './lib/colaVentas.js'
 import { calcularMasVendidos } from './lib/masVendidos.js'
-import { getModoPartido, setModoPartido, setModoPartidoLog, getHistoricoVentas, getPromos, getAlias, getArticulos, getUsuarios, registrarLog, calcularStockTodos, leerArticulosVistos, guardarArticulosVistos, getTutoriales, leerTutorialesVistos, guardarTutorialesVistos } from './api/sheets.js'
+import { prepararGuardadoVentas, getModoPartido, setModoPartido, setModoPartidoLog, getHistoricoVentas, getPromos, getAlias, getArticulos, getUsuarios, registrarLog, calcularStockTodos, leerArticulosVistos, guardarArticulosVistos, getTutoriales, leerTutorialesVistos, guardarTutorialesVistos } from './api/sheets.js'
 // Las solapas que no son Vender ni Hoy se bajan aparte (la app abre más rápido). Unos segundos
 // después de abrir se precargan en segundo plano, así al tocarlas ya están.
 const CARGAS = {
@@ -402,9 +402,21 @@ export default function App() {
       detectarCambiosPrecio(arts)
       revisarTutoriales()
       recalcularStock(arts)
+      // Deja lista la planilla para que la primera venta no espere (columnas y datos de la hoja)
+      prepararGuardadoVentas().catch(e => console.warn('No se pudo preparar el guardado de ventas', e))
       await registrarLog({ accion:'ARTICULOS_CARGADOS', detalle:`${arts.length} artículos cargados`, empleado:perfilGuardado?.nombre||'', resultado:'OK' })
     } catch (e) { console.error(e) }
     finally { setLoadingArticulos(false) }
+  }
+
+  // Después de cada venta: Hoy se actualiza enseguida (es liviano) y el stock 20 s después de la
+  // última venta, así no compite con la venta siguiente si hay varias seguidas
+  const stockTimer = useRef(null)
+  function despuesDeVenta() {
+    if (modoRef.current.activo) return
+    setRefreshKey(k => k + 1)
+    clearTimeout(stockTimer.current)
+    stockTimer.current = setTimeout(() => recalcularStock(articulosRef.current), 20 * 1000)
   }
 
   // Stock calculado (último conteo + ingresos − ventas − bajas posteriores)
@@ -536,11 +548,11 @@ export default function App() {
           <div style={tabStyle('venta')}>
             {LOCAL.venderSimple ? (
               <VenderSimple articulos={articulos} loadingArticulos={loadingArticulos} usuarios={usuarios} stockMap={stockMap} perfilNombre={empleadoActual} esAdmin={veAdmin}
-                onVentaRegistrada={() => { setRefreshKey(k => k + 1); recalcularStock(articulosRef.current) }} />
+                onVentaRegistrada={despuesDeVenta} />
             ) : (
             <NuevaVenta promos={promos} articulos={articulos} loadingArticulos={loadingArticulos} usuarios={usuarios} stockMap={stockMap} empleadoFijo={veAdmin ? empleadoActual : null} esAdmin={veAdmin} cargadoPor={empleadoActual}
               modoPartido={modo.activo} masVendidos={modo.masVendidos || []}
-              onVentaRegistrada={() => { if (modoRef.current.activo) return; setRefreshKey(k => k + 1); recalcularStock(articulosRef.current) }} />
+              onVentaRegistrada={despuesDeVenta} />
             )}
           </div>
           {tabsVisitadas.has('hoy') && (

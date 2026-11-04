@@ -349,15 +349,27 @@ function inicioColaDetalle(filas) {
   return Math.max(0, Math.min(i + 1, filas.length - DV_COLA))
 }
 
+// La relectura completa de cada 15 minutos se hace en segundo plano: nadie espera los ~7 MB
+// (antes, la primera venta después de 15 minutos esperaba a que bajara la planilla entera).
+let _completaFondo = null
+function releerCompletaEnFondo() {
+  if (_completaFondo) return
+  _completaFondo = sheetsGet('DETALLE DE VENTAS!A2:AN')
+    .then(d => { if (!DV.promesa) { DV.filas = d.values || []; DV.tCompleta = DV.tCola = Date.now(); DV.invalida = false } })
+    .catch(e => console.warn('No se pudo releer DETALLE DE VENTAS', e))
+    .finally(() => { _completaFondo = null })
+}
+
 function leerDetalle() {
   if (DV.promesa) return DV.promesa
-  if (DV.filas && !DV.invalida && Date.now() - DV.tCola < DV_FRESCA_MS && Date.now() - DV.tCompleta < DV_COMPLETA_MS) return Promise.resolve(DV.filas)
+  if (DV.filas && !DV.invalida && Date.now() - DV.tCompleta >= DV_COMPLETA_MS) releerCompletaEnFondo()
+  if (DV.filas && !DV.invalida && Date.now() - DV.tCola < DV_FRESCA_MS) return Promise.resolve(DV.filas)
   DV.promesa = (async () => {
     const completa = async () => {
       const d = await sheetsGet('DETALLE DE VENTAS!A2:AN')
       DV.filas = d.values || []; DV.tCompleta = DV.tCola = Date.now(); DV.invalida = false
     }
-    if (!DV.filas || DV.invalida || Date.now() - DV.tCompleta >= DV_COMPLETA_MS) await completa()
+    if (!DV.filas || DV.invalida) await completa()
     else {
       const desde = inicioColaDetalle(DV.filas)
       const d = await sheetsGet(`DETALLE DE VENTAS!A${desde + 2}:AN`)
@@ -670,8 +682,8 @@ export async function registrarVenta({ items, devueltos = [], metodoPago, pagos 
   }
   // Se relee solo el final de la planilla (las ventas de hoy): alcanza para el código de la venta
   // y para saber dónde termina. Antes se bajaba la columna entera (más de 20.000 filas) en cada venta.
-  await asegurarColumna(COL_UID, 'CLAVE CARGA')
-  const filasAB = await leerDetalleFresco()
+  await prepararGuardadoVentas()
+  const filasAB = await leerFinalParaVenta()
   const yaGuardada = filasAB.find(r => r[0] && String(r[IDX_UID] || '') === uid)
   if (yaGuardada) return String(yaGuardada[1])
   const fechaId = dt.fecha !== ahora.fecha ? dt.fecha : null
@@ -825,13 +837,16 @@ export async function registrarVenta({ items, devueltos = [], metodoPago, pagos 
   // corridas 17 columnas a la derecha.)
   void nextRow
   await agregarFilasDetalle(rows)
-  // Se ubica la venta por su clave para saber en qué fila quedó y confirmar el código
-  const filasDespues = await leerDetalleFresco()
-  const idx = filasDespues.findIndex(r => r[0] && String(r[IDX_UID] || '') === uid)
-  if (idx >= 0) {
-    detalleCambio([idx + 2])
-    idVenta = await verificarCodigoVenta({ idVenta, primera: idx + 2, cantidad: rows.length, filas: filasDespues })
-  }
+  detalleCambio()
+  // En segundo plano (la venta ya quedó guardada): se ubica la venta por su clave y se confirma
+  // que su número no se repita con el de otro dispositivo; si se repite, se corrige solo.
+  const idProvisorio = idVenta
+  ;(async () => {
+    const filasDespues = await leerFinalParaVenta()
+    const idx = filasDespues.findIndex(r => r[0] && String(r[IDX_UID] || '') === uid)
+    if (idx >= 0) await verificarCodigoVenta({ idVenta: idProvisorio, primera: idx + 2, cantidad: rows.length, filas: filasDespues })
+    detalleCambio()
+  })().catch(e => console.warn('No se pudo verificar el código de la venta', e))
 
   const totalVenta = rows.reduce((s, r) => s+(r[18]||0), 0)
   const totalDtoImanes = dtosPorItem.reduce((s, d) => s+d.descuentoImanes, 0)
@@ -870,6 +885,27 @@ async function verificarCodigoVenta({ idVenta, primera, cantidad, filas }) {
   return nuevo
 }
 
+// Deja lista la hoja para guardar ventas con 2 pedidos en total (antes, la primera venta de cada
+// sesión hacía 2 pedidos por cada columna extra: posnet, pagos, clave…). Se llama al abrir la app.
+let _prepGuardado = null
+export function prepararGuardadoVentas() {
+  if (!_prepGuardado) _prepGuardado = (async () => {
+    const extras = [[COL_DTO_SOCIO, 'DTO SOCIO'], [COL_DTO_XXXL, 'DTO 2x1 XXXL'], [COL_DTO_EFECTIVO, 'DTO EFECTIVO'], [COL_REDONDEO, 'REDONDEO'], [COL_POSNET, 'POSNET'], [COL_CORRECCION_POSNET, 'CORRECCIÓN POSNET'], [COL_PAGOS, 'PAGOS'], [COL_EDICIONES, 'EDICIONES'], [COL_PROMOS, 'PROMOS'], [COL_UID, 'CLAVE CARGA']]
+    const token = await getAccessToken()
+    const metaRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}?fields=sheets.properties(sheetId,title,gridProperties.columnCount)`, { headers: { Authorization: `Bearer ${token}` } })
+    if (!metaRes.ok) throw new Error(`Sheets META error: ${metaRes.status}`)
+    const hoja = ((await metaRes.json()).sheets || []).find(h => h.properties?.title === 'DETALLE DE VENTAS')
+    if (!hoja) throw new Error('No se encontró la hoja DETALLE DE VENTAS')
+    _sheetIdDetalle = hoja.properties.sheetId ?? 0
+    if ((hoja.properties.gridProperties?.columnCount || 0) < numeroDeColumna(COL_UID)) { await asegurarColumna(COL_UID, 'CLAVE CARGA'); }
+    const enc = ((await sheetsGet(`DETALLE DE VENTAS!A1:${COL_UID}1`)).values || [])[0] || []
+    const faltan = extras.filter(([l]) => !String(enc[numeroDeColumna(l) - 1] || '').trim())
+    if (faltan.length) await sheetsBatchUpdate(faltan.map(([l, h]) => ({ range: `DETALLE DE VENTAS!${l}1`, values: [[h]] })))
+    extras.forEach(([l]) => _columnasListas.add(l))
+  })().catch(e => { _prepGuardado = null; throw e })
+  return _prepGuardado
+}
+
 // Agrega filas al final de DETALLE DE VENTAS empezando en la columna A (appendCells)
 let _sheetIdDetalle = null
 async function agregarFilasDetalle(rows) {
@@ -902,6 +938,22 @@ async function sheetsBatchGet(rangos) {
   const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchGet?${q}`, { headers: { Authorization: `Bearer ${token}` } })
   if (!res.ok) throw new Error(`Sheets BATCHGET error: ${res.status}`)
   return ((await res.json()).valueRanges || []).map(v => v.values || [])
+}
+
+// Lectura liviana para guardar una venta: solo A:C y la clave (AN) de las filas de hoy (y las
+// últimas 30), en un solo pedido de pocos KB. Devuelve todas las filas con ese formato: las viejas
+// salen de la copia en memoria. Sin copia en memoria, se lee como siempre.
+async function leerFinalParaVenta() {
+  if (!DV.filas) return leerDetalleFresco()
+  const { fecha } = getArgentinaDate()
+  let i = DV.filas.length - 1
+  while (i >= 0 && String(DV.filas[i]?.[2] || '').replace(/^'/, '') === fecha) i--
+  const desde = Math.max(0, Math.min(i + 1, DV.filas.length - 30))   // índice (fila = índice + 2)
+  const [abc, claves] = await sheetsBatchGet([`DETALLE DE VENTAS!A${desde + 2}:C`, `DETALLE DE VENTAS!${COL_UID}${desde + 2}:${COL_UID}`])
+  // Si la planilla se movió (filas borradas o insertadas arriba), se lee como siempre
+  if (desde < DV.filas.length && String(DV.filas[desde]?.[0] || '') !== String(abc[0]?.[0] || '')) { DV.invalida = true; return leerDetalleFresco() }
+  const cola = abc.map((r, k) => { const x = [r[0], r[1], r[2]]; x[IDX_UID] = claves[k]?.[0] || ''; return x })
+  return DV.filas.slice(0, desde).concat(cola)
 }
 
 // Lee el final de DETALLE DE VENTAS ahora (sin usar la copia en memoria de hace unos segundos)

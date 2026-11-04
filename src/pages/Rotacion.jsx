@@ -295,15 +295,20 @@ export default function Rotacion({ articulos = [], stockMap = {} }) {
     })
   }, [porGrupo, filasModelo, rotGrupo, stockVista, stockMap, agr, nombresArt])
 
+  // Ritmo de venta y reposición: solo artículos ACTIVOS (los inactivos no se reponen). Los grupos
+  // se arman con artículos activos, así que siempre quedan.
+  const idsActivos = useMemo(() => new Set(articulos.map(a => a.id)), [articulos])
   const filasVisibles = useMemo(() => {
     const q = normalizar(busqueda.trim())
-    const f = filas.filter(r => !q || normalizar(textoBusqueda(r)).includes(q))
+    const f = filas
+      .filter(r => r.esGrupo || idsActivos.has(r.id))
+      .filter(r => !q || normalizar(textoBusqueda(r)).includes(q))
     const val = r => { const v = r[orden.k]; return v == null ? (orden.dir > 0 ? Infinity : -Infinity) : v }
     return f.sort((a, b) => {
       const A = val(a), B = val(b)
       return (typeof A === 'string' ? A.localeCompare(B) : A - B) * orden.dir
     })
-  }, [filas, busqueda, orden, agr, nombresArt])
+  }, [filas, busqueda, orden, agr, nombresArt, idsActivos])
 
   const recModelo = useMemo(() => calcularRecupero(ventas, ingresos, articulos, hoy), [ventas, ingresos, articulos, hoy])
   const recupero = useMemo(() => {

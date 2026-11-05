@@ -123,7 +123,7 @@ export default function CobrosMP() {
 
         <div style={S.bloque}>
           <div style={S.cardTit}>Control contra las ventas de la app</div>
-          <div style={S.nota}>Point (tarjeta) contra las ventas con tarjeta del posnet amarillo; QR contra las ventas con QR del posnet amarillo. Cada cobro se empareja con una venta del mismo día y el mismo monto. Tocá un día para ver qué no coincide. Las ventas del posnet blanco son de otra cuenta y no entran.</div>
+          <div style={S.nota}>Point (tarjeta) contra las ventas con tarjeta del posnet amarillo; QR contra las ventas con QR del posnet amarillo. Cada cobro se empareja con una venta del mismo día y el mismo monto. Si el monto y la hora coinciden pero la venta quedó cargada con otro medio (QR en vez de tarjeta, transferencia, débito en vez de crédito, posnet blanco…), se marca como <b>error de registro del medio de pago</b>, para corregirlo en Historial. Tocá un día para ver el detalle. Las ventas del posnet blanco son de otra cuenta y no entran.</div>
           <div style={S.tablaWrap}>
             <table style={S.tabla}>
               <thead><tr>
@@ -134,13 +134,13 @@ export default function CobrosMP() {
               </tr></thead>
               <tbody>
                 {cruce.map(d => {
-                  const sinPar = d.POINT.sinParejaMP.length + d.POINT.sinParejaApp.length + d.INSTORE.sinParejaMP.length + d.INSTORE.sinParejaApp.length
+                  const estado = [d.errores.length ? `${d.errores.length} con el medio de pago mal cargado` : '', d.sinPareja ? `${d.sinPareja} sin pareja` : ''].filter(Boolean).join(' · ')
                   return [
                     <tr key={d.dia} onClick={() => setAbierto(a => a === d.dia ? null : d.dia)} style={{ cursor: 'pointer', ...(abierto === d.dia ? { background: 'rgba(96,165,250,0.08)' } : {}) }} aria-expanded={abierto === d.dia}>
                       <td style={{ ...S.td, textAlign: 'left' }}><span style={{ color: 'var(--muted)', marginRight: 6 }}>{abierto === d.dia ? '▾' : '▸'}</span>{diaSemana(d.dia)} {diaCorto(d.dia)}</td>
                       <td style={S.td}>{$(d.POINT.totMP)}</td><td style={S.td}>{$(d.POINT.totApp)}</td><td style={{ ...S.td, ...colorDif(d.POINT.dif) }}>{d.POINT.dif ? $(d.POINT.dif) : '✓'}</td>
                       <td style={S.td}>{$(d.INSTORE.totMP)}</td><td style={S.td}>{$(d.INSTORE.totApp)}</td><td style={{ ...S.td, ...colorDif(d.INSTORE.dif) }}>{d.INSTORE.dif ? $(d.INSTORE.dif) : '✓'}</td>
-                      <td style={{ ...S.td, textAlign: 'left', color: d.ok ? '#22c55e' : '#f59e0b', fontWeight: 600 }}>{d.ok ? '✓ coincide' : `⚠ ${sinPar} sin pareja`}</td>
+                      <td style={{ ...S.td, textAlign: 'left', color: d.ok ? '#22c55e' : '#f59e0b', fontWeight: 600 }}>{d.ok ? '✓ coincide' : `⚠ ${estado}`}</td>
                     </tr>,
                     abierto === d.dia && <tr key={d.dia + '-det'}><td colSpan={8} style={{ padding: '6px 8px 14px', borderBottom: '1px solid var(--border)' }}><DetalleDia d={d} /></td></tr>,
                   ]
@@ -187,17 +187,29 @@ function DetalleDia({ d }) {
         {x.sinParejaApp.map(p => <div key={p.idVenta + p.metodo} style={S.detLinea}>⚠ {p.hora} · <b>{$(p.monto)}</b> · {p.metodo} · {p.idVenta}{p.empleado ? ` · ${p.empleado}` : ''}</div>)}
         <details style={{ marginTop: 4 }}>
           <summary style={S.detSum}>Ver los {x.mp.length} cobros y {x.app.length} ventas</summary>
-          {x.mp.map(c => <div key={c.id} style={S.detLinea}>{c.pareja ? '✓' : '⚠'} {c.hora} · {$(c.bruto)} · {nombreMedio(c)}{c.pareja ? ` → ${c.pareja.idVenta} (${c.pareja.hora})` : ' · sin venta en la app'}</div>)}
+          {x.mp.map(c => <div key={c.id} style={S.detLinea}>{c.pareja ? '✓' : '⚠'} {c.hora} · {$(c.bruto)} · {nombreMedio(c)}{c.pareja ? ` → ${c.pareja.idVenta} (${c.pareja.hora})${d.errores.some(e => e.cobro.id === c.id) ? ' · medio mal cargado' : ''}` : ' · sin venta en la app'}</div>)}
         </details>
       </div>
     )
   }
   return (
     <div>
+      {d.errores.length > 0 && (
+        <div style={S.errBox}>
+          <div style={S.errTit}>✏️ Error de registro del medio de pago ({d.errores.length})</div>
+          <div style={S.nota}>Estas ventas SÍ se cobraron, pero en la app quedaron cargadas con otro medio de pago. No falta plata: hay que corregirlas en <b>Historial → tocar la venta → ✏️ Editar o anular venta</b>, cambiar el medio de pago y elegir el motivo “Método de pago mal”.</div>
+          {d.errores.map(e => (
+            <div key={e.cobro.id} style={S.errLinea}>
+              <b>{e.venta.idVenta}</b> ({e.venta.hora}{e.venta.empleado ? ` · ${e.venta.empleado}` : ''}) · <b>{$(e.venta.monto)}</b>: está cargada como <b style={{ color: '#f87171' }}>{e.cargada}</b>, pero se cobró con <b style={{ color: '#22c55e' }}>{nombreMedio(e.cobro)}</b> a las {e.cobro.hora}{e.cobro.medio && e.cobro.tipoMedio !== 'account_money' ? ` (${e.cobro.medio})` : ''}.
+              <div style={S.errCorregir}>→ Corregir a: {e.correcto}{e.correcto !== 'QR' ? ', posnet amarillo' : ''}</div>
+            </div>
+          ))}
+        </div>
+      )}
       {bloque('Point (tarjeta)', 'POINT')}
       {bloque('QR', 'INSTORE')}
       {d.ok && <div style={{ ...S.detLinea, color: '#22c55e' }}>Todo coincide: cada cobro tiene su venta en la app.</div>}
-      {!d.ok && <div style={S.nota}>Si un cobro no tiene venta: puede ser una venta sin cargar, cargada con otro medio (efectivo, transferencia) o en el posnet blanco. Si una venta no tiene cobro: puede que se haya cobrado por el posnet blanco o en efectivo y quedó mal el medio.</div>}
+      {d.sinPareja > 0 && <div style={S.nota}>Si un cobro no tiene venta: puede ser una venta sin cargar, cargada con otro medio (efectivo, transferencia) o en el posnet blanco. Si una venta no tiene cobro: puede que se haya cobrado por el posnet blanco o en efectivo y quedó mal el medio.</div>}
     </div>
   )
 }
@@ -230,6 +242,10 @@ const S = {
   detTit: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 15, letterSpacing: 1, color: 'var(--text)', marginBottom: 2 },
   detAviso: { fontFamily: 'Barlow, sans-serif', fontSize: 13, color: '#f59e0b', fontWeight: 600, marginTop: 4 },
   detLinea: { fontFamily: 'Barlow, sans-serif', fontSize: 13, color: 'var(--text)', padding: '2px 0', whiteSpace: 'normal' },
+  errBox: { background: 'rgba(248,113,113,0.08)', border: '1.5px solid rgba(248,113,113,0.5)', borderRadius: 10, padding: '10px 12px', marginBottom: 12, display: 'flex', flexDirection: 'column', gap: 6 },
+  errTit: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 16, letterSpacing: 0.5, color: '#f87171' },
+  errLinea: { fontFamily: 'Barlow, sans-serif', fontSize: 14, color: 'var(--text)', lineHeight: 1.4, whiteSpace: 'normal' },
+  errCorregir: { fontFamily: 'Barlow, sans-serif', fontSize: 13, color: '#22c55e', fontWeight: 600 },
   detSum: { fontFamily: 'Barlow, sans-serif', fontSize: 12, color: 'var(--muted)', cursor: 'pointer' },
   centro: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, height: '100%', padding: 24, textAlign: 'center' },
   cargando: { fontFamily: 'Barlow, sans-serif', fontSize: 15, color: 'var(--muted)' },

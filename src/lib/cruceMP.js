@@ -30,28 +30,59 @@ export function nombreMedio(c) {
   return `${canal} – ${tipo}`
 }
 
-// Partes de venta de la app que deberían aparecer en Mercado Pago, por día y canal
+// Partes de venta de la app, por día. canal: POINT / INSTORE (las que deberían estar en Mercado
+// Pago) u OTRO (efectivo, transferencia, Pix, o tarjeta/QR del posnet blanco): esas solo se usan
+// para encontrar errores de medio de pago.
 export function partesApp(filasVentas) {
   const porVenta = {}
   for (const v of filasVentas) {
-    if (v.anulado || v.posnet === 'BLANCO') continue
+    if (v.anulado) continue
     const dia = diaISO(v.fecha); if (!dia) continue
     const id = v.idVenta || v.idDetalle
+    const blanco = v.posnet === 'BLANCO'
     for (const p of repartoPago(v)) {
-      const canal = METODOS_TARJETA.has(p.metodo) ? 'POINT' : p.metodo === 'QR' ? 'INSTORE' : null
-      if (!canal || !(p.monto > 0)) continue
+      if (!(p.monto > 0)) continue
+      const canalMP = METODOS_TARJETA.has(p.metodo) ? 'POINT' : p.metodo === 'QR' ? 'INSTORE' : null
+      const canal = canalMP && !blanco ? canalMP : 'OTRO'
       const k = `${id}|${p.metodo}`
-      const x = (porVenta[k] ||= { dia, canal, idVenta: id, metodo: p.metodo, hora: String(v.hora || '').replace(/^'/, '').slice(0, 5), min: minDeHora(v.hora), monto: 0, empleado: v.empleado || '' })
+      const x = (porVenta[k] ||= { dia, canal, idVenta: id, metodo: p.metodo, posnet: v.posnet || '', hora: String(v.hora || '').replace(/^'/, '').slice(0, 5), min: minDeHora(v.hora), monto: 0, empleado: v.empleado || '' })
       x.monto += p.monto
     }
   }
   return Object.values(porVenta).map(x => ({ ...x, monto: Math.round(x.monto) }))
 }
 
-// dias: Set de 'aaaa-mm-dd' a cruzar. Devuelve por día: { dia, POINT: {...}, INSTORE: {...} }
+const MAX_MIN_OTRO_MEDIO = 45
+const mismoMonto = (c, p) => Math.abs(Math.round(c.bruto) - p.monto) <= 1
+// Con qué medio de la app corresponde cargar un cobro de Mercado Pago
+export function medioCorrecto(c) {
+  if (c.canal === 'INSTORE') return 'QR'
+  return c.tipoMedio === 'credit_card' ? 'Tarjeta de Crédito' : 'Tarjeta de Débito'
+}
+const comoCargada = p => p.posnet === 'BLANCO' && (METODOS_TARJETA.has(p.metodo) || p.metodo === 'QR') ? `${p.metodo} en el posnet blanco` : p.metodo
+
+function emparejar(mp, app, maxMin) {
+  const pares = []
+  mp.forEach((c, i) => { if (c.pareja) return; app.forEach((p, j) => {
+    if (p.pareja) return
+    const dt = Math.abs(c.min - p.min)
+    if (mismoMonto(c, p) && dt <= maxMin) pares.push({ i, j, dt })
+  }) })
+  pares.sort((a, b) => a.dt - b.dt)
+  const hechos = []
+  for (const { i, j } of pares) {
+    if (mp[i].pareja || app[j].pareja) continue
+    mp[i].pareja = app[j]; app[j].pareja = mp[i]; hechos.push([mp[i], app[j]])
+  }
+  return hechos
+}
+
+// dias: Set de 'aaaa-mm-dd' a cruzar. Devuelve por día: { dia, POINT, INSTORE, errores, ok }
+// errores: ventas que SÍ se cobraron, pero cargadas con otro medio de pago (hay que corregirlas en
+// Historial → Editar). Cada una: { cobro, venta, cargada, correcto }
 export function cruzarPorDia(cobros, partes, dias) {
   const out = {}
-  const base = dia => ({ dia, POINT: { mp: [], app: [] }, INSTORE: { mp: [], app: [] } })
+  const base = dia => ({ dia, POINT: { mp: [], app: [] }, INSTORE: { mp: [], app: [] }, OTRO: [] })
   for (const c of cobros) {
     const { dia, min } = partirFechaMP(c.fecha)
     if (!dias.has(dia)) continue
@@ -61,27 +92,35 @@ export function cruzarPorDia(cobros, partes, dias) {
   }
   for (const p of partes) {
     if (!dias.has(p.dia)) continue
+    if (p.canal === 'OTRO') { if (out[p.dia]) out[p.dia].OTRO.push({ ...p, pareja: null }); continue }
     ;(out[p.dia] ||= base(p.dia))[p.canal].app.push({ ...p, pareja: null })
   }
   for (const d of Object.values(out)) {
+    const errores = []
+    // 1) Mismo canal: cobro del Point con venta con tarjeta, cobro por QR con venta por QR
+    for (const canal of ['POINT', 'INSTORE']) emparejar(d[canal].mp, d[canal].app, MAX_MIN)
+    // 2) Lo que sobró: mismo monto y hora cercana pero cargado con otro medio (QR en vez de tarjeta,
+    //    transferencia, efectivo, posnet blanco…) → error de registro del medio de pago
+    const mpSueltos = [...d.POINT.mp, ...d.INSTORE.mp]
+    const appOtros = [...d.POINT.app, ...d.INSTORE.app, ...d.OTRO]
+    for (const [c, p] of emparejar(mpSueltos, appOtros, MAX_MIN_OTRO_MEDIO)) errores.push({ cobro: c, venta: p, cargada: comoCargada(p), correcto: medioCorrecto(c) })
+    // 3) Bien emparejados, pero débito cargado como crédito (o al revés)
+    for (const c of d.POINT.mp) {
+      const p = c.pareja
+      if (!p || errores.some(e => e.cobro === c) || p.metodo === 'Tarjeta') continue
+      const ok = medioCorrecto(c)
+      if (p.metodo !== ok) errores.push({ cobro: c, venta: p, cargada: p.metodo, correcto: ok, soloTarjeta: true })
+    }
     for (const canal of ['POINT', 'INSTORE']) {
       const { mp, app } = d[canal]
       mp.sort((a, b) => a.min - b.min); app.sort((a, b) => a.min - b.min)
-      // Pareja: mismo monto y hora más cercana
-      const pares = []
-      mp.forEach((c, i) => app.forEach((p, j) => {
-        const dt = Math.abs(c.min - p.min)
-        if (Math.abs(Math.round(c.bruto) - p.monto) <= 1 && dt <= MAX_MIN) pares.push({ i, j, dt })
-      }))
-      pares.sort((a, b) => a.dt - b.dt)
-      for (const { i, j } of pares) {
-        if (mp[i].pareja || app[j].pareja) continue
-        mp[i].pareja = app[j]; app[j].pareja = mp[i]
-      }
       const totMP = mp.reduce((s, c) => s + c.bruto, 0), totApp = app.reduce((s, p) => s + p.monto, 0)
       d[canal] = { mp, app, totMP, totApp, dif: Math.round(totMP - totApp), sinParejaMP: mp.filter(c => !c.pareja), sinParejaApp: app.filter(p => !p.pareja) }
     }
-    d.ok = ['POINT', 'INSTORE'].every(k => !d[k].sinParejaMP.length && !d[k].sinParejaApp.length)
+    d.errores = errores.sort((a, b) => a.cobro.min - b.cobro.min)
+    d.sinPareja = ['POINT', 'INSTORE'].reduce((s, k) => s + d[k].sinParejaMP.length + d[k].sinParejaApp.length, 0)
+    d.ok = !d.sinPareja && !d.errores.length
+    delete d.OTRO
   }
   return Object.values(out).sort((a, b) => b.dia.localeCompare(a.dia))
 }

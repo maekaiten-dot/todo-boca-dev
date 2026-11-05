@@ -206,6 +206,16 @@ function DetalleDia({ d }) {
           ))}
         </div>
       )}
+      {d.combinados.length > 0 && (
+        <div style={{ marginBottom: 10 }}>
+          <div style={S.detTit}>Pagos en partes (están bien)</div>
+          {d.combinados.map((k, i) => (
+            <div key={i} style={{ ...S.detLinea, color: '#22c55e' }}>✓ {k.ventas.length === 1
+              ? <>{k.ventas[0].idVenta} ({k.ventas[0].hora}) · {$(k.ventas[0].monto)} se pagó en {k.cobros.length} cobros: {k.cobros.map(c => `${$(c.bruto)} (${c.hora})`).join(' + ')}</>
+              : <>un cobro de {$(k.cobros[0].bruto)} ({k.cobros[0].hora}) pagó {k.ventas.length} ventas: {k.ventas.map(p => `${p.idVenta} ${$(p.monto)}`).join(' + ')}</>}</div>
+          ))}
+        </div>
+      )}
       {bloque('Point (tarjeta)', 'POINT')}
       {bloque('QR', 'INSTORE')}
       {d.ok && <div style={{ ...S.detLinea, color: '#22c55e' }}>Todo coincide: cada cobro tiene su venta en la app.</div>}

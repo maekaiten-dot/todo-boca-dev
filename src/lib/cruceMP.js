@@ -61,6 +61,44 @@ export function medioCorrecto(c) {
 }
 const comoCargada = p => p.posnet === 'BLANCO' && (METODOS_TARJETA.has(p.metodo) || p.metodo === 'QR') ? `${p.metodo} en el posnet blanco` : p.metodo
 
+// Combinaciones de 2 o 3 elementos sueltos que sumen el monto (±$1), todos cerca de la hora dada.
+// Devuelve la combinación con la menor diferencia de hora máxima, o null.
+const MAX_MIN_COMBO = 60
+function mejorCombinacion(objetivo, min, lista, montoDe) {
+  const c = lista.filter(x => !x.pareja && Math.abs(x.min - min) <= MAX_MIN_COMBO)
+  let mejor = null
+  const probar = combo => {
+    if (Math.abs(combo.reduce((s, x) => s + montoDe(x), 0) - objetivo) > 1) return
+    const dt = Math.max(...combo.map(x => Math.abs(x.min - min)))
+    if (!mejor || dt < mejor.dt) mejor = { combo, dt }
+  }
+  for (let i = 0; i < c.length; i++) for (let j = i + 1; j < c.length; j++) {
+    probar([c[i], c[j]])
+    for (let k = j + 1; k < c.length && c.length <= 40; k++) probar([c[i], c[j], c[k]])
+  }
+  return mejor?.combo || null
+}
+// Una venta pagada con varios cobros (ej. $35.000 en dos QR de $22.000 y $13.000), o un cobro que
+// cubre varias ventas. Quedan como emparejados (no es un error), y se anotan para mostrarlos.
+function emparejarCombinados(mp, app) {
+  const hechos = []
+  for (const p of app.filter(x => !x.pareja).sort((a, b) => b.monto - a.monto)) {
+    if (p.pareja) continue
+    const combo = mejorCombinacion(p.monto, p.min, mp, c => Math.round(c.bruto))
+    if (!combo) continue
+    combo.forEach(c => { c.pareja = p }); p.pareja = combo[0]
+    hechos.push({ ventas: [p], cobros: combo })
+  }
+  for (const c of mp.filter(x => !x.pareja).sort((a, b) => b.bruto - a.bruto)) {
+    if (c.pareja) continue
+    const combo = mejorCombinacion(Math.round(c.bruto), c.min, app, p => p.monto)
+    if (!combo) continue
+    combo.forEach(p => { p.pareja = c }); c.pareja = combo[0]
+    hechos.push({ ventas: combo, cobros: [c] })
+  }
+  return hechos
+}
+
 function emparejar(mp, app, maxMin) {
   const pares = []
   mp.forEach((c, i) => { if (c.pareja) return; app.forEach((p, j) => {
@@ -99,6 +137,9 @@ export function cruzarPorDia(cobros, partes, dias) {
     const errores = []
     // 1) Mismo canal: cobro del Point con venta con tarjeta, cobro por QR con venta por QR
     for (const canal of ['POINT', 'INSTORE']) emparejar(d[canal].mp, d[canal].app, MAX_MIN)
+    // 1b) Una venta en varios cobros, o un cobro para varias ventas (mismo canal)
+    const combinados = []
+    for (const canal of ['POINT', 'INSTORE']) combinados.push(...emparejarCombinados(d[canal].mp, d[canal].app))
     // 2) Lo que sobró: mismo monto y hora cercana pero cargado con otro medio (QR en vez de tarjeta,
     //    transferencia, efectivo, posnet blanco…) → error de registro del medio de pago
     const mpSueltos = [...d.POINT.mp, ...d.INSTORE.mp]
@@ -118,6 +159,7 @@ export function cruzarPorDia(cobros, partes, dias) {
       d[canal] = { mp, app, totMP, totApp, dif: Math.round(totMP - totApp), sinParejaMP: mp.filter(c => !c.pareja), sinParejaApp: app.filter(p => !p.pareja) }
     }
     d.errores = errores.sort((a, b) => a.cobro.min - b.cobro.min)
+    d.combinados = combinados
     d.sinPareja = ['POINT', 'INSTORE'].reduce((s, k) => s + d[k].sinParejaMP.length + d[k].sinParejaApp.length, 0)
     d.ok = !d.sinPareja && !d.errores.length
     delete d.OTRO

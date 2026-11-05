@@ -28,6 +28,7 @@ const CARGAS = {
   Asistencia: () => import('./pages/Asistencia.jsx'),
   Administracion: () => import('./pages/Administracion.jsx'),
   Promos: () => import('./pages/Promos.jsx'),
+  CobrosMP: () => import('./pages/CobrosMP.jsx'),
 }
 const LogVentas = lazy(CARGAS.LogVentas)
 const Estadisticas = lazy(CARGAS.Estadisticas)
@@ -43,6 +44,7 @@ const Fichadas = lazy(CARGAS.Fichadas)
 const Asistencia = lazy(CARGAS.Asistencia)
 const Administracion = lazy(CARGAS.Administracion)
 const Promos = lazy(CARGAS.Promos)
+const CobrosMP = lazy(CARGAS.CobrosMP)
 const precargarSolapas = () => Object.values(CARGAS).forEach(f => f().catch(() => {}))
 const CargandoSolapa = () => <div style={{ padding: 24, fontFamily: 'Barlow, sans-serif', color: 'var(--muted)' }}>Cargando…</div>
 
@@ -80,6 +82,7 @@ const TABS_MAS_ADMIN = [
   { id:'asis', label:'Asistencia', icon:'🗓', desc:'Tardes, francos y fichadas faltantes' },
   { id:'fich', label:'Fichadas', icon:'⏱', desc:'Tablet y celulares para fichar' },
   { id:'admin', label:'Administración', icon:'🔒', desc:'Cierre de mes, regalías, cuentas y ahorros' },
+  { id:'mp', label:'Mercado Pago', icon:'💙', desc:'Cobros del Point y QR, y control contra las ventas' },
 ]
 
 // Solapas según el local (src/config/local.js). Sin configuración: las de siempre.
@@ -92,7 +95,7 @@ function tabsDelLocal(tipoKey) {
 }
 function tabsMasDelLocal(esAdmin) {
   if (!esAdmin) return []
-  return LOCAL.solapas ? tabsPorIds(LOCAL.solapas.mas) : TABS_MAS_ADMIN
+  return (LOCAL.solapas ? tabsPorIds(LOCAL.solapas.mas) : TABS_MAS_ADMIN).filter(t => t.id !== 'mp' || LOCAL.planillaMP)
 }
 
 function MenuMas({ tabs, tabActual, onElegir, onCerrar }) {
@@ -578,6 +581,9 @@ export default function App() {
           )}
           {veAdmin && tabsVisitadas.has('rota') && (
             <div style={tabStyle('rota')}><Suspense fallback={<CargandoSolapa />}><Rotacion articulos={articulos} stockMap={stockMap} /></Suspense></div>
+          )}
+          {esAdmin && LOCAL.planillaMP && tabsVisitadas.has('mp') && (
+            <div style={tabStyle('mp')}><Suspense fallback={<CargandoSolapa />}><CobrosMP /></Suspense></div>
           )}
           {veAdmin && tabsVisitadas.has('promos') && (
             <div style={tabStyle('promos')}><Suspense fallback={<CargandoSolapa />}><Promos promos={promos} articulos={articulos} perfilNombre={empleadoActual} onCambio={cargarPromos} /></Suspense></div>

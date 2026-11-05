@@ -49,6 +49,10 @@ const LOCALES = {
     // Rol Supervisor (TIPO "Supervisor" en USUARIOS): ve lo mismo que un Admin pero no puede
     // modificar artículos ni editar o anular ventas cerradas
     supervisor: false,
+    // Planilla "Jorge Mercado Pago" (cobros del Point amarillo y QR). La app solo la LEE: la
+    // reescribe un Apps Script todos los días. Tiene que estar compartida como Lector con la
+    // cuenta de servicio de la app. null = no hay solapa Mercado Pago.
+    planillaMP: '151MOML6Ez5Evw296QyCfQWV31AdeY1GphMI_0c0DXbc',
   },
   mitad: {
     id: 'mitad',
@@ -72,6 +76,7 @@ const LOCALES = {
     fichar: false,
     barraGrande: true,
     supervisor: true,
+    planillaMP: null,
     // Vendedores para elegir en la pantalla simple (perfiles Caja de USUARIOS, sin "Tablet")
     pedirVendedor: true,
   },

@@ -1,0 +1,238 @@
+// src/pages/CobrosMP.jsx
+// Solapa "Mercado Pago" (solo Admin): cobros del Point amarillo y del QR de la cuenta de Jorge, que
+// trae la planilla "Jorge Mercado Pago" (la actualiza un Apps Script todos los días a las 7). La app
+// solo la lee. Muestra lo cobrado, lo que descuenta Mercado Pago, lo que falta liberar y el control
+// día por día contra las ventas cargadas en la app.
+import { useEffect, useMemo, useState } from 'react'
+import { getCobrosMP, getVentasDesde, CUENTA_APP } from '../api/sheets.js'
+import { partesApp, cruzarPorDia, nombreMedio, partirFechaMP } from '../lib/cruceMP.js'
+
+const $ = n => (Math.round(n || 0) < 0 ? '−$' : '$') + Math.abs(Math.round(n || 0)).toLocaleString('es-AR')
+const pct = x => x == null || !isFinite(x) ? '–' : (x * 100).toLocaleString('es-AR', { maximumFractionDigits: 1 }) + '%'
+const diaCorto = iso => { const [a, m, d] = String(iso).split('-'); return `${Number(d)}/${Number(m)}` }
+const NOMBRE_DIA = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb']
+const diaSemana = iso => NOMBRE_DIA[new Date(iso + 'T12:00:00').getDay()]
+
+function hoyISO(offset = 0) {
+  const [d, m, a] = new Date(Date.now() - offset * 86400000).toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' }).split('/').map(Number)
+  return `${a}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+}
+const PERIODOS = [
+  { v: 'hoy', label: 'Hoy' }, { v: 'ayer', label: 'Ayer' }, { v: '7', label: '7 días' },
+  { v: 'mes', label: 'Este mes' }, { v: 'mesAnt', label: 'Mes pasado' },
+]
+function rangoDe(p) {
+  const hoy = hoyISO()
+  if (p === 'hoy') return [hoy, hoy]
+  if (p === 'ayer') { const a = hoyISO(1); return [a, a] }
+  if (p === '7') return [hoyISO(6), hoy]
+  const [a, m] = hoy.split('-').map(Number)
+  if (p === 'mes') return [`${a}-${String(m).padStart(2, '0')}-01`, hoy]
+  const pa = m === 1 ? a - 1 : a, pm = m === 1 ? 12 : m - 1
+  const ult = new Date(pa, pm, 0).getDate()
+  return [`${pa}-${String(pm).padStart(2, '0')}-01`, `${pa}-${String(pm).padStart(2, '0')}-${ult}`]
+}
+function diasEntre(desde, hasta) {
+  const out = new Set()
+  for (let t = new Date(desde + 'T12:00:00'); t <= new Date(hasta + 'T12:00:00'); t = new Date(t.getTime() + 86400000)) {
+    out.add(`${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`)
+  }
+  return out
+}
+
+export default function CobrosMP() {
+  const [cobros, setCobros] = useState([])
+  const [ventas, setVentas] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [periodo, setPeriodo] = useState('7')
+  const [abierto, setAbierto] = useState(null) // día desplegado en el control
+
+  useEffect(() => { cargar() }, [])
+  async function cargar() {
+    setLoading(true); setError(null)
+    try {
+      // Ventas desde el 1 del mes pasado (alcanza para todos los períodos)
+      const [desde] = rangoDe('mesAnt')
+      const [c, v] = await Promise.all([getCobrosMP(), getVentasDesde(desde)])
+      setCobros(c); setVentas(v)
+    } catch (e) {
+      console.error(e)
+      setError(e?.message === 'MP_SIN_ACCESO' ? 'MP_SIN_ACCESO' : 'No se pudieron leer los cobros. Revisá la conexión y probá de nuevo.')
+    } finally { setLoading(false) }
+  }
+
+  const [desde, hasta] = rangoDe(periodo)
+  const delPeriodo = useMemo(() => cobros.filter(c => { const d = partirFechaMP(c.fecha).dia; return d >= desde && d <= hasta }), [cobros, desde, hasta])
+  const tot = useMemo(() => {
+    const t = { n: delPeriodo.length, bruto: 0, comision: 0, impuestos: 0, neto: 0 }
+    for (const c of delPeriodo) { t.bruto += c.bruto; t.comision += c.comision + c.financiacion; t.impuestos += c.descuentos - c.comision - c.financiacion; t.neto += c.neto }
+    return t
+  }, [delPeriodo])
+  const porMedio = useMemo(() => {
+    const m = {}
+    for (const c of delPeriodo) {
+      const k = nombreMedio(c)
+      const x = (m[k] ||= { medio: k, n: 0, bruto: 0, comision: 0, impuestos: 0, neto: 0 })
+      x.n++; x.bruto += c.bruto; x.comision += c.comision + c.financiacion; x.impuestos += c.descuentos - c.comision - c.financiacion; x.neto += c.neto
+    }
+    return Object.values(m).sort((a, b) => b.bruto - a.bruto)
+  }, [delPeriodo])
+  // Plata por liberarse: todos los cobros pendientes, sin importar el período
+  const porLiberar = useMemo(() => {
+    const pend = cobros.filter(c => !c.liberado)
+    const porDia = {}
+    pend.forEach(c => { const d = partirFechaMP(c.fechaLiberacion).dia || '¿?'; (porDia[d] ||= { dia: d, n: 0, neto: 0 }); porDia[d].n++; porDia[d].neto += c.neto })
+    return { total: pend.reduce((s, c) => s + c.neto, 0), n: pend.length, dias: Object.values(porDia).sort((a, b) => a.dia.localeCompare(b.dia)) }
+  }, [cobros])
+  const cruce = useMemo(() => cruzarPorDia(cobros, partesApp(ventas), diasEntre(desde, hasta)), [cobros, ventas, desde, hasta])
+  const ultimo = cobros.reduce((m, c) => c.fecha > m ? c.fecha : m, '')
+
+  if (loading) return <div style={S.centro}><div style={S.cargando}>Leyendo cobros de Mercado Pago…</div></div>
+  if (error === 'MP_SIN_ACCESO') return (
+    <div style={S.centro}>
+      <div style={{ ...S.cardTit, marginBottom: 8 }}>La app no puede leer la planilla “Jorge Mercado Pago”</div>
+      <div style={S.nota}>Abrí la planilla → Compartir → agregá esta cuenta como <b>Lector</b>:</div>
+      <div style={S.cuenta}>{CUENTA_APP || '(la cuenta de servicio de la app)'}</div>
+      <button style={S.btn} onClick={cargar}>Probar de nuevo</button>
+    </div>
+  )
+  if (error) return <div style={S.centro}><div style={S.nota}>{error}</div><button style={S.btn} onClick={cargar}>Reintentar</button></div>
+
+  return (
+    <div style={S.page}>
+      <div style={S.header}>
+        <div>
+          <div style={S.titulo}>MERCADO PAGO</div>
+          <div style={S.sub}>Point amarillo y QR de la cuenta de Jorge · último cobro en la planilla: {ultimo ? `${diaCorto(ultimo.slice(0, 10))} ${ultimo.slice(11, 16)}` : '–'} · se actualiza todos los días a las 7</div>
+        </div>
+        <button style={S.refresh} onClick={cargar} aria-label="Volver a leer">↻</button>
+      </div>
+
+      <div style={S.cuerpo}>
+        <div style={S.seg} role="group" aria-label="Período">
+          {PERIODOS.map((p, i) => <button key={p.v} style={{ ...S.segBtn, ...(i ? S.segSep : {}), ...(periodo === p.v ? S.segActivo : {}) }} onClick={() => { setPeriodo(p.v); setAbierto(null) }} aria-pressed={periodo === p.v}>{p.label}</button>)}
+        </div>
+
+        <div style={S.cards}>
+          <div style={S.card}><div style={S.cardLbl}>Cobrado</div><div style={S.cardBig}>{$(tot.bruto)}</div><div style={S.cardSub}>{tot.n} {tot.n === 1 ? 'cobro' : 'cobros'}</div></div>
+          <div style={S.card}><div style={S.cardLbl}>Descuenta Mercado Pago</div><div style={{ ...S.cardBig, color: '#f87171' }}>{$(tot.comision + tot.impuestos)}</div><div style={S.cardSub}>{pct(tot.bruto ? (tot.comision + tot.impuestos) / tot.bruto : null)} · comisión {$(tot.comision)} · impuestos y retenciones {$(tot.impuestos)}</div></div>
+          <div style={S.card}><div style={S.cardLbl}>Neto</div><div style={{ ...S.cardBig, color: '#22c55e' }}>{$(tot.neto)}</div><div style={S.cardSub}>lo que queda de lo cobrado</div></div>
+          <div style={S.card}><div style={S.cardLbl}>Falta liberar (todo)</div><div style={S.cardBig}>{$(porLiberar.total)}</div><div style={S.cardSub}>{porLiberar.n} cobros · {porLiberar.dias.slice(0, 3).map(d => `${diaCorto(d.dia)}: ${$(d.neto)}`).join(' · ')}{porLiberar.dias.length > 3 ? ' …' : ''}</div></div>
+        </div>
+
+        <div style={S.bloque}>
+          <div style={S.cardTit}>Control contra las ventas de la app</div>
+          <div style={S.nota}>Point (tarjeta) contra las ventas con tarjeta del posnet amarillo; QR contra las ventas con QR del posnet amarillo. Cada cobro se empareja con una venta del mismo día y el mismo monto. Tocá un día para ver qué no coincide. Las ventas del posnet blanco son de otra cuenta y no entran.</div>
+          <div style={S.tablaWrap}>
+            <table style={S.tabla}>
+              <thead><tr>
+                <th style={{ ...S.th, textAlign: 'left' }}>Día</th>
+                <th style={S.th}>Point MP</th><th style={S.th}>App tarjeta 🟡</th><th style={S.th}>Dif.</th>
+                <th style={S.th}>QR MP</th><th style={S.th}>App QR</th><th style={S.th}>Dif.</th>
+                <th style={{ ...S.th, textAlign: 'left' }}>Estado</th>
+              </tr></thead>
+              <tbody>
+                {cruce.map(d => {
+                  const sinPar = d.POINT.sinParejaMP.length + d.POINT.sinParejaApp.length + d.INSTORE.sinParejaMP.length + d.INSTORE.sinParejaApp.length
+                  return [
+                    <tr key={d.dia} onClick={() => setAbierto(a => a === d.dia ? null : d.dia)} style={{ cursor: 'pointer', ...(abierto === d.dia ? { background: 'rgba(96,165,250,0.08)' } : {}) }} aria-expanded={abierto === d.dia}>
+                      <td style={{ ...S.td, textAlign: 'left' }}><span style={{ color: 'var(--muted)', marginRight: 6 }}>{abierto === d.dia ? '▾' : '▸'}</span>{diaSemana(d.dia)} {diaCorto(d.dia)}</td>
+                      <td style={S.td}>{$(d.POINT.totMP)}</td><td style={S.td}>{$(d.POINT.totApp)}</td><td style={{ ...S.td, ...colorDif(d.POINT.dif) }}>{d.POINT.dif ? $(d.POINT.dif) : '✓'}</td>
+                      <td style={S.td}>{$(d.INSTORE.totMP)}</td><td style={S.td}>{$(d.INSTORE.totApp)}</td><td style={{ ...S.td, ...colorDif(d.INSTORE.dif) }}>{d.INSTORE.dif ? $(d.INSTORE.dif) : '✓'}</td>
+                      <td style={{ ...S.td, textAlign: 'left', color: d.ok ? '#22c55e' : '#f59e0b', fontWeight: 600 }}>{d.ok ? '✓ coincide' : `⚠ ${sinPar} sin pareja`}</td>
+                    </tr>,
+                    abierto === d.dia && <tr key={d.dia + '-det'}><td colSpan={8} style={{ padding: '6px 8px 14px', borderBottom: '1px solid var(--border)' }}><DetalleDia d={d} /></td></tr>,
+                  ]
+                })}
+                {!cruce.length && <tr><td colSpan={8} style={{ ...S.td, textAlign: 'left' }}>Sin cobros ni ventas con tarjeta o QR en este período.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div style={S.bloque}>
+          <div style={S.cardTit}>Por medio de pago</div>
+          <div style={S.tablaWrap}>
+            <table style={S.tabla}>
+              <thead><tr>{['Medio', 'Cobros', 'Cobrado', 'Comisión', 'Impuestos', 'Neto', '% descontado'].map((h, i) => <th key={h} style={{ ...S.th, textAlign: i ? 'right' : 'left' }}>{h}</th>)}</tr></thead>
+              <tbody>
+                {porMedio.map(m => (
+                  <tr key={m.medio}>
+                    <td style={{ ...S.td, textAlign: 'left' }}>{m.medio}</td><td style={S.td}>{m.n}</td><td style={S.td}>{$(m.bruto)}</td>
+                    <td style={S.td}>{$(m.comision)}</td><td style={S.td}>{$(m.impuestos)}</td><td style={S.td}>{$(m.neto)}</td>
+                    <td style={{ ...S.td, fontWeight: 700 }}>{pct(m.bruto ? (m.comision + m.impuestos) / m.bruto : null)}</td>
+                  </tr>
+                ))}
+                {!porMedio.length && <tr><td colSpan={7} style={{ ...S.td, textAlign: 'left' }}>Sin cobros en este período.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function DetalleDia({ d }) {
+  const bloque = (titulo, k) => {
+    const x = d[k]
+    if (!x.mp.length && !x.app.length) return null
+    return (
+      <div style={{ marginBottom: 10 }}>
+        <div style={S.detTit}>{titulo}</div>
+        {x.sinParejaMP.length > 0 && <div style={S.detAviso}>Cobrado en Mercado Pago sin venta en la app ({x.sinParejaMP.length}):</div>}
+        {x.sinParejaMP.map(c => <div key={c.id} style={S.detLinea}>⚠ {c.hora} · <b>{$(c.bruto)}</b> · {nombreMedio(c)} · cobro {c.id}</div>)}
+        {x.sinParejaApp.length > 0 && <div style={S.detAviso}>Vendido en la app sin cobro en Mercado Pago ({x.sinParejaApp.length}):</div>}
+        {x.sinParejaApp.map(p => <div key={p.idVenta + p.metodo} style={S.detLinea}>⚠ {p.hora} · <b>{$(p.monto)}</b> · {p.metodo} · {p.idVenta}{p.empleado ? ` · ${p.empleado}` : ''}</div>)}
+        <details style={{ marginTop: 4 }}>
+          <summary style={S.detSum}>Ver los {x.mp.length} cobros y {x.app.length} ventas</summary>
+          {x.mp.map(c => <div key={c.id} style={S.detLinea}>{c.pareja ? '✓' : '⚠'} {c.hora} · {$(c.bruto)} · {nombreMedio(c)}{c.pareja ? ` → ${c.pareja.idVenta} (${c.pareja.hora})` : ' · sin venta en la app'}</div>)}
+        </details>
+      </div>
+    )
+  }
+  return (
+    <div>
+      {bloque('Point (tarjeta)', 'POINT')}
+      {bloque('QR', 'INSTORE')}
+      {d.ok && <div style={{ ...S.detLinea, color: '#22c55e' }}>Todo coincide: cada cobro tiene su venta en la app.</div>}
+      {!d.ok && <div style={S.nota}>Si un cobro no tiene venta: puede ser una venta sin cargar, cargada con otro medio (efectivo, transferencia) o en el posnet blanco. Si una venta no tiene cobro: puede que se haya cobrado por el posnet blanco o en efectivo y quedó mal el medio.</div>}
+    </div>
+  )
+}
+
+const colorDif = dif => !dif ? { color: '#22c55e' } : { color: '#f59e0b', fontWeight: 700 }
+
+const S = {
+  page: { display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto', paddingBottom: 24 },
+  header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '16px 20px 12px', borderBottom: '2px solid var(--accent)', flexShrink: 0 },
+  titulo: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 28, color: 'var(--accent-text)', letterSpacing: 2 },
+  sub: { fontFamily: 'Barlow, sans-serif', fontSize: 12, color: 'var(--muted)' },
+  refresh: { background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 10, color: 'var(--text)', fontSize: 20, width: 42, height: 42, cursor: 'pointer', flexShrink: 0 },
+  cuerpo: { display: 'flex', flexDirection: 'column', gap: 14, padding: '14px 20px' },
+  seg: { display: 'inline-flex', flexWrap: 'wrap', alignSelf: 'flex-start', border: '1.5px solid var(--border)', borderRadius: 10, overflow: 'hidden' },
+  segBtn: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 15, letterSpacing: 0.5, padding: '8px 14px', background: 'transparent', color: 'var(--muted)', border: 'none', cursor: 'pointer' },
+  segSep: { borderLeft: '1.5px solid var(--border)' },
+  segActivo: { background: 'rgba(245,200,0,0.14)', color: 'var(--accent-text)' },
+  cards: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 12 },
+  card: { background: 'var(--surface)', border: '1.5px solid var(--border)', borderRadius: 12, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 3 },
+  cardLbl: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 13, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--muted)' },
+  cardBig: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 28, color: 'var(--text)' },
+  cardSub: { fontFamily: 'Barlow, sans-serif', fontSize: 12, color: 'var(--muted)', lineHeight: 1.4 },
+  bloque: { background: 'var(--surface)', border: '1.5px solid var(--border)', borderRadius: 12, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 },
+  cardTit: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 20, color: 'var(--accent-text)', letterSpacing: 1 },
+  nota: { fontFamily: 'Barlow, sans-serif', fontSize: 12, color: 'var(--muted)', lineHeight: 1.5 },
+  tablaWrap: { overflowX: 'auto', WebkitOverflowScrolling: 'touch' },
+  tabla: { width: '100%', minWidth: 720, borderCollapse: 'collapse' },
+  th: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 12, color: 'var(--muted)', letterSpacing: 1, textTransform: 'uppercase', padding: '8px', borderBottom: '1.5px solid var(--border)', whiteSpace: 'nowrap', textAlign: 'right' },
+  td: { fontFamily: 'Barlow, sans-serif', fontSize: 14, color: 'var(--text)', padding: '8px', borderBottom: '1px solid var(--border)', textAlign: 'right', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' },
+  detTit: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 15, letterSpacing: 1, color: 'var(--text)', marginBottom: 2 },
+  detAviso: { fontFamily: 'Barlow, sans-serif', fontSize: 13, color: '#f59e0b', fontWeight: 600, marginTop: 4 },
+  detLinea: { fontFamily: 'Barlow, sans-serif', fontSize: 13, color: 'var(--text)', padding: '2px 0', whiteSpace: 'normal' },
+  detSum: { fontFamily: 'Barlow, sans-serif', fontSize: 12, color: 'var(--muted)', cursor: 'pointer' },
+  centro: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, height: '100%', padding: 24, textAlign: 'center' },
+  cargando: { fontFamily: 'Barlow, sans-serif', fontSize: 15, color: 'var(--muted)' },
+  cuenta: { fontFamily: 'monospace', fontSize: 14, background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px', color: 'var(--text)', userSelect: 'all', wordBreak: 'break-all' },
+  btn: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 16, background: 'var(--accent)', color: '#000', border: 'none', borderRadius: 10, padding: '10px 18px', cursor: 'pointer' },
+}

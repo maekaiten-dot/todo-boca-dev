@@ -932,6 +932,27 @@ async function agregarFilasDetalle(rows) {
   if (!res.ok) throw new Error(`Sheets APPEND CELLS error: ${res.status}`)
 }
 
+// ── Cobros de Mercado Pago (planilla aparte, solo lectura) ─────────────────────────
+// Hoja "Cobros MP" de la planilla LOCAL.planillaMP: una fila por cobro aprobado del Point y del QR.
+// Se lee sin formato (números como números). Nunca se escribe: la reescribe un Apps Script.
+export const CUENTA_APP = CLIENT_EMAIL
+export async function getCobrosMP() {
+  if (!LOCAL.planillaMP) return []
+  const token = await getAccessToken()
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${LOCAL.planillaMP}/values/${encodeURIComponent("'Cobros MP'!A2:T")}?valueRenderOption=UNFORMATTED_VALUE`
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+  if (res.status === 403 || res.status === 404) throw new Error('MP_SIN_ACCESO')
+  if (!res.ok) throw new Error(`Sheets GET error: ${res.status}`)
+  const n = v => typeof v === 'number' ? v : parseMonto(v)
+  return ((await res.json()).values || []).filter(r => r[0] && r[1]).map(r => ({
+    fecha: String(r[0]), id: String(r[1]), estado: String(r[2] || ''), canal: String(r[3] || '').toUpperCase(),
+    medio: String(r[4] || ''), tipoMedio: String(r[5] || ''), cuotas: Number(r[6]) || 1,
+    bruto: n(r[7]), comision: n(r[8]), financiacion: n(r[9]), retIIBB: n(r[10]), retSirtac: n(r[11]),
+    impDebCred: n(r[12]), otrosImp: n(r[13]), descuentos: n(r[14]), pctDescontado: n(r[15]), neto: n(r[16]),
+    control: n(r[17]), fechaLiberacion: String(r[18] || ''), liberado: String(r[19] || '').toLowerCase() === 'released',
+  }))
+}
+
 async function sheetsBatchGet(rangos) {
   const token = await getAccessToken()
   const q = rangos.map(r => `ranges=${encodeURIComponent(r)}`).join('&')

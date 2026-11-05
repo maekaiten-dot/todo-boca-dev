@@ -564,15 +564,35 @@ const COL_DTO_EFECTIVO = 'AG'
 const COL_REDONDEO = 'AH'
 
 // ── Posnet con el que se cobra (tarjeta y QR) ────────────────────────────────
-// Se decide por el bruto MENOS las promos (imanes, alfajores, 2x1 XXXL), antes de socio/efectivo:
-// menos de $50.000 → posnet AMARILLO · $50.000 o más → posnet BLANCO. Se guarda en AI (POSNET).
-export const POSNET_TOPE = 50000
+// Desde nov 2026 se decide por el MEDIO DE PAGO, sin importar el monto:
+//   crédito → posnet BLANCO (Payway) · débito y QR → posnet AMARILLO (Mercado Pago)
+// Se guarda en AI (POSNET). Con 2 medios que van a posnets distintos (crédito + débito, crédito + QR)
+// queda "AMBOS": cada parte se cobra en el posnet de su medio (ver posnetDeParte).
+// Antes (hasta nov 2026) era por monto: menos de $50.000 amarillo, desde $50.000 blanco; las ventas
+// viejas conservan el posnet que se anotó.
 export const POSNET_METODOS = new Set(['Tarjeta de Crédito', 'Tarjeta de Débito', 'Tarjeta', 'QR'])
 export const POSNETS = ['AMARILLO', 'BLANCO']
+export const POSNET_AMBOS = 'AMBOS'
 const COL_POSNET = 'AI'
-export function posnetSugerido(brutoMenosPromos) {
-  return Math.round(brutoMenosPromos) < POSNET_TOPE ? 'AMARILLO' : 'BLANCO'
+// Posnet que corresponde a un medio de pago ('' si no usa posnet). "Tarjeta" sin aclarar = crédito.
+export function posnetDeMetodo(metodo) {
+  if (metodo === 'Tarjeta de Crédito' || metodo === 'Tarjeta') return 'BLANCO'
+  if (metodo === 'Tarjeta de Débito' || metodo === 'QR') return 'AMARILLO'
+  return ''
 }
+// Posnet de una venta según sus medios: AMARILLO, BLANCO, AMBOS o ''
+export function posnetDeVenta(metodoPago) {
+  const ps = [...new Set(metodosDe(metodoPago).map(posnetDeMetodo).filter(Boolean))]
+  return ps.length > 1 ? POSNET_AMBOS : ps[0] || ''
+}
+// Posnet con el que se cobró UNA parte de la venta (un medio de pago). Las ventas con un solo
+// posnet anotado (las viejas, o las de un solo posnet) devuelven ese; las "AMBOS", el de su medio.
+export function posnetDeParte(v, metodo) {
+  if (!POSNET_METODOS.has(metodo)) return ''
+  const pos = String(v?.posnet || '').trim().toUpperCase()
+  return pos === POSNET_AMBOS ? posnetDeMetodo(metodo) : pos
+}
+export const nombrePosnet = p => p === POSNET_AMBOS ? 'amarillo y blanco' : String(p || '').toLowerCase()
 
 // ── Moneda extranjera: sin descuentos ────────────────────────────────────────
 // Pagando en efectivo con dólares, euros o reales, o con Pix, no hay descuento de socio ni de efectivo.
@@ -661,7 +681,7 @@ export async function registrarVenta({ items, devueltos = [], metodoPago, pagos 
   }
   const conXXXL = promoXXXL?.descuento > 0
   if (socio) await asegurarColumna(COL_DTO_SOCIO, 'DTO SOCIO')
-  const posnetVenta = usaPosnet(metodoPago) && POSNETS.includes(posnet) ? posnet : ''
+  const posnetVenta = usaPosnet(metodoPago) && (POSNETS.includes(posnet) || posnet === POSNET_AMBOS) ? posnet : ''
   if (posnetVenta) await asegurarColumna(COL_POSNET, 'POSNET')
   const ahora = getArgentinaDate()
   let dt = ahora, constancia = ''
@@ -1080,7 +1100,7 @@ export async function editarVenta({ venta, lineas, metodoPago, pagos = null, pos
     if (!(m1 > 0 && m1 < total)) throw new Error('PAGOS_MONTO')
     textoPagosVenta = textoPagos([{ metodo: pagos[0].metodo, monto: m1 }, { metodo: pagos[1].metodo, monto: total - m1 }])
   }
-  const posnetVenta = usaPosnet(metodoPago) && POSNETS.includes(posnet) ? posnet : ''
+  const posnetVenta = usaPosnet(metodoPago) && (POSNETS.includes(posnet) || posnet === POSNET_AMBOS) ? posnet : ''
 
   // Qué cambió (para dejar constancia)
   const cambios = []

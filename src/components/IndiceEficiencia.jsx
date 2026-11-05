@@ -9,7 +9,7 @@
 // Componentes pendientes (se muestran con lo que falta): gastos fijos sobre ventas, rendimiento del
 // stock (GMROI) y stock parado.
 import { useState, useEffect, useMemo } from 'react'
-import { repartoPago } from '../api/sheets.js'
+import { repartoPago, posnetDeParte } from '../api/sheets.js'
 import { generarRecomendaciones, costoValido } from '../lib/recomendaciones.js'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Cell } from 'recharts'
 
@@ -28,9 +28,13 @@ export const COMPONENTES = [
 
 // Comisiones en % antes de IVA. Crédito siempre en 1 pago. "Tarjeta" sin aclarar se toma como crédito.
 // Las ventas con tarjeta o QR sin posnet anotado se toman como BLANCO. Efectivo, transferencia y Pix: sin comisión.
+// Valores reales (nov 2026), sin la retención de IIBB (2,5% en los dos, no es comisión):
+//  · Mercado Pago (planilla "Jorge Mercado Pago"): crédito 8,7%, débito 3,33%, QR 0,97% con IVA.
+//  · Payway (resumen de oct 2026, ya sin cobro anticipado): arancel crédito 2% (Amex 2,5%), débito
+//    sin arancel, más el "Servicio Payway" (~1% de lo cobrado por mes) que se reparte en los dos.
 export const COMISIONES = {
-  AMARILLO: { credito: 2.99, debito: 2.99, qr: 0.8 }, // Mercado Pago Point
-  BLANCO: { credito: 2.0, debito: 1.3, qr: 0.8 },     // Payway (débito: entre Visa/Cabal 1,2% y Mastercard 1,4%)
+  AMARILLO: { credito: 7.19, debito: 2.75, qr: 0.8 }, // Mercado Pago Point
+  BLANCO: { credito: 3.0, debito: 1.0, qr: 0.8 },     // Payway
 }
 const IVA = 1.21
 export function comisionDe(metodo, posnet) {
@@ -96,7 +100,7 @@ export function calcularIndice(ventas, { indices = null, horas = {}, mesActual }
     const x = (m[mes] ||= { venta: 0, ventaConCosto: 0, costo: 0, tickets: new Set(), ventaTk: 0, unidadesTk: 0, comision: 0 })
     const $ = monto(v)
     x.venta += $
-    x.comision += repartoPago(v).reduce((s, p) => s + p.monto * comisionDe(p.metodo, v.posnet), 0)
+    x.comision += repartoPago(v).reduce((s, p) => s + p.monto * comisionDe(p.metodo, posnetDeParte(v, p.metodo)), 0)
     if (costoValido(v)) { x.ventaConCosto += $; x.costo += v.costoTotal }
     // Solo filas con ticket real (las cargas viejas de resumen mensual no tienen ID de venta)
     if (v.idVenta && !cambio.has(v.idVenta)) { x.tickets.add(v.idVenta); x.ventaTk += $; x.unidadesTk += v.cantidad || 0 }

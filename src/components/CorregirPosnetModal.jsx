@@ -38,7 +38,7 @@ export default function CorregirPosnetModal({ venta, usuarios = [], perfilNombre
         <div style={{ ...S.confirmTitle, color:'var(--accent-text)' }}>Corregir posnet</div>
         <div style={S.confirmSub}>
           Venta <strong style={{ color: 'var(--text)' }}>{venta.idVenta}</strong> · {venta.hora} · ${Math.round(venta.total).toLocaleString('es-AR')}<br />
-          Registrado: <strong style={{ color: 'var(--text)' }}>{venta.posnet ? `posnet ${venta.posnet.toLowerCase()}` : 'sin posnet'}</strong>
+          Registrado: <strong style={{ color: 'var(--text)' }}>{venta.posnet ? `posnet ${venta.posnet === 'AMBOS' ? 'amarillo y blanco' : venta.posnet.toLowerCase()}` : 'sin posnet'}</strong>
         </div>
 
         <div style={S.corrLabel}>¿CON QUÉ POSNET SE COBRÓ?</div>

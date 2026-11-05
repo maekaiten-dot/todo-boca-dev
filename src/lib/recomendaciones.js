@@ -1,3 +1,4 @@
+import { posnetDeParte } from '../api/sheets.js'
 // src/lib/recomendaciones.js
 // Recomendaciones del índice de eficiencia: reglas fijas (sin IA) que buscan la causa de cada
 // componente que está por debajo del promedio y proponen qué hacer. Usan el mes elegido y lo
@@ -164,9 +165,10 @@ export function generarRecomendaciones(ventas, mes, comp, { fichadas = [], comis
         const reparto = v.pagos?.length >= 2 ? (() => { const suma = v.pagos.reduce((s, p) => s + p.monto, 0) || 1; return v.pagos.map(p => ({ metodo: p.metodo, monto: monto(v) * p.monto / suma })) })() : [{ metodo: v.metodoPago, monto: monto(v) }]
         for (const p of reparto) {
           total += p.monto
-          const k = comisionDe(p.metodo, v.posnet)
+          const pos = posnetDeParte(v, p.metodo)
+          const k = comisionDe(p.metodo, pos)
           if (k > 0) { tarj += p.monto; com += p.monto * k }
-          if (k > 0 && /AMARILLO/i.test(v.posnet || '')) { amar += p.monto; ahorro += p.monto * (k - comisionDe(p.metodo, 'BLANCO')) }
+          if (k > 0 && /AMARILLO/i.test(pos || '')) { amar += p.monto; ahorro += p.monto * (k - comisionDe(p.metodo, 'BLANCO')) }
         }
       }
       return { total, tarj, com, amar, ahorro }

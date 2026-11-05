@@ -2,9 +2,9 @@
 // Editar una venta ya cerrada (solo Admin): artículos (agregar, quitar, cambiar), cantidades, precios,
 // totales, medio de pago (uno o dos), posnet, notas y vendedor, o anularla entera. Siempre con motivo:
 // queda constancia de quién, por qué y qué cambió. Es el único lugar para corregir una venta cerrada.
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { parseMonto as num } from '../lib/montos.js'
-import { editarVenta, anularVentaConMotivo, MOTIVOS_EDICION, POSNETS, usaPosnet, metodosDe, SEP_METODOS } from '../api/sheets.js'
+import { editarVenta, anularVentaConMotivo, MOTIVOS_EDICION, POSNETS, POSNET_AMBOS, posnetDeVenta, usaPosnet, metodosDe, SEP_METODOS } from '../api/sheets.js'
 
 const METODOS = ['Efectivo Pesos', 'Efectivo Dólares', 'Efectivo Reales', 'Efectivo Euros', 'Tarjeta de Crédito', 'Tarjeta de Débito', 'QR', 'Transferencia', 'Pix']
 const fmt$ = n => (n < 0 ? '−$' : '$') + Math.abs(Math.round(n || 0)).toLocaleString('es-AR')
@@ -58,6 +58,14 @@ export default function EditarVentaModal({ venta, articulos = [], usuarios = [],
   const total = lineas.filter(l => !l.quitar).reduce((s, l) => s + Math.round(num(l.precioTotalFinal)), 0)
   const metodoFinal = dividido && metodo2 ? `${metodo1}${SEP_METODOS}${metodo2}` : metodo1
   const conPosnet = usaPosnet(metodoFinal)
+  // Si se cambia el medio de pago, el posnet se pone solo según la regla (crédito blanco; débito y
+  // QR amarillo). Igual se puede cambiar a mano, por si se cobró con el otro.
+  const primeraVez = useRef(true)
+  useEffect(() => {
+    if (primeraVez.current) { primeraVez.current = false; return }
+    setPosnet(posnetDeVenta(metodoFinal))
+  }, [metodoFinal])
+  const opcionesPosnet = posnetDeVenta(metodoFinal) === POSNET_AMBOS || posnet === POSNET_AMBOS ? [...POSNETS, POSNET_AMBOS] : POSNETS
   const vendedores = useMemo(() => [...new Set([...usuarios.filter(u => u.nombre && u.nombre !== 'Tablet').map(u => u.nombre), ref.empleado].filter(Boolean))], [usuarios, ref.empleado])
 
   const cambiar = (k, campos) => setLineas(ls => ls.map((l, i) => i === k ? { ...l, ...campos } : l))
@@ -91,7 +99,7 @@ export default function EditarVentaModal({ venta, articulos = [], usuarios = [],
     if (dividido && (!metodo2 || metodo2 === metodo1)) { setError('Elegí dos medios de pago distintos'); return }
     const m1 = Math.round(num(monto1))
     if (dividido && !(m1 > 0 && m1 < total)) { setError(`Lo cobrado con ${metodo1} tiene que ser más que $0 y menos que el total`); return }
-    if (conPosnet && !POSNETS.includes(posnet)) { setError('Elegí con qué posnet se cobró'); return }
+    if (conPosnet && !opcionesPosnet.includes(posnet)) { setError('Elegí con qué posnet se cobró'); return }
     setGuardando(true)
     try {
       const registro = await editarVenta({
@@ -171,7 +179,8 @@ export default function EditarVentaModal({ venta, articulos = [], usuarios = [],
             )}
             {conPosnet && (
               <div style={S.campo}><span style={S.label}>POSNET</span>
-                <div style={{ display: 'flex', gap: 8 }}>{POSNETS.map(p => <button key={p} style={{ ...S.btnSec, ...(posnet === p ? S.activo : {}) }} onClick={() => setPosnet(p)}>{p}</button>)}</div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>{opcionesPosnet.map(p => <button key={p} style={{ ...S.btnSec, ...(posnet === p ? S.activo : {}) }} onClick={() => setPosnet(p)}>{p === POSNET_AMBOS ? 'LOS DOS' : p}</button>)}</div>
+                {posnet === POSNET_AMBOS && <div style={{ fontFamily: 'Barlow, sans-serif', fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>El crédito en el blanco y el débito o QR en el amarillo.</div>}
               </div>
             )}
             <div style={S.campos}>

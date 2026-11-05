@@ -8,7 +8,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { parseMonto as parsePrecio } from '../lib/montos.js'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
-import { getMonotributoManual, montoConMetodo } from '../api/sheets.js'
+import { getMonotributoManual, montoConMetodo, repartoPago, posnetDeParte } from '../api/sheets.js'
 
 // Topes anuales de ingresos brutos (actualizar cuando ARCA los cambie)
 export const TOPES_MONOTRIBUTO = [
@@ -16,7 +16,9 @@ export const TOPES_MONOTRIBUTO = [
   ['F', 45151659.41], ['G', 53995798.87], ['H', 81924660.37], ['I', 91699761.90], ['J', 105012519.20], ['K', 126610838.75],
 ]
 const TOPE_K = TOPES_MONOTRIBUTO[TOPES_MONOTRIBUTO.length - 1][1]
-const CORTE_POSNET = 50000 // regla actual: menos de $50.000 → amarillo; desde $50.000 → blanco
+// Regla que se usó hasta nov 2026 (menos de $50.000 → amarillo; desde $50.000 → blanco). Solo sirve para
+// estimar ventas viejas sin posnet anotado: las nuevas se cobran según el medio de pago.
+const CORTE_POSNET = 50000
 const POSNETS = [
   { id: 'amarillo', nombre: 'Posnet amarillo', color: '#f5c800' },
   { id: 'blanco', nombre: 'Posnet blanco', color: '#e8eefc' },
@@ -47,11 +49,14 @@ function calcularMensual(ventas, manual) {
     const [d, m, a] = String(v.fecha).split('/').map(Number); if (!d || !m || !a) return
     const k = mesKey(a, m)
     const mm = meses[k] || (meses[k] = { amarillo: 0, blanco: 0, estAmarillo: 0, estBlanco: 0 })
-    const monto = montoConMetodo(v, esTarjetaOQR)
-    const pos = String(v.posnet || '').trim().toUpperCase()
-    if (pos === 'AMARILLO') mm.amarillo += monto
-    else if (pos === 'BLANCO') mm.blanco += monto
-    else { const t = `${k}|${v.fecha}|${v.idVenta || v.idDetalle}`; (tickets[t] ||= { k, total: 0 }).total += monto }
+    // Cada parte va al posnet de su medio (crédito + débito puede ir a los dos)
+    for (const p of repartoPago(v)) {
+      if (!esTarjetaOQR(p.metodo)) continue
+      const pos = posnetDeParte(v, p.metodo)
+      if (pos === 'AMARILLO') mm.amarillo += p.monto
+      else if (pos === 'BLANCO') mm.blanco += p.monto
+      else { const t = `${k}|${v.fecha}|${v.idVenta || v.idDetalle}`; (tickets[t] ||= { k, total: 0 }).total += p.monto }
+    }
   })
   Object.values(tickets).forEach(t => { if (t.total >= CORTE_POSNET) meses[t.k].estBlanco += t.total; else meses[t.k].estAmarillo += t.total })
   Object.entries(manual).forEach(([k, v]) => { meses[k] ||= { amarillo: 0, blanco: 0, estAmarillo: 0, estBlanco: 0 } })
@@ -191,7 +196,7 @@ export default function MonotributoPosnet({ ventas = [] }) {
 
       {datos.hayEstimados && (
         <div style={S.nota}>
-          Algunos meses son <strong>estimados</strong>: la app empezó a registrar el posnet hace poco, y para las ventas anteriores reparte tarjeta + QR con la regla de hoy (menos de {fmt$(CORTE_POSNET)} → amarillo; desde {fmt$(CORTE_POSNET)} → blanco). Para que el contador sea exacto, cargá los totales reales de cada titular en la hoja <strong>MONOTRIBUTO POSNET</strong> de la planilla (columnas MES aaaa-mm, AMARILLO, BLANCO): los meses cargados ahí reemplazan a los estimados.
+          Algunos meses son <strong>estimados</strong>: la app empezó a registrar el posnet hace poco, y para las ventas anteriores reparte tarjeta + QR con la regla que se usaba hasta noviembre de 2026 (menos de {fmt$(CORTE_POSNET)} → amarillo; desde {fmt$(CORTE_POSNET)} → blanco). Para que el contador sea exacto, cargá los totales reales de cada titular en la hoja <strong>MONOTRIBUTO POSNET</strong> de la planilla (columnas MES aaaa-mm, AMARILLO, BLANCO): los meses cargados ahí reemplazan a los estimados.
         </div>
       )}
       {errorManual && <div style={{ ...S.nota, color: '#ef4444' }}>No se pudo leer la hoja MONOTRIBUTO POSNET; se muestran solo datos de la app.</div>}

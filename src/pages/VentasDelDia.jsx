@@ -1,6 +1,6 @@
 // src/pages/VentasDelDia.jsx
 import { useState, useEffect, Fragment } from 'react'
-import { getVentasHoy, anularVenta, registrarLog, getGastosCajaHoy, POSNET_METODOS, usaPosnet, metodosDe, repartoPago, montoConMetodo } from '../api/sheets.js'
+import { getVentasHoy, anularVenta, registrarLog, getGastosCajaHoy, POSNET_METODOS, usaPosnet, metodosDe, repartoPago, montoConMetodo, posnetDeParte, nombrePosnet } from '../api/sheets.js'
 import DetalleVentaModal from '../components/DetalleVentaModal.jsx'
 
 const METODO_ICONS = {
@@ -112,12 +112,16 @@ export default function VentasDelDia({ refreshKey, usuarios = [], perfilNombre =
     }, {})
 
   // ── Totales por posnet (tarjeta y QR), para controlar contra el cierre de cada terminal ──
+  // Cada parte de la venta va al posnet de su medio (una venta con crédito + débito suma a los dos)
   const porPosnet = ventas
     .filter(v => !v.anulado && v.posnet)
     .reduce((acc, v) => {
-      if (!acc[v.posnet]) acc[v.posnet] = { total: 0, ventas: new Set() }
-      acc[v.posnet].total += montoConMetodo(v, m => POSNET_METODOS.has(m))
-      acc[v.posnet].ventas.add(v.idVenta || v.idDetalle)
+      repartoPago(v).forEach(p => {
+        const pos = posnetDeParte(v, p.metodo); if (!pos) return
+        if (!acc[pos]) acc[pos] = { total: 0, ventas: new Set() }
+        acc[pos].total += p.monto
+        acc[pos].ventas.add(v.idVenta || v.idDetalle)
+      })
       return acc
     }, {})
 
@@ -322,7 +326,7 @@ export default function VentasDelDia({ refreshKey, usuarios = [], perfilNombre =
                           <td style={S.td}>
                             {iconos(item.metodoPago)} {item.metodoPago}
                             {item.pagos && i === 0 && <span style={{ display:'block', fontSize:11, color:'var(--muted)' }}>{textoPagos(item.pagos)}</span>}
-                            {item.posnet && <span style={{ display:'block', fontSize:11, color: item.posnet === 'AMARILLO' ? 'var(--accent)' : 'var(--muted)' }} title={item.correccionPosnet || undefined}>Posnet {item.posnet.toLowerCase()}{item.correccionPosnet ? ' · corregido' : ''}</span>}
+                            {item.posnet && <span style={{ display:'block', fontSize:11, color: item.posnet === 'AMARILLO' ? 'var(--accent)' : 'var(--muted)' }} title={item.correccionPosnet || undefined}>Posnet {nombrePosnet(item.posnet)}{item.correccionPosnet ? ' · corregido' : ''}</span>}
                           </td>
                           <td style={S.td}>{item.empleado}</td>
                         </tr>

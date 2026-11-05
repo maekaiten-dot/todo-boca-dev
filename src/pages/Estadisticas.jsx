@@ -2,7 +2,7 @@
 import { useState, useEffect, useMemo, Fragment } from 'react'
 import { parseMonto as parseMontoAR } from '../lib/montos.js'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LabelList } from 'recharts'
-import { getHistoricoVentas, montoConMetodo, repartoPago, usaPosnet } from '../api/sheets.js'
+import { getHistoricoVentas, montoConMetodo, repartoPago, usaPosnet, posnetDeParte } from '../api/sheets.js'
 import CorregirPosnetModal from '../components/CorregirPosnetModal.jsx'
 import MonotributoPosnet from '../components/MonotributoPosnet.jsx'
 import IndiceEficiencia from '../components/IndiceEficiencia.jsx'
@@ -74,11 +74,13 @@ function calcularTarjetaQRPorPosnet(ventas, mesTotales) {
     const p = String(v.fecha).split('/'); if (p.length < 3) return
     const key = `${p[2]}-${String(p[1]).padStart(2, '0')}`
     const m = porMes[key] || (porMes[key] = { amarillo: 0, blanco: 0, sinDato: 0 })
-    const monto = montoConMetodo(v, esTarjetaOQR)
-    const pos = String(v.posnet || '').trim().toUpperCase()
-    if (pos === 'AMARILLO') m.amarillo += monto
-    else if (pos === 'BLANCO') m.blanco += monto
-    else m.sinDato += monto
+    for (const pa of repartoPago(v)) {
+      if (!esTarjetaOQR(pa.metodo)) continue
+      const pos = posnetDeParte(v, pa.metodo)
+      if (pos === 'AMARILLO') m.amarillo += pa.monto
+      else if (pos === 'BLANCO') m.blanco += pa.monto
+      else m.sinDato += pa.monto
+    }
   })
   return mesTotales.filter(mt => porMes[mt.key]).map(mt => {
     const m = porMes[mt.key]
@@ -528,7 +530,7 @@ function DetalleDia({ dia, ventas, onCerrar, esAdmin = false, usuarios = [], per
                   </div>
                   <div style={D.ticketMetodo}>
                     {t.pagos ? t.pagos.map(p => `${p.metodo} ${fmt$(p.monto)}`).join(' + ') : t.metodoPago}
-                    {t.posnet && <span style={{ ...D.posnetDot, background: t.posnet.toUpperCase() === 'AMARILLO' ? '#f5c800' : '#f0f4ff' }} title={`Posnet ${t.posnet.toLowerCase()}`} />}
+                    {t.posnet && <span style={{ ...D.posnetDot, background: t.posnet.toUpperCase() === 'AMBOS' ? 'linear-gradient(90deg, #f5c800 50%, #f0f4ff 50%)' : t.posnet.toUpperCase() === 'AMARILLO' ? '#f5c800' : '#f0f4ff' }} title={t.posnet.toUpperCase() === 'AMBOS' ? 'Posnet amarillo y blanco (crédito en el blanco, débito o QR en el amarillo)' : `Posnet ${t.posnet.toLowerCase()}`} />}
                     {t.correccionPosnet && <span style={{ color: 'var(--muted)' }} title={t.correccionPosnet}>corregido</span>}
                     {esAdmin && !t.anulado && usaPosnet(t.metodoPago) && (
                       <button style={D.posnetBtn} onClick={() => setCorrigiendo({ idVenta: t.id, hora: t.hora.slice(0, 5), total: t.total, posnet: t.posnet })}>

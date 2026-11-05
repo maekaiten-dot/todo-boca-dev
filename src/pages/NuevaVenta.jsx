@@ -1,7 +1,7 @@
 // src/pages/NuevaVenta.jsx
 import { useState, useEffect } from 'react'
 import { calcularPromosConfig, fijaPausada, promoVigente as promoConfigVigente, etiquetaPromo } from '../lib/promos.js'
-import { idCanonico, registrarVenta, registrarLog, REMERAS_XXXL, calcularPromoXXXL, getPromoXXXLEstado, POSNET_METODOS, posnetSugerido, socioPermitido, calcularRedondeoSocio, usaPosnet as metodoUsaPosnet, SEP_METODOS } from '../api/sheets.js'
+import { idCanonico, registrarVenta, registrarLog, REMERAS_XXXL, calcularPromoXXXL, getPromoXXXLEstado, POSNET_METODOS, posnetDeMetodo, posnetDeVenta, metodosDe, socioPermitido, calcularRedondeoSocio, usaPosnet as metodoUsaPosnet, SEP_METODOS } from '../api/sheets.js'
 import BarcodeScanner from '../components/BarcodeScanner.jsx'
 import { encolarVenta } from '../lib/colaVentas.js'
 
@@ -412,11 +412,13 @@ export default function NuevaVenta({ promos = [], articulos, loadingArticulos, o
     </span>
   ) : null
 
-  // Posnet: se define solo según el bruto MENOS las promos (imanes, alfajores, 2x1 XXXL),
-  // antes del descuento de socio: menos de $50.000 → amarillo, $50.000 o más → blanco
+  // Posnet: se define solo según el medio de pago, sin importar el monto:
+  // crédito → blanco (Payway) · débito y QR → amarillo (Mercado Pago). Con 2 medios que van a
+  // posnets distintos queda "AMBOS" y cada parte se cobra en el suyo.
   const usaPosnet = cobraAlgo && metodoUsaPosnet(metodoCompleto)
-  const posnetAuto = posnetSugerido(modoCambio ? aCobrar : totales.subtotalConDesc)
-  const posnet = usaPosnet ? posnetAuto : ''
+  const posnet = usaPosnet ? posnetDeVenta(metodoCompleto) : ''
+  // Qué posnet usar para cada medio (para el indicador de la pantalla)
+  const posnetsPorMedio = usaPosnet ? metodosDe(metodoCompleto).map(m => ({ metodo: m, posnet: posnetDeMetodo(m) })).filter(x => x.posnet) : []
 
   // Socio: no corresponde pagando con dólares, euros, reales o Pix (se apaga solo si cambian el método)
   const socioHabilitado = !modoCambio && socioPermitido(metodoCompleto)
@@ -900,10 +902,13 @@ export default function NuevaVenta({ promos = [], articulos, loadingArticulos, o
             </>
           )}
 
-          {/* Posnet: automático según el monto, discreto y no presionable */}
+          {/* Posnet: automático según el medio de pago (crédito blanco; débito y QR amarillo),
+              discreto y no presionable. Con 2 medios en posnets distintos, uno por medio. */}
           {usaPosnet && carrito.length > 0 && (
-            <div style={S.posnetGrid4} role="img" aria-label={`Posnet ${posnet.toLowerCase()}`} title={`Posnet ${posnet.toLowerCase()}`}>
-              <div style={{...S.posnetRect, background: posnet === 'AMARILLO' ? '#f5c800' : '#f0f4ff'}} />
+            <div style={S.posnetGrid4} role="img" aria-label={posnetsPorMedio.map(x => `${labelMetodo(x.metodo)}: posnet ${x.posnet.toLowerCase()}`).join(', ')} title={posnetsPorMedio.map(x => `${labelMetodo(x.metodo)}: posnet ${x.posnet.toLowerCase()}`).join(' · ')}>
+              {posnetsPorMedio.length > 1 && posnet === 'AMBOS'
+                ? posnetsPorMedio.map(x => <div key={x.metodo} style={{...S.posnetRect, background: x.posnet === 'AMARILLO' ? '#f5c800' : '#f0f4ff'}} />)
+                : <div style={{...S.posnetRect, background: posnet === 'AMARILLO' ? '#f5c800' : '#f0f4ff'}} />}
             </div>
           )}
           </>)}

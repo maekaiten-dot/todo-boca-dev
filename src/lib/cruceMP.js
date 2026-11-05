@@ -6,7 +6,7 @@
 // BLANCO es de otra cuenta y no entra.
 // Cada cobro se empareja con una parte de venta del mismo día, mismo monto (±$1) y la hora más
 // cercana (hasta 3 horas de diferencia). Lo que queda sin pareja es lo que hay que revisar.
-import { repartoPago } from '../api/sheets.js'
+import { repartoPago, posnetDeParte } from '../api/sheets.js'
 
 export const METODOS_TARJETA = new Set(['Tarjeta de Crédito', 'Tarjeta de Débito', 'Tarjeta'])
 const MAX_MIN = 180
@@ -39,13 +39,14 @@ export function partesApp(filasVentas) {
     if (v.anulado) continue
     const dia = diaISO(v.fecha); if (!dia) continue
     const id = v.idVenta || v.idDetalle
-    const blanco = v.posnet === 'BLANCO'
     for (const p of repartoPago(v)) {
       if (!(p.monto > 0)) continue
+      const posParte = posnetDeParte(v, p.metodo)
+      const blanco = posParte === 'BLANCO'
       const canalMP = METODOS_TARJETA.has(p.metodo) ? 'POINT' : p.metodo === 'QR' ? 'INSTORE' : null
       const canal = canalMP && !blanco ? canalMP : 'OTRO'
       const k = `${id}|${p.metodo}`
-      const x = (porVenta[k] ||= { dia, canal, idVenta: id, metodo: p.metodo, posnet: v.posnet || '', hora: String(v.hora || '').replace(/^'/, '').slice(0, 5), min: minDeHora(v.hora), monto: 0, empleado: v.empleado || '' })
+      const x = (porVenta[k] ||= { dia, canal, idVenta: id, metodo: p.metodo, posnet: posParte || '', hora: String(v.hora || '').replace(/^'/, '').slice(0, 5), min: minDeHora(v.hora), monto: 0, empleado: v.empleado || '' })
       x.monto += p.monto
     }
   }

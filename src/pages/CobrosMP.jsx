@@ -86,6 +86,21 @@ export default function CobrosMP() {
     return { total: pend.reduce((s, c) => s + c.neto, 0), n: pend.length, dias: Object.values(porDia).sort((a, b) => a.dia.localeCompare(b.dia)) }
   }, [cobros])
   const cruce = useMemo(() => cruzarPorDia(cobros, partesApp(ventas), diasEntre(desde, hasta)), [cobros, ventas, desde, hasta])
+  // Totales del control en el período elegido
+  const resCruce = useMemo(() => {
+    const r = { mal: 0, malMonto: 0, mpSin: 0, mpSinMonto: 0, appSin: 0, appSinMonto: 0, partes: 0, dias: cruce.length, diasOk: 0 }
+    for (const d of cruce) {
+      r.mal += d.errores.length; r.malMonto += d.errores.reduce((s, e) => s + e.venta.monto, 0)
+      for (const k of ['POINT', 'INSTORE']) {
+        r.mpSin += d[k].sinParejaMP.length; r.mpSinMonto += d[k].sinParejaMP.reduce((s, c) => s + c.bruto, 0)
+        r.appSin += d[k].sinParejaApp.length; r.appSinMonto += d[k].sinParejaApp.reduce((s, p) => s + p.monto, 0)
+      }
+      r.partes += d.combinados.length
+      if (d.ok) r.diasOk++
+    }
+    return r
+  }, [cruce])
+  const [soloRevisar, setSoloRevisar] = useState(false)
   const ultimo = cobros.reduce((m, c) => c.fecha > m ? c.fecha : m, '')
 
   if (loading) return <div style={S.centro}><div style={S.cargando}>Leyendo cobros de Mercado Pago…</div></div>
@@ -124,6 +139,27 @@ export default function CobrosMP() {
         <div style={S.bloque}>
           <div style={S.cardTit}>Control contra las ventas de la app</div>
           <div style={S.nota}>Point (tarjeta) contra las ventas con tarjeta del posnet amarillo; QR contra las ventas con QR del posnet amarillo. Cada cobro se empareja con una venta del mismo día y el mismo monto. Si el monto y la hora coinciden pero la venta quedó cargada con otro medio (QR en vez de tarjeta, transferencia, débito en vez de crédito, posnet blanco…), se marca como <b>error de registro del medio de pago</b>, para corregirlo en Historial. Tocá un día para ver el detalle. Las ventas del posnet blanco son de otra cuenta y no entran.</div>
+          <div style={S.resCruce}>
+            <div style={{ ...S.resItem, borderColor: resCruce.mal ? 'rgba(248,113,113,0.6)' : 'var(--border)' }}>
+              <div style={{ ...S.resN, color: resCruce.mal ? '#f87171' : '#22c55e' }}>{resCruce.mal}</div>
+              <div style={S.resLbl}>con el medio de pago mal cargado{resCruce.mal ? ` · ${$(resCruce.malMonto)}` : ''}<br /><span style={S.resSub}>se corrigen en Historial</span></div>
+            </div>
+            <div style={{ ...S.resItem, borderColor: resCruce.mpSin ? 'rgba(245,158,11,0.6)' : 'var(--border)' }}>
+              <div style={{ ...S.resN, color: resCruce.mpSin ? '#f59e0b' : '#22c55e' }}>{resCruce.mpSin}</div>
+              <div style={S.resLbl}>cobros de Mercado Pago sin venta en la app{resCruce.mpSin ? ` · ${$(resCruce.mpSinMonto)}` : ''}<br /><span style={S.resSub}>¿ventas sin cargar?</span></div>
+            </div>
+            <div style={{ ...S.resItem, borderColor: resCruce.appSin ? 'rgba(245,158,11,0.6)' : 'var(--border)' }}>
+              <div style={{ ...S.resN, color: resCruce.appSin ? '#f59e0b' : '#22c55e' }}>{resCruce.appSin}</div>
+              <div style={S.resLbl}>ventas de la app sin cobro en Mercado Pago{resCruce.appSin ? ` · ${$(resCruce.appSinMonto)}` : ''}<br /><span style={S.resSub}>¿otro posnet o efectivo?</span></div>
+            </div>
+            <div style={S.resItem}>
+              <div style={{ ...S.resN, color: 'var(--text)' }}>{resCruce.diasOk}/{resCruce.dias}</div>
+              <div style={S.resLbl}>días que coinciden{resCruce.partes ? ` · ${resCruce.partes} pagos en partes (están bien)` : ''}</div>
+            </div>
+          </div>
+          {resCruce.dias > resCruce.diasOk && (
+            <label style={S.check}><input type="checkbox" checked={soloRevisar} onChange={e => setSoloRevisar(e.target.checked)} /> Mostrar solo los días para revisar</label>
+          )}
           <div style={S.tablaWrap}>
             <table style={S.tabla}>
               <thead><tr>
@@ -133,7 +169,7 @@ export default function CobrosMP() {
                 <th style={{ ...S.th, textAlign: 'left' }}>Estado</th>
               </tr></thead>
               <tbody>
-                {cruce.map(d => {
+                {cruce.filter(d => !soloRevisar || !d.ok).map(d => {
                   const estado = [d.errores.length ? `${d.errores.length} con el medio de pago mal cargado` : '', d.sinPareja ? `${d.sinPareja} sin pareja` : ''].filter(Boolean).join(' · ')
                   return [
                     <tr key={d.dia} onClick={() => setAbierto(a => a === d.dia ? null : d.dia)} style={{ cursor: 'pointer', ...(abierto === d.dia ? { background: 'rgba(96,165,250,0.08)' } : {}) }} aria-expanded={abierto === d.dia}>
@@ -252,6 +288,12 @@ const S = {
   detTit: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 15, letterSpacing: 1, color: 'var(--text)', marginBottom: 2 },
   detAviso: { fontFamily: 'Barlow, sans-serif', fontSize: 13, color: '#f59e0b', fontWeight: 600, marginTop: 4 },
   detLinea: { fontFamily: 'Barlow, sans-serif', fontSize: 13, color: 'var(--text)', padding: '2px 0', whiteSpace: 'normal' },
+  resCruce: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10 },
+  resItem: { display: 'flex', alignItems: 'center', gap: 10, background: 'var(--bg)', border: '1.5px solid var(--border)', borderRadius: 10, padding: '8px 12px' },
+  resN: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 30, minWidth: 34, textAlign: 'center' },
+  resLbl: { fontFamily: 'Barlow, sans-serif', fontSize: 13, color: 'var(--text)', lineHeight: 1.3 },
+  resSub: { fontSize: 11, color: 'var(--muted)' },
+  check: { fontFamily: 'Barlow, sans-serif', fontSize: 13, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' },
   errBox: { background: 'rgba(248,113,113,0.08)', border: '1.5px solid rgba(248,113,113,0.5)', borderRadius: 10, padding: '10px 12px', marginBottom: 12, display: 'flex', flexDirection: 'column', gap: 6 },
   errTit: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 16, letterSpacing: 0.5, color: '#f87171' },
   errLinea: { fontFamily: 'Barlow, sans-serif', fontSize: 14, color: 'var(--text)', lineHeight: 1.4, whiteSpace: 'normal' },

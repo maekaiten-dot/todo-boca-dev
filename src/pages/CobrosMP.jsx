@@ -19,13 +19,16 @@ function diasEntreFechas(a, b) {
   const x = t(a), y = t(b)
   return x == null || y == null ? null : Math.round((y - x) / 86400000)
 }
-// Argentina / Exterior según la hoja "Tarjetas MP" (país del BIN; si no está, el banco emisor)
+// Origen de la tarjeta según la hoja "Tarjetas MP": el país del BIN si está; si no, el banco
+// emisor. Mercado Pago pone "Otro" o el nombre de la marca cuando no reconoce el banco.
+const EMISOR_GENERICO = /^(otro|otros|visa|mastercard|master|amex|american express|emisor \d+)$/i
 function origenTarjeta(t) {
   if (!t) return 'sin dato'
   const p = t.pais.toLowerCase()
   if (p.startsWith('argentina')) return 'Argentina'
   if (p) return 'Exterior · ' + t.pais.split(' · ')[0]
-  return t.banco && !/^emisor /.test(t.banco) ? 'Argentina' : 'sin dato'
+  if (!t.banco || EMISOR_GENERICO.test(t.banco.trim())) return 'Banco no identificado'
+  return 'Banco argentino'
 }
 const textoPlazo = d => d == null ? '–' : d === 0 ? 'al instante' : d === 1 ? '1 día' : `${d} días`
 const diaCorto = iso => { const [a, m, d] = String(iso).split('-'); return `${Number(d)}/${Number(m)}` }

@@ -65,18 +65,31 @@ export default function CobrosMP() {
   const [desde, hasta] = rangoDe(periodo)
   const delPeriodo = useMemo(() => cobros.filter(c => { const d = partirFechaMP(c.fecha).dia; return d >= desde && d <= hasta }), [cobros, desde, hasta])
   const tot = useMemo(() => {
-    const t = { n: delPeriodo.length, bruto: 0, comision: 0, impuestos: 0, neto: 0 }
-    for (const c of delPeriodo) { t.bruto += c.bruto; t.comision += c.comision + c.financiacion; t.impuestos += c.descuentos - c.comision - c.financiacion; t.neto += c.neto }
+    const t = { n: delPeriodo.length, bruto: 0, comision: 0, financiacion: 0, impuestos: 0, neto: 0 }
+    for (const c of delPeriodo) { t.bruto += c.bruto; t.comision += c.comision + c.financiacion; t.financiacion += c.financiacion; t.impuestos += c.descuentos - c.comision - c.financiacion; t.neto += c.neto }
     return t
   }, [delPeriodo])
   const porMedio = useMemo(() => {
     const m = {}
     for (const c of delPeriodo) {
       const k = nombreMedio(c)
-      const x = (m[k] ||= { medio: k, n: 0, bruto: 0, comision: 0, impuestos: 0, neto: 0 })
-      x.n++; x.bruto += c.bruto; x.comision += c.comision + c.financiacion; x.impuestos += c.descuentos - c.comision - c.financiacion; x.neto += c.neto
+      const x = (m[k] ||= { medio: k, n: 0, bruto: 0, comision: 0, financiacion: 0, impuestos: 0, neto: 0, nCuotas: 0 })
+      x.n++; x.bruto += c.bruto; x.comision += c.comision; x.financiacion += c.financiacion
+      x.impuestos += c.descuentos - c.comision - c.financiacion; x.neto += c.neto
+      if (c.cuotas > 1) x.nCuotas++
     }
     return Object.values(m).sort((a, b) => b.bruto - a.bruto)
+  }, [delPeriodo])
+  // Crédito según la cantidad de cuotas: muestra si el costo de más viene de las cuotas
+  const porCuotas = useMemo(() => {
+    const m = {}
+    for (const c of delPeriodo) {
+      if (c.tipoMedio !== 'credit_card') continue
+      const k = `${c.canal === 'POINT' ? 'Point' : 'QR'}|${c.cuotas}`
+      const x = (m[k] ||= { canal: c.canal === 'POINT' ? 'Point' : 'QR', cuotas: c.cuotas, n: 0, bruto: 0, comision: 0, financiacion: 0 })
+      x.n++; x.bruto += c.bruto; x.comision += c.comision; x.financiacion += c.financiacion
+    }
+    return Object.values(m).sort((a, b) => a.canal.localeCompare(b.canal) || a.cuotas - b.cuotas)
   }, [delPeriodo])
   // Plata por liberarse: todos los cobros pendientes, sin importar el período
   const porLiberar = useMemo(() => {
@@ -131,7 +144,7 @@ export default function CobrosMP() {
 
         <div style={S.cards}>
           <div style={S.card}><div style={S.cardLbl}>Cobrado</div><div style={S.cardBig}>{$(tot.bruto)}</div><div style={S.cardSub}>{tot.n} {tot.n === 1 ? 'cobro' : 'cobros'}</div></div>
-          <div style={S.card}><div style={S.cardLbl}>Descuenta Mercado Pago</div><div style={{ ...S.cardBig, color: '#f87171' }}>{$(tot.comision + tot.impuestos)}</div><div style={S.cardSub}>{pct(tot.bruto ? (tot.comision + tot.impuestos) / tot.bruto : null)} · comisión {$(tot.comision)} · impuestos y retenciones {$(tot.impuestos)}</div></div>
+          <div style={S.card}><div style={S.cardLbl}>Descuenta Mercado Pago</div><div style={{ ...S.cardBig, color: '#f87171' }}>{$(tot.comision + tot.impuestos)}</div><div style={S.cardSub}>{pct(tot.bruto ? (tot.comision + tot.impuestos) / tot.bruto : null)} · comisión {$(tot.comision - tot.financiacion)}{tot.financiacion > 0.5 ? <> · cuotas {$(tot.financiacion)}</> : null} · impuestos y retenciones {$(tot.impuestos)}</div></div>
           <div style={S.card}><div style={S.cardLbl}>Neto</div><div style={{ ...S.cardBig, color: '#22c55e' }}>{$(tot.neto)}</div><div style={S.cardSub}>lo que queda de lo cobrado</div></div>
           <div style={S.card}><div style={S.cardLbl}>Falta liberar (todo)</div><div style={S.cardBig}>{$(porLiberar.total)}</div><div style={S.cardSub}>{porLiberar.n} cobros · {porLiberar.dias.slice(0, 3).map(d => `${diaCorto(d.dia)}: ${$(d.neto)}`).join(' · ')}{porLiberar.dias.length > 3 ? ' …' : ''}</div></div>
         </div>
@@ -191,20 +204,47 @@ export default function CobrosMP() {
           <div style={S.cardTit}>Por medio de pago</div>
           <div style={S.tablaWrap}>
             <table style={S.tabla}>
-              <thead><tr>{['Medio', 'Cobros', 'Cobrado', 'Comisión', 'Impuestos', 'Neto', '% descontado'].map((h, i) => <th key={h} style={{ ...S.th, textAlign: i ? 'right' : 'left' }}>{h}</th>)}</tr></thead>
+              <thead><tr>{['Medio', 'Cobros', 'Cobrado', 'Comisión', '% comisión', 'Financiación', 'Impuestos', 'Neto', '% descontado'].map((h, i) => <th key={h} style={{ ...S.th, textAlign: i ? 'right' : 'left' }}>{h}</th>)}</tr></thead>
               <tbody>
                 {porMedio.map(m => (
                   <tr key={m.medio}>
-                    <td style={{ ...S.td, textAlign: 'left' }}>{m.medio}</td><td style={S.td}>{m.n}</td><td style={S.td}>{$(m.bruto)}</td>
-                    <td style={S.td}>{$(m.comision)}</td><td style={S.td}>{$(m.impuestos)}</td><td style={S.td}>{$(m.neto)}</td>
-                    <td style={{ ...S.td, fontWeight: 700 }}>{pct(m.bruto ? (m.comision + m.impuestos) / m.bruto : null)}</td>
+                    <td style={{ ...S.td, textAlign: 'left' }}>{m.medio}{m.nCuotas > 0 && <span style={{ color: 'var(--muted)', fontSize: 12 }}> · {m.nCuotas} en cuotas</span>}</td>
+                    <td style={S.td}>{m.n}</td><td style={S.td}>{$(m.bruto)}</td>
+                    <td style={S.td}>{$(m.comision)}</td><td style={S.td}>{pct(m.bruto ? m.comision / m.bruto : null)}</td>
+                    <td style={{ ...S.td, ...(m.financiacion > 0.5 ? { color: '#f87171', fontWeight: 700 } : {}) }}>{$(m.financiacion)}</td>
+                    <td style={S.td}>{$(m.impuestos)}</td><td style={S.td}>{$(m.neto)}</td>
+                    <td style={{ ...S.td, fontWeight: 700 }}>{pct(m.bruto ? (m.comision + m.financiacion + m.impuestos) / m.bruto : null)}</td>
                   </tr>
                 ))}
-                {!porMedio.length && <tr><td colSpan={7} style={{ ...S.td, textAlign: 'left' }}>Sin cobros en este período.</td></tr>}
+                {!porMedio.length && <tr><td colSpan={9} style={{ ...S.td, textAlign: 'left' }}>Sin cobros en este período.</td></tr>}
               </tbody>
             </table>
           </div>
+          <div style={{ ...S.nota, marginTop: 8 }}>Comisión: lo que cobra Mercado Pago por el medio (con IVA). Financiación: lo que le cuesta a la cuenta que el cliente pague en cuotas. Impuestos: retenciones e impuestos.</div>
         </div>
+
+        {porCuotas.length > 0 && (
+          <div style={S.bloque}>
+            <div style={S.cardTit}>Crédito: en un pago y en cuotas</div>
+            <div style={S.tablaWrap}>
+              <table style={S.tabla}>
+                <thead><tr>{['Cobro', 'Cobros', 'Cobrado', 'Comisión', '% comisión', 'Financiación', '% financiación', '% total'].map((h, i) => <th key={h} style={{ ...S.th, textAlign: i ? 'right' : 'left' }}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {porCuotas.map(q => (
+                    <tr key={q.canal + q.cuotas}>
+                      <td style={{ ...S.td, textAlign: 'left' }}>{q.canal} · {q.cuotas === 1 ? 'un pago' : `${q.cuotas} cuotas`}</td>
+                      <td style={S.td}>{q.n}</td><td style={S.td}>{$(q.bruto)}</td>
+                      <td style={S.td}>{$(q.comision)}</td><td style={S.td}>{pct(q.bruto ? q.comision / q.bruto : null)}</td>
+                      <td style={S.td}>{$(q.financiacion)}</td><td style={S.td}>{pct(q.bruto ? q.financiacion / q.bruto : null)}</td>
+                      <td style={{ ...S.td, fontWeight: 700 }}>{pct(q.bruto ? (q.comision + q.financiacion) / q.bruto : null)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ ...S.nota, marginTop: 8 }}>Sin impuestos. Según la configuración de la cuenta (6/11/2026), el crédito en un pago con el Point debería costar 4,19% + IVA (5,07%) con acreditación en 10 días. Si las cuotas tienen financiación, la paga la cuenta: se puede cambiar en Mercado Pago → Costos y cuotas → Cuotas y acreditación.</div>
+          </div>
+        )}
       </div>
     </div>
   )

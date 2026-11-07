@@ -4,7 +4,7 @@
 // solo la lee. Muestra lo cobrado, lo que descuenta Mercado Pago, lo que falta liberar y el control
 // día por día contra las ventas cargadas en la app.
 import { useEffect, useMemo, useState } from 'react'
-import { getCobrosMP, getVentasDesde, CUENTA_APP } from '../api/sheets.js'
+import { getCobrosMP, getVentasDesde, getTarjetasMP, CUENTA_APP } from '../api/sheets.js'
 import { partesApp, cruzarPorDia, nombreMedio, partirFechaMP } from '../lib/cruceMP.js'
 
 const $ = n => (Math.round(n || 0) < 0 ? '−$' : '$') + Math.abs(Math.round(n || 0)).toLocaleString('es-AR')
@@ -18,6 +18,14 @@ function diasEntreFechas(a, b) {
   const t = f => { const [d] = String(f || '').split(' '); const [y, m, dd] = d.split('-').map(Number); return y ? Date.UTC(y, m - 1, dd) : null }
   const x = t(a), y = t(b)
   return x == null || y == null ? null : Math.round((y - x) / 86400000)
+}
+// Argentina / Exterior según la hoja "Tarjetas MP" (país del BIN; si no está, el banco emisor)
+function origenTarjeta(t) {
+  if (!t) return 'sin dato'
+  const p = t.pais.toLowerCase()
+  if (p.startsWith('argentina')) return 'Argentina'
+  if (p) return 'Exterior · ' + t.pais.split(' · ')[0]
+  return t.banco && !/^emisor /.test(t.banco) ? 'Argentina' : 'sin dato'
 }
 const textoPlazo = d => d == null ? '–' : d === 0 ? 'al instante' : d === 1 ? '1 día' : `${d} días`
 const diaCorto = iso => { const [a, m, d] = String(iso).split('-'); return `${Number(d)}/${Number(m)}` }
@@ -53,6 +61,7 @@ function diasEntre(desde, hasta) {
 
 export default function CobrosMP() {
   const [cobros, setCobros] = useState([])
+  const [tarjetas, setTarjetas] = useState({})
   const [ventas, setVentas] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -67,6 +76,7 @@ export default function CobrosMP() {
       const [desde] = rangoDe('mesAnt')
       const [c, v] = await Promise.all([getCobrosMP(), getVentasDesde(desde)])
       setCobros(c); setVentas(v)
+      getTarjetasMP().then(setTarjetas).catch(() => {})
     } catch (e) {
       console.error(e)
       setError(e?.message === 'MP_SIN_ACCESO' ? 'MP_SIN_ACCESO' : 'No se pudieron leer los cobros. Revisá la conexión y probá de nuevo.')
@@ -105,19 +115,20 @@ export default function CobrosMP() {
   // Crédito por marca y plazo de acreditación, y cobro por cobro: para ver qué cobros pagan más
   const creditos = useMemo(() => delPeriodo
     .filter(c => c.tipoMedio === 'credit_card')
-    .map(c => ({ ...c, marca: nombreMarca(c.medio), plazo: diasEntreFechas(c.fecha, c.fechaLiberacion), pctCom: c.bruto ? (c.comision + c.financiacion) / c.bruto : null }))
-    .sort((a, b) => String(b.fecha).localeCompare(String(a.fecha))), [delPeriodo])
+    .map(c => ({ ...c, marca: nombreMarca(c.medio), tarjeta: tarjetas[String(c.id)] || null, origen: origenTarjeta(tarjetas[String(c.id)]), plazo: diasEntreFechas(c.fecha, c.fechaLiberacion), pctCom: c.bruto ? (c.comision + c.financiacion) / c.bruto : null }))
+    .sort((a, b) => String(b.fecha).localeCompare(String(a.fecha))), [delPeriodo, tarjetas])
   const porMarca = useMemo(() => {
     const m = {}
     for (const c of creditos) {
-      const k = `${c.canal}|${c.marca}|${c.plazo ?? '?'}`
-      const x = (m[k] ||= { canal: c.canal === 'POINT' ? 'Point' : 'QR', marca: c.marca, plazo: c.plazo, n: 0, bruto: 0, comision: 0, min: Infinity, max: -Infinity })
+      const k = `${c.canal}|${c.marca}|${c.plazo ?? '?'}|${c.origen}`
+      const x = (m[k] ||= { canal: c.canal === 'POINT' ? 'Point' : 'QR', marca: c.marca, plazo: c.plazo, origen: c.origen, n: 0, bruto: 0, comision: 0, min: Infinity, max: -Infinity })
       x.n++; x.bruto += c.bruto; x.comision += c.comision + c.financiacion
       if (c.pctCom != null) { x.min = Math.min(x.min, c.pctCom); x.max = Math.max(x.max, c.pctCom) }
     }
     return Object.values(m).sort((a, b) => b.bruto - a.bruto)
   }, [creditos])
   const [verTodosCred, setVerTodosCred] = useState(false)
+  const hayTarjetas = Object.keys(tarjetas).length > 0
   // Plata por liberarse: todos los cobros pendientes, sin importar el período
   const porLiberar = useMemo(() => {
     const pend = cobros.filter(c => !c.liberado)
@@ -278,13 +289,14 @@ export default function CobrosMP() {
             <div style={S.cardTit}>Crédito: por marca y plazo</div>
             <div style={S.tablaWrap}>
               <table style={S.tabla}>
-                <thead><tr>{['Cobro', 'Marca', 'Acredita en', 'Cobros', 'Cobrado', 'Comisión', '% comisión', 'Mín – máx'].map((h, i) => <th key={h} style={{ ...S.th, textAlign: i > 2 ? 'right' : 'left' }}>{h}</th>)}</tr></thead>
+                <thead><tr>{['Cobro', 'Marca', ...(hayTarjetas ? ['Tarjeta'] : []), 'Acredita en', 'Cobros', 'Cobrado', 'Comisión', '% comisión', 'Mín – máx'].map((h, i) => <th key={h} style={{ ...S.th, textAlign: i > (hayTarjetas ? 3 : 2) ? 'right' : 'left' }}>{h}</th>)}</tr></thead>
                 <tbody>
                   {porMarca.map(x => {
                     const p = x.bruto ? x.comision / x.bruto : null
                     return (
-                      <tr key={x.canal + x.marca + x.plazo}>
+                      <tr key={x.canal + x.marca + x.plazo + x.origen}>
                         <td style={{ ...S.td, textAlign: 'left' }}>{x.canal}</td><td style={{ ...S.td, textAlign: 'left' }}>{x.marca}</td>
+                        {hayTarjetas && <td style={{ ...S.td, textAlign: 'left' }}>{x.origen}</td>}
                         <td style={{ ...S.td, textAlign: 'left' }}>{textoPlazo(x.plazo)}</td>
                         <td style={S.td}>{x.n}</td><td style={S.td}>{$(x.bruto)}</td><td style={S.td}>{$(x.comision)}</td>
                         <td style={{ ...S.td, fontWeight: 700, ...(p > PCT_CRED_ESPERADO + 0.005 ? { color: '#f87171' } : {}) }}>{pct(p)}</td>
@@ -299,7 +311,7 @@ export default function CobrosMP() {
             <div style={{ ...S.cardTit, fontSize: 16, marginTop: 16 }}>Cobro por cobro</div>
             <div style={S.tablaWrap}>
               <table style={S.tabla}>
-                <thead><tr>{['Fecha', 'Cobro', 'Marca', 'Acredita en', 'Cuotas', 'Monto', 'Comisión', '%'].map((h, i) => <th key={h} style={{ ...S.th, textAlign: i > 3 ? 'right' : 'left' }}>{h}</th>)}</tr></thead>
+                <thead><tr>{['Fecha', 'Cobro', 'Marca', ...(hayTarjetas ? ['Tarjeta'] : []), 'Acredita en', 'Cuotas', 'Monto', 'Comisión', '%'].map((h, i) => <th key={h} style={{ ...S.th, textAlign: i > (hayTarjetas ? 4 : 3) ? 'right' : 'left' }}>{h}</th>)}</tr></thead>
                 <tbody>
                   {(verTodosCred ? creditos : creditos.slice(0, 30)).map(c => {
                     const caro = c.pctCom > PCT_CRED_ESPERADO + 0.005
@@ -308,6 +320,7 @@ export default function CobrosMP() {
                         <td style={{ ...S.td, textAlign: 'left' }}>{diaCorto(String(c.fecha).slice(0, 10))} {String(c.fecha).slice(11, 16)}</td>
                         <td style={{ ...S.td, textAlign: 'left' }}>{c.canal === 'POINT' ? 'Point' : 'QR'}</td>
                         <td style={{ ...S.td, textAlign: 'left' }}>{c.marca}</td>
+                        {hayTarjetas && <td style={{ ...S.td, textAlign: 'left' }} title={c.tarjeta?.detalleCargos || ''}>{c.tarjeta ? [c.tarjeta.pais || '¿país?', c.tarjeta.banco, c.tarjeta.lectura].filter(Boolean).join(' · ') : '–'}</td>}
                         <td style={{ ...S.td, textAlign: 'left' }}>{textoPlazo(c.plazo)}</td>
                         <td style={S.td}>{c.cuotas}</td><td style={S.td}>{$(c.bruto)}</td><td style={S.td}>{$(c.comision + c.financiacion)}</td>
                         <td style={{ ...S.td, fontWeight: 700, ...(caro ? { color: '#f87171' } : { color: '#4ade80' }) }}>{pct(c.pctCom)}</td>

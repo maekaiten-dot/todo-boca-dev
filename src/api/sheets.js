@@ -978,13 +978,13 @@ export async function getCobrosMP() {
 export async function getTarjetasMP() {
   if (!LOCAL.planillaMP) return {}
   const token = await getAccessToken()
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${LOCAL.planillaMP}/values/${encodeURIComponent("'Tarjetas MP'!A2:J")}?valueRenderOption=UNFORMATTED_VALUE`
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${LOCAL.planillaMP}/values/${encodeURIComponent("'Tarjetas MP'!A2:O")}?valueRenderOption=UNFORMATTED_VALUE`
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
   if (!res.ok) return {}
   const out = {}
   for (const r of (await res.json()).values || []) {
     if (!r[0]) continue
-    out[String(r[0])] = { bin: String(r[1] || '').replace(/^'/, ''), banco: String(r[2] || ''), pais: String(r[3] || ''), tipo: String(r[4] || ''), lectura: String(r[5] || ''), detalleCargos: String(r[9] || '') }
+    out[String(r[0])] = { bin: String(r[1] || '').replace(/^'/, ''), banco: String(r[2] || ''), pais: String(r[3] || ''), tipo: String(r[4] || ''), lectura: String(r[5] || ''), detalleCargos: String(r[9] || ''), bancoBin: String(r[11] || ''), tipoBanco: String(r[12] || ''), nivel: String(r[13] || ''), coincide: String(r[14] || '') }
   }
   return out
 }

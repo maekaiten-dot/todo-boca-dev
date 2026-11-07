@@ -26,7 +26,7 @@ function origenTarjeta(t) {
   if (!t) return 'sin dato'
   const p = t.pais.toLowerCase()
   if (p.startsWith('argentina')) return 'Argentina'
-  if (p) return 'Exterior · ' + t.pais.split(' · ')[0]
+  if (p) return 'Exterior'
   if (!t.banco || EMISOR_GENERICO.test(t.banco.trim())) return 'Banco no identificado'
   return 'Banco argentino'
 }
@@ -323,7 +323,10 @@ export default function CobrosMP() {
                         <td style={{ ...S.td, textAlign: 'left' }}>{diaCorto(String(c.fecha).slice(0, 10))} {String(c.fecha).slice(11, 16)}</td>
                         <td style={{ ...S.td, textAlign: 'left' }}>{c.canal === 'POINT' ? 'Point' : 'QR'}</td>
                         <td style={{ ...S.td, textAlign: 'left' }}>{c.marca}</td>
-                        {hayTarjetas && <td style={{ ...S.td, textAlign: 'left' }} title={c.tarjeta?.detalleCargos || ''}>{c.tarjeta ? [c.tarjeta.pais || '¿país?', c.tarjeta.banco, c.tarjeta.lectura].filter(Boolean).join(' · ') : '–'}</td>}
+                        {hayTarjetas && <td style={{ ...S.td, textAlign: 'left' }} title={c.tarjeta?.detalleCargos || ''}>{c.tarjeta ? <>
+                          {[c.tarjeta.pais || '¿país?', c.tarjeta.bancoBin || c.tarjeta.banco, c.tarjeta.tipoBanco, c.tarjeta.nivel].filter(Boolean).join(' · ')}
+                          {/^No/.test(c.tarjeta.coincide) && <span style={{ color: '#fbbf24' }}> · ⚠ {c.tarjeta.coincide.replace(/^No:\s*/, '')}</span>}
+                        </> : '–'}</td>}
                         <td style={{ ...S.td, textAlign: 'left' }}>{textoPlazo(c.plazo)}</td>
                         <td style={S.td}>{c.cuotas}</td><td style={S.td}>{$(c.bruto)}</td><td style={S.td}>{$(c.comision + c.financiacion)}</td>
                         <td style={{ ...S.td, fontWeight: 700, ...(caro ? { color: '#f87171' } : { color: '#4ade80' }) }}>{pct(c.pctCom)}</td>

@@ -9,6 +9,17 @@ import { partesApp, cruzarPorDia, nombreMedio, partirFechaMP } from '../lib/cruc
 
 const $ = n => (Math.round(n || 0) < 0 ? '−$' : '$') + Math.abs(Math.round(n || 0)).toLocaleString('es-AR')
 const pct = x => x == null || !isFinite(x) ? '–' : (x * 100).toLocaleString('es-AR', { maximumFractionDigits: 1 }) + '%'
+// Tarifa de crédito en un pago configurada en la cuenta (4,19% + IVA), para marcar los cobros que pagan más
+const PCT_CRED_ESPERADO = 0.0419 * 1.21
+const MARCAS = { visa: 'Visa', master: 'Mastercard', amex: 'Amex', naranja: 'Naranja', cabal: 'Cabal', argencard: 'Argencard', diners: 'Diners', cencosud: 'Cencosud', tarshop: 'Tarjeta Shopping', nativa: 'Nativa', cmr: 'CMR', elo: 'Elo', hipercard: 'Hipercard' }
+const nombreMarca = m => MARCAS[String(m || '').toLowerCase()] || (m ? String(m).charAt(0).toUpperCase() + String(m).slice(1) : '¿?')
+// "2026-11-03 16:47" → "2026-11-13 16:47" = 10 días
+function diasEntreFechas(a, b) {
+  const t = f => { const [d] = String(f || '').split(' '); const [y, m, dd] = d.split('-').map(Number); return y ? Date.UTC(y, m - 1, dd) : null }
+  const x = t(a), y = t(b)
+  return x == null || y == null ? null : Math.round((y - x) / 86400000)
+}
+const textoPlazo = d => d == null ? '–' : d === 0 ? 'al instante' : d === 1 ? '1 día' : `${d} días`
 const diaCorto = iso => { const [a, m, d] = String(iso).split('-'); return `${Number(d)}/${Number(m)}` }
 const NOMBRE_DIA = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb']
 const diaSemana = iso => NOMBRE_DIA[new Date(iso + 'T12:00:00').getDay()]
@@ -91,6 +102,22 @@ export default function CobrosMP() {
     }
     return Object.values(m).sort((a, b) => a.canal.localeCompare(b.canal) || a.cuotas - b.cuotas)
   }, [delPeriodo])
+  // Crédito por marca y plazo de acreditación, y cobro por cobro: para ver qué cobros pagan más
+  const creditos = useMemo(() => delPeriodo
+    .filter(c => c.tipoMedio === 'credit_card')
+    .map(c => ({ ...c, marca: nombreMarca(c.medio), plazo: diasEntreFechas(c.fecha, c.fechaLiberacion), pctCom: c.bruto ? (c.comision + c.financiacion) / c.bruto : null }))
+    .sort((a, b) => String(b.fecha).localeCompare(String(a.fecha))), [delPeriodo])
+  const porMarca = useMemo(() => {
+    const m = {}
+    for (const c of creditos) {
+      const k = `${c.canal}|${c.marca}|${c.plazo ?? '?'}`
+      const x = (m[k] ||= { canal: c.canal === 'POINT' ? 'Point' : 'QR', marca: c.marca, plazo: c.plazo, n: 0, bruto: 0, comision: 0, min: Infinity, max: -Infinity })
+      x.n++; x.bruto += c.bruto; x.comision += c.comision + c.financiacion
+      if (c.pctCom != null) { x.min = Math.min(x.min, c.pctCom); x.max = Math.max(x.max, c.pctCom) }
+    }
+    return Object.values(m).sort((a, b) => b.bruto - a.bruto)
+  }, [creditos])
+  const [verTodosCred, setVerTodosCred] = useState(false)
   // Plata por liberarse: todos los cobros pendientes, sin importar el período
   const porLiberar = useMemo(() => {
     const pend = cobros.filter(c => !c.liberado)
@@ -245,6 +272,57 @@ export default function CobrosMP() {
             <div style={{ ...S.nota, marginTop: 8 }}>Sin impuestos. Según la configuración de la cuenta (6/11/2026), el crédito en un pago con el Point debería costar 4,19% + IVA (5,07%) con acreditación en 10 días. Si las cuotas tienen financiación, la paga la cuenta: se puede cambiar en Mercado Pago → Costos y cuotas → Cuotas y acreditación.</div>
           </div>
         )}
+
+        {creditos.length > 0 && (
+          <div style={S.bloque}>
+            <div style={S.cardTit}>Crédito: por marca y plazo</div>
+            <div style={S.tablaWrap}>
+              <table style={S.tabla}>
+                <thead><tr>{['Cobro', 'Marca', 'Acredita en', 'Cobros', 'Cobrado', 'Comisión', '% comisión', 'Mín – máx'].map((h, i) => <th key={h} style={{ ...S.th, textAlign: i > 2 ? 'right' : 'left' }}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {porMarca.map(x => {
+                    const p = x.bruto ? x.comision / x.bruto : null
+                    return (
+                      <tr key={x.canal + x.marca + x.plazo}>
+                        <td style={{ ...S.td, textAlign: 'left' }}>{x.canal}</td><td style={{ ...S.td, textAlign: 'left' }}>{x.marca}</td>
+                        <td style={{ ...S.td, textAlign: 'left' }}>{textoPlazo(x.plazo)}</td>
+                        <td style={S.td}>{x.n}</td><td style={S.td}>{$(x.bruto)}</td><td style={S.td}>{$(x.comision)}</td>
+                        <td style={{ ...S.td, fontWeight: 700, ...(p > PCT_CRED_ESPERADO + 0.005 ? { color: '#f87171' } : {}) }}>{pct(p)}</td>
+                        <td style={S.td}>{x.min === Infinity ? '–' : x.min === x.max ? pct(x.min) : `${pct(x.min)} – ${pct(x.max)}`}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ ...S.cardTit, fontSize: 16, marginTop: 16 }}>Cobro por cobro</div>
+            <div style={S.tablaWrap}>
+              <table style={S.tabla}>
+                <thead><tr>{['Fecha', 'Cobro', 'Marca', 'Acredita en', 'Cuotas', 'Monto', 'Comisión', '%'].map((h, i) => <th key={h} style={{ ...S.th, textAlign: i > 3 ? 'right' : 'left' }}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {(verTodosCred ? creditos : creditos.slice(0, 30)).map(c => {
+                    const caro = c.pctCom > PCT_CRED_ESPERADO + 0.005
+                    return (
+                      <tr key={c.id}>
+                        <td style={{ ...S.td, textAlign: 'left' }}>{diaCorto(String(c.fecha).slice(0, 10))} {String(c.fecha).slice(11, 16)}</td>
+                        <td style={{ ...S.td, textAlign: 'left' }}>{c.canal === 'POINT' ? 'Point' : 'QR'}</td>
+                        <td style={{ ...S.td, textAlign: 'left' }}>{c.marca}</td>
+                        <td style={{ ...S.td, textAlign: 'left' }}>{textoPlazo(c.plazo)}</td>
+                        <td style={S.td}>{c.cuotas}</td><td style={S.td}>{$(c.bruto)}</td><td style={S.td}>{$(c.comision + c.financiacion)}</td>
+                        <td style={{ ...S.td, fontWeight: 700, ...(caro ? { color: '#f87171' } : { color: '#4ade80' }) }}>{pct(c.pctCom)}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+            {creditos.length > 30 && (
+              <button style={S.verTodos} onClick={() => setVerTodosCred(v => !v)}>{verTodosCred ? 'Ver menos' : `Ver los ${creditos.length} cobros`}</button>
+            )}
+            <div style={{ ...S.nota, marginTop: 8 }}>Comisión con IVA, sin impuestos. En verde, los cobros que pagaron la tarifa configurada (4,19% + IVA = 5,07%) o menos; en rojo, los que pagaron más. "Acredita en": días entre el cobro y la fecha en que Mercado Pago libera la plata.</div>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -303,6 +381,7 @@ function DetalleDia({ d }) {
 const colorDif = dif => !dif ? { color: '#22c55e' } : { color: '#f59e0b', fontWeight: 700 }
 
 const S = {
+  verTodos: { marginTop: 8, padding: '6px 14px', background: 'none', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--muted)', fontFamily: 'Barlow, sans-serif', fontSize: 13, cursor: 'pointer' },
   page: { display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto', paddingBottom: 24 },
   header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '16px 20px 12px', borderBottom: '2px solid var(--accent)', flexShrink: 0 },
   titulo: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 28, color: 'var(--accent-text)', letterSpacing: 2 },

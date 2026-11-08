@@ -230,6 +230,9 @@ export default function NuevaVenta({ promos = [], articulos, loadingArticulos, o
   const horaAhora = () => new Date().toLocaleTimeString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', hour12: false }).slice(0, 5)
   const fechaOtraTexto = fechaOtra ? `${fechaOtra.dia.split('-').reverse().map((x, i) => i < 2 ? String(Number(x)) : x).join('/')} ${fechaOtra.hora}` : ''
   const [carrito, setCarrito] = useState([])
+  // Posnet elegido por el vendedor para cada medio ({ 'Tarjeta de Crédito': 'BLANCO', … }).
+  // Si no eligió, se usa el que corresponde por regla (crédito blanco; débito y QR amarillo).
+  const [posnetElegido, setPosnetElegido] = useState({})
   const [busqueda, setBusqueda] = useState('')
   const [metodoPago, setMetodoPago] = useState('Efectivo Pesos')
   // Cambio de producto: lo que devuelve el cliente (al precio actual) entra en negativo.
@@ -385,6 +388,7 @@ export default function NuevaVenta({ promos = [], articulos, loadingArticulos, o
     setModoCambio(false); setDevueltos([])
     setCarrito([])
     setSocio(false)
+    setPosnetElegido({})
     setConfirmarReinicio(false)
   }
 
@@ -412,13 +416,16 @@ export default function NuevaVenta({ promos = [], articulos, loadingArticulos, o
     </span>
   ) : null
 
-  // Posnet: se define solo según el medio de pago, sin importar el monto:
-  // crédito → blanco (Payway) · débito y QR → amarillo (Mercado Pago). Con 2 medios que van a
-  // posnets distintos queda "AMBOS" y cada parte se cobra en el suyo.
+  // Posnet: lo elige el vendedor para cada medio. Viene marcado el que corresponde por regla
+  // (crédito → blanco · débito y QR → amarillo); si elige otro, solo se le avisa.
+  // Con 2 medios en posnets distintos queda "AMBOS".
   const usaPosnet = cobraAlgo && metodoUsaPosnet(metodoCompleto)
-  const posnet = usaPosnet ? posnetDeVenta(metodoCompleto) : ''
-  // Qué posnet usar para cada medio (para el indicador de la pantalla)
-  const posnetsPorMedio = usaPosnet ? metodosDe(metodoCompleto).map(m => ({ metodo: m, posnet: posnetDeMetodo(m) })).filter(x => x.posnet) : []
+  const posnetsPorMedio = usaPosnet ? metodosDe(metodoCompleto).filter(m => posnetDeMetodo(m))
+    .map(m => ({ metodo: m, sugerido: posnetDeMetodo(m), posnet: posnetElegido[m] || posnetDeMetodo(m) })) : []
+  const posnet = !usaPosnet ? '' : (() => { const ps = [...new Set(posnetsPorMedio.map(x => x.posnet))]; return ps.length > 1 ? 'AMBOS' : ps[0] || posnetDeVenta(metodoCompleto) })()
+  const avisoPosnet = x => x.posnet === x.sugerido ? ''
+    : x.sugerido === 'BLANCO' ? 'Con crédito deberías usar el posnet BLANCO.'
+    : `Con ${x.metodo === 'QR' ? 'QR' : 'débito'}, el posnet BLANCO es solo para tarjetas del exterior.`
 
   // Socio: no corresponde pagando con dólares, euros, reales o Pix (se apaga solo si cambian el método)
   const socioHabilitado = !modoCambio && socioPermitido(metodoCompleto)
@@ -438,6 +445,7 @@ export default function NuevaVenta({ promos = [], articulos, loadingArticulos, o
 
   function limpiarDespuesDeCerrar() {
     setFechaOtra(null)
+    setPosnetElegido({})
     setModoCambio(false); setDevueltos([])
     setCarrito([])
     setSocio(false)
@@ -902,15 +910,24 @@ export default function NuevaVenta({ promos = [], articulos, loadingArticulos, o
             </>
           )}
 
-          {/* Posnet: automático según el medio de pago (crédito blanco; débito y QR amarillo),
-              discreto y no presionable. Con 2 medios en posnets distintos, uno por medio. */}
-          {usaPosnet && carrito.length > 0 && (
-            <div style={S.posnetGrid4} role="img" aria-label={posnetsPorMedio.map(x => `${labelMetodo(x.metodo)}: posnet ${x.posnet.toLowerCase()}`).join(', ')} title={posnetsPorMedio.map(x => `${labelMetodo(x.metodo)}: posnet ${x.posnet.toLowerCase()}`).join(' · ')}>
-              {posnetsPorMedio.length > 1 && posnet === 'AMBOS'
-                ? posnetsPorMedio.map(x => <div key={x.metodo} style={{...S.posnetRect, background: x.posnet === 'AMARILLO' ? '#f5c800' : '#f0f4ff'}} />)
-                : <div style={{...S.posnetRect, background: posnet === 'AMARILLO' ? '#f5c800' : '#f0f4ff'}} />}
+          {/* Posnet: lo elige el vendedor. Viene marcado el que corresponde por regla y, si elige
+              el otro, aparece un aviso (no bloquea). Con 2 medios, uno por medio. */}
+          {usaPosnet && carrito.length > 0 && posnetsPorMedio.map(x => (
+            <div key={x.metodo} style={{ marginTop: 8 }}>
+              <div style={S.posnetTit}>POSNET{posnetsPorMedio.length > 1 ? ` · ${labelMetodo(x.metodo)}` : ''}</div>
+              <div style={S.posnetGrid} role="radiogroup" aria-label={`Posnet para ${labelMetodo(x.metodo)}`}>
+                {['AMARILLO', 'BLANCO'].map(op => (
+                  <button key={op} role="radio" aria-checked={x.posnet === op}
+                    style={{ ...S.posnetBtn, ...(x.posnet === op ? (op === 'AMARILLO' ? S.posnetAmarilloActivo : S.posnetBlancoActivo) : {}) }}
+                    onClick={() => setPosnetElegido(p => ({ ...p, [x.metodo]: op }))}>
+                    {op === 'AMARILLO' ? 'AMARILLO' : 'BLANCO'}
+                    <span style={S.posnetSub}>{op === 'AMARILLO' ? 'Mercado Pago' : 'Payway'}</span>
+                  </button>
+                ))}
+              </div>
+              {avisoPosnet(x) && <div style={S.posnetAvisoFuerte} role="alert">⚠ {avisoPosnet(x)}</div>}
             </div>
-          )}
+          ))}
           </>)}
 
           <div style={S.fieldLabel}>EMPLEADO</div>
@@ -1069,6 +1086,8 @@ const S = {
   posnetAmarilloActivo: { background:'#f5c800', border:'1.5px solid #f5c800', color:'#000' },
   posnetBlancoActivo: { background:'#f0f4ff', border:'1.5px solid #f0f4ff', color:'#000' },
   posnetSub: { fontFamily:'Barlow,sans-serif', fontWeight:400, fontSize:11, letterSpacing:0, opacity:0.75 },
+  posnetTit: { fontFamily:'Barlow Condensed,sans-serif', fontWeight:700, fontSize:13, letterSpacing:1, color:'var(--muted)', marginBottom:4 },
+  posnetAvisoFuerte: { fontFamily:'Barlow,sans-serif', fontSize:14, fontWeight:600, color:'#000', background:'#fbbf24', borderRadius:8, padding:'6px 10px', marginTop:6 },
   posnetAviso: { fontFamily:'Barlow,sans-serif', fontSize:12, color:'#f59e0b', marginTop:4 },
   efectivoBtnActivo: { background:'rgba(34,197,94,0.15)', border:'1.5px solid #22c55e', color:'#22c55e' },
   socioBtnActivo: { background:'rgba(245,200,0,0.15)', border:'1.5px solid var(--accent)', color:'var(--accent-text)' },

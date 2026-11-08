@@ -145,3 +145,25 @@ export const ESTADOS = {
   noTrabaja: { texto: 'No trabaja', color: '#6a8ccc' },
   futuro: { texto: '', color: '#6a8ccc' },
 }
+
+// ── Presentismo y bono de fin de semana (solo admin) ───────────────────────
+// Presentismo:   valor hora × horas por día × días trabajados × % presentismo
+// Fin de semana: valor hora × horas por día × sábados y domingos trabajados × % recargo
+// Cuenta como trabajado: fichó (a tiempo o tarde) o trabajó sin fichar (olvido cargado).
+export const BONOS_DEFAULT = { valorHora: 4800, horasDia: 5, presentismo: 20, recargo: 50 }
+const TRABAJADO = ['aTiempo', 'tarde', 'presente', 'olvido']
+export function calcularBonos(emp, p = BONOS_DEFAULT) {
+  const trabajados = emp.dias.filter(d => TRABAJADO.includes(d.estado))
+  const finde = trabajados.filter(d => d.dow === 6 || d.dow === 7)
+  const base = (Number(p.valorHora) || 0) * (Number(p.horasDia) || 0)
+  const presentismo = Math.round(base * trabajados.length * (Number(p.presentismo) || 0) / 100)
+  const bonoFinde = Math.round(base * finde.length * (Number(p.recargo) || 0) / 100)
+  return {
+    dias: trabajados.length, diasFinde: finde.length,
+    sabados: finde.filter(d => d.dow === 6).map(d => parseFecha(d.fecha).d),
+    domingos: finde.filter(d => d.dow === 7).map(d => parseFecha(d.fecha).d),
+    noTrabajados: emp.dias.filter(d => !TRABAJADO.includes(d.estado) && d.estado !== 'futuro'),
+    revisar: emp.resumen.revisar, pendientes: emp.dias.filter(d => d.estado === 'futuro' || d.estado === 'pendiente').length,
+    presentismo, bonoFinde, total: presentismo + bonoFinde,
+  }
+}

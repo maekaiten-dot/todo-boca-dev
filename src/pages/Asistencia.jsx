@@ -3,13 +3,14 @@
 // Solo los administradores modifican horarios y cambios, y para eso piden el PIN de fichadas.
 import { useEffect, useMemo, useState } from 'react'
 import { asistencia, getPinFichadas, setPinFichadas } from '../api/fichadas.js'
+import BonosMes from '../components/BonosMes.jsx'
 import {
   calcularAsistencia, parseFecha, fmtHora, parseTurno, DIAS, DIAS_CORTOS, ESTADOS, TIPOS_CAMBIO, HORARIOS_SUGERIDOS, TOLERANCIA_MIN,
 } from '../lib/asistencia.js'
 
 const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
 
-export default function Asistencia({ usuarios = [], esAdmin = false }) {
+export default function Asistencia({ usuarios = [], esAdmin = false, verBonos = false, perfilNombre = '' }) {
   const [pin, setPinLocal] = useState(getPinFichadas())
   const [datos, setDatos] = useState(null)
   const [mes, setMes] = useState(null) // { anio, mes }
@@ -138,6 +139,8 @@ export default function Asistencia({ usuarios = [], esAdmin = false }) {
       <div style={S.muted}>Columnas: día · entrada esperada · fichada. Tolerancia {TOLERANCIA_MIN} min. {esAdmin
         ? 'Tocá un día para cargar un franco, un cambio de horario o un olvido de fichada.'
         : 'Tocá un día para ver el detalle. Si ves algo mal (un franco, un cambio de horario o una fichada), avisale al encargado para que lo corrija.'}</div>
+
+      {verBonos && resultado.length > 0 && <BonosMes resultado={resultado} nombreMes={`${MESES[mes.mes - 1]} ${mes.anio}`} perfilNombre={perfilNombre} />}
 
       {diaAbierto && (
         <ModalDia {...diaAbierto} soloVer={!esAdmin} cargando={cargando} error={error}

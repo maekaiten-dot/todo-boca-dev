@@ -595,7 +595,7 @@ export default function App() {
             <div style={tabStyle('pagos')}><Suspense fallback={<CargandoSolapa />}><Pagos empleado={empleadoActual} empleadoFijo={empleadoActual} usuarios={usuarios} /></Suspense></div>
           )}
           {tabsVisitadas.has('asis') && (
-            <div style={tabStyle('asis')}><Suspense fallback={<CargandoSolapa />}><Asistencia usuarios={usuarios} esAdmin={veAdmin} /></Suspense></div>
+            <div style={tabStyle('asis')}><Suspense fallback={<CargandoSolapa />}><Asistencia usuarios={usuarios} esAdmin={veAdmin} verBonos={esAdmin} perfilNombre={perfilGuardado?.nombre || ''} /></Suspense></div>
           )}
           {veAdmin && tabsVisitadas.has('fich') && (
             <div style={tabStyle('fich')}><Suspense fallback={<CargandoSolapa />}><Fichadas usuarios={usuarios} /></Suspense></div>

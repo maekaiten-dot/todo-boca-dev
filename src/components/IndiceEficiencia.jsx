@@ -88,7 +88,7 @@ export function calcularIndice(ventas, { indices = null, horas = {}, mesActual }
     x.venta += $
     for (const p of repartoPago(v)) {
       const tipo = tipoDeMetodo(p.metodo); if (!tipo || !(p.monto > 0)) continue
-      const pos = tipo === 'qr' ? 'AMARILLO' : posnetNormal(posnetDeParte(v, p.metodo))
+      const pos = posnetNormal(posnetDeParte(v, p.metodo))
       const k = `${pos}|${tipo}`
       const d = (x.cobro[k] ||= { posnet: pos, tipo, monto: 0, comision: 0, iibb: 0, cheque: 0, costo: 0, tasa: tasaCobro(tipo, pos, mes) })
       const com = p.monto * d.tasa * IVA / 100, ib = p.monto * IIBB / 100
@@ -189,9 +189,9 @@ function DesgloseCobro({ d, label }) {
           </table>
         </div>
         <div style={S.hint}>
-          Payway: crédito 2% + cobro anticipado (activo hasta oct 2026), débito sin arancel, servicio fijo por mes (bonificado nov 2026 – oct 2027).
+          Payway: crédito 2% + cobro anticipado (activo hasta oct 2026), débito sin arancel, QR 0,80%, servicio fijo por mes (bonificado nov 2026 – oct 2027).
           Mercado Pago: crédito 4,19% argentina / 7,19% del exterior (se usa el promedio real, ≈80% del exterior), débito 2,75%, QR 0,80%.
-          Comisiones con IVA. Se suman la retención de Ingresos Brutos (2,5% de lo cobrado con tarjeta o QR) y el impuesto al cheque (Ley 25.413, {LEY_25413_BLANCO.toLocaleString('es-AR')}% de lo que Payway deposita en el banco), porque no se recuperan.
+          Comisiones con IVA. Se suman la retención de Ingresos Brutos (2,5% de lo cobrado con tarjeta o QR) y el impuesto al cheque (Ley 25.413, {LEY_25413_BLANCO.toLocaleString('es-AR')}% de lo que Payway deposita por las tarjetas; el QR de Payway no lo paga), porque no se recuperan.
         </div>
       </>)}
     </div>

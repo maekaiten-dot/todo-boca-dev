@@ -9,6 +9,8 @@
 //    estuvo activo hasta oct 2026 (% del crédito de cada mes, sacado de los resúmenes).
 //  · Débito: sin arancel.
 //  · "Servicio Payway": cargo fijo por mes, bonificado de nov 2026 a oct 2027.
+//  · QR de Payway: 0,80% + IVA (más IIBB), se acredita al instante en el banco (venta del 9/11/2026:
+//    $22.000 → $21.237,04, sin impuesto al cheque). Antes del posnet amarillo (mayo 2026) todo QR era de Payway.
 // MERCADO PAGO (posnet AMARILLO, cuenta de Jorge)
 //  · Crédito: 4,19% con tarjeta argentina y 7,19% con tarjeta del exterior (en 10 días). La app no
 //    sabe de dónde es la tarjeta: se usa el promedio real de los cobros (≈ 80% del exterior).
@@ -38,6 +40,7 @@ export const SERVICIO_PAYWAY = [
   { desde: '2026-11', monto: 0 },      // bonificado hasta el 1/11/2027
   { desde: '2027-11', monto: 57999 },  // revisar el precio cuando termine la bonificación
 ]
+export const QR_PAYWAY = 0.8
 export const MP = { creditoLocal: 4.19, creditoExterior: 7.19, parteExterior: 0.8, debito: 2.75, qr: 0.8 }
 
 export const NOMBRE_POSNET = { AMARILLO: 'Amarillo (Mercado Pago)', BLANCO: 'Blanco (Payway)' }
@@ -59,7 +62,7 @@ export const posnetNormal = posnet => /AMARILLO/i.test(posnet || '') ? 'AMARILLO
 // % antes de IVA para un medio, un posnet y un mes
 export function tasaCobro(tipo, posnet, mes) {
   if (!tipo) return 0
-  if (tipo === 'qr') return MP.qr                       // el QR siempre es de Mercado Pago
+  if (tipo === 'qr') return posnetNormal(posnet) === 'AMARILLO' ? MP.qr : QR_PAYWAY
   if (posnetNormal(posnet) === 'AMARILLO') return tipo === 'credito' ? MP.creditoLocal * (1 - MP.parteExterior) + MP.creditoExterior * MP.parteExterior : MP.debito
   if (tipo === 'debito') return 0
   const anticipo = mes >= ANTICIPO_DESDE ? 0 : (ANTICIPO_PAYWAY[mes] ?? (mes < '2025-11' ? ANTICIPO_ANTES : 0))
@@ -71,8 +74,9 @@ export function costoTotalTasa(tipo, posnet, mes) {
   const base = (tasaCobro(tipo, posnet, mes) * IVA + IIBB) / 100
   return base + (impChequeAplica(tipo, posnet) ? (1 - base) * LEY_25413_BLANCO / 100 : 0)
 }
-// El impuesto al cheque se paga sobre lo que deposita Payway (posnet blanco; el QR es de Mercado Pago)
-export const impChequeAplica = (tipo, posnet) => tipo !== 'qr' && posnetNormal(posnet) === 'BLANCO'
+// El impuesto al cheque se paga sobre lo que deposita Payway por las tarjetas (posnet blanco). El QR de
+// Payway entra al instante y el banco no le cobra el impuesto (venta del 9/11/2026).
+export const impChequeAplica = (tipo, posnet) => !!tipo && tipo !== 'qr' && posnetNormal(posnet) === 'BLANCO'
 export function comisionDe(metodo, posnet, cuando) {
   return costoTotalTasa(tipoDeMetodo(metodo), posnet, mesDeCuando(cuando))
 }

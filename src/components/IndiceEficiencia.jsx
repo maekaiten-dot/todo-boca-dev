@@ -11,6 +11,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { repartoPago, posnetDeParte } from '../api/sheets.js'
 import { generarRecomendaciones, costoValido } from '../lib/recomendaciones.js'
+import { comisionDe, tipoDeMetodo, posnetNormal, tasaCobro, servicioPaywayDelMes, IVA, IIBB, LEY_25413_BLANCO, impChequeAplica, NOMBRE_POSNET, NOMBRE_TIPO } from '../lib/costosCobro.js'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Cell } from 'recharts'
 
 export const COMPONENTES = [
@@ -23,26 +24,11 @@ export const COMPONENTES = [
   { id: 'upt', nombre: 'Unidades por ticket', peso: 15, fmt: v => v.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
     ayuda: 'Cuántas unidades se llevan por ticket.' },
   { id: 'cobro', nombre: 'Costo de cobro', peso: 10, menorEsMejor: true, fmt: v => `${(v * 100).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`,
-    ayuda: 'Comisiones de posnet y QR (con IVA) sobre la venta total. Más bajo es mejor.' },
+    ayuda: 'Comisiones de posnet y QR, cobro anticipado y servicio de Payway (con IVA), retención de Ingresos Brutos e impuesto al cheque de lo que deposita Payway, sobre la venta total. Más bajo es mejor.' },
 ]
 
-// Comisiones en % antes de IVA. Crédito siempre en 1 pago. "Tarjeta" sin aclarar se toma como crédito.
-// Las ventas con tarjeta o QR sin posnet anotado se toman como BLANCO. Efectivo, transferencia y Pix: sin comisión.
-// Valores reales (nov 2026), sin la retención de IIBB (2,5% en los dos, no es comisión):
-//  · Mercado Pago (planilla "Jorge Mercado Pago"): crédito 8,7%, débito 3,33%, QR 0,97% con IVA.
-//  · Payway (resumen de oct 2026, ya sin cobro anticipado): arancel crédito 2% (Amex 2,5%), débito
-//    sin arancel, más el "Servicio Payway" (~1% de lo cobrado por mes) que se reparte en los dos.
-export const COMISIONES = {
-  AMARILLO: { credito: 7.19, debito: 2.75, qr: 0.8 }, // Mercado Pago Point
-  BLANCO: { credito: 3.0, debito: 1.0, qr: 0.8 },     // Payway
-}
-const IVA = 1.21
-export function comisionDe(metodo, posnet) {
-  const m = String(metodo || '').toLowerCase()
-  const tipo = /\bqr\b/.test(m) ? 'qr' : /d[eé]bito/.test(m) ? 'debito' : /tarjeta|cr[eé]dito/.test(m) ? 'credito' : null
-  if (!tipo) return 0
-  return COMISIONES[/AMARILLO/i.test(posnet || '') ? 'AMARILLO' : 'BLANCO'][tipo] * IVA / 100
-}
+// Costos de cobro por medio de pago, posnet y mes: ver src/lib/costosCobro.js
+export { comisionDe }
 const PENDIENTES = [
   { nombre: 'Gastos fijos sobre ventas', falta: 'terminar de cargar los gastos fijos (alquiler, sueldos, servicios)' },
   { nombre: 'Rendimiento del stock (GMROI) y stock parado', falta: 'terminar el primer conteo de stock y completar los costos' },
@@ -97,10 +83,19 @@ export function calcularIndice(ventas, { indices = null, horas = {}, mesActual }
   for (const v of ventas) {
     if (v.anulado) continue
     const mes = mesDe(v.fecha); if (!mes) continue
-    const x = (m[mes] ||= { venta: 0, ventaConCosto: 0, costo: 0, tickets: new Set(), ventaTk: 0, unidadesTk: 0, comision: 0 })
+    const x = (m[mes] ||= { venta: 0, ventaConCosto: 0, costo: 0, tickets: new Set(), ventaTk: 0, unidadesTk: 0, comision: 0, cobro: {} })
     const $ = monto(v)
     x.venta += $
-    x.comision += repartoPago(v).reduce((s, p) => s + p.monto * comisionDe(p.metodo, posnetDeParte(v, p.metodo)), 0)
+    for (const p of repartoPago(v)) {
+      const tipo = tipoDeMetodo(p.metodo); if (!tipo || !(p.monto > 0)) continue
+      const pos = tipo === 'qr' ? 'AMARILLO' : posnetNormal(posnetDeParte(v, p.metodo))
+      const k = `${pos}|${tipo}`
+      const d = (x.cobro[k] ||= { posnet: pos, tipo, monto: 0, comision: 0, iibb: 0, cheque: 0, costo: 0, tasa: tasaCobro(tipo, pos, mes) })
+      const com = p.monto * d.tasa * IVA / 100, ib = p.monto * IIBB / 100
+      const ch = impChequeAplica(tipo, pos) ? (p.monto - com - ib) * LEY_25413_BLANCO / 100 : 0
+      d.monto += p.monto; d.comision += com; d.iibb += ib; d.cheque += ch; d.costo += com + ib + ch
+      x.comision += com + ib + ch
+    }
     if (costoValido(v)) { x.ventaConCosto += $; x.costo += v.costoTotal }
     // Solo filas con ticket real (las cargas viejas de resumen mensual no tienen ID de venta)
     if (v.idVenta && !cambio.has(v.idVenta)) { x.tickets.add(v.idVenta); x.ventaTk += $; x.unidadesTk += v.cantidad || 0 }
@@ -115,6 +110,7 @@ export function calcularIndice(ventas, { indices = null, horas = {}, mesActual }
     const x = m[mes]
     const f = aHoy(mes)
     const val = {}, det = {}
+    let desglose = null
     if (x) {
       const cobertura = x.venta > 0 ? x.ventaConCosto / x.venta : 0
       if (cobertura >= MIN_COBERTURA && x.ventaConCosto > 0) val.margen = (x.ventaConCosto - x.costo) / x.ventaConCosto
@@ -124,11 +120,16 @@ export function calcularIndice(ventas, { indices = null, horas = {}, mesActual }
       det.ticket = det.upt = `${nt.toLocaleString('es-AR')} tickets`
       const h = horas[mes] || 0
       if (h >= MIN_HORAS) val.porHora = x.venta * f / h
+      // Servicio Payway (fijo por mes) si ese mes se cobró con el blanco
+      const usoBlanco = Object.values(x.cobro).some(d => d.posnet === 'BLANCO')
+      const servicio = usoBlanco ? servicioPaywayDelMes(mes) : 0
+      x.comision += servicio
       if (x.venta > 0) val.cobro = x.comision / x.venta
-      det.cobro = `${fmt$(x.comision)} en comisiones`
+      det.cobro = `${fmt$(x.comision)} entre comisiones e impuestos`
+      desglose = { filas: Object.values(x.cobro).sort((a, b) => b.costo - a.costo), servicio, total: x.comision, venta: x.venta }
       det.porHora = h ? `${Math.round(h).toLocaleString('es-AR')} h fichadas` : 'sin fichadas'
     }
-    return { mes, val, det, venta: x?.venta || 0 }
+    return { mes, val, det, venta: x?.venta || 0, desglose }
   })
 
   const resultado = crudo.map((c, i) => {
@@ -145,9 +146,56 @@ export function calcularIndice(ventas, { indices = null, horas = {}, mesActual }
     const pesoTotal = activos.reduce((s, x) => s + x.peso, 0)
     const indice = pesoTotal ? activos.reduce((s, x) => s + x.puntaje * x.peso, 0) / pesoTotal : null
     activos.forEach(x => { x.pesoReal = x.peso / pesoTotal })
-    return { mes: c.mes, label: nombreMes(c.mes), indice, comp, enCurso: c.mes === mesActual }
+    return { mes: c.mes, label: nombreMes(c.mes), indice, comp, enCurso: c.mes === mesActual, desglose: c.desglose }
   })
   return { meses: resultado }
+}
+
+// Detalle del costo de cobro del mes: cuánto se cobró con cada posnet y medio, a qué tasa y cuánto costó
+function DesgloseCobro({ d, label }) {
+  const [abierto, setAbierto] = useState(false)
+  const pctTxt = v => `${(v * 100).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`
+  const cobradoPosnet = d.filas.reduce((s, f) => s + f.monto, 0)
+  const totalIibb = d.filas.reduce((s, f) => s + f.iibb, 0)
+  const totalCheque = d.filas.reduce((s, f) => s + f.cheque, 0)
+  return (
+    <div style={{ marginTop: 12 }}>
+      <button style={S.desgloseBtn} onClick={() => setAbierto(v => !v)} aria-expanded={abierto}>
+        {abierto ? '▾' : '▸'} Costo de cobro de {label}: {fmt$(d.total)} ({pctTxt(d.venta ? d.total / d.venta : 0)} de la venta)
+      </button>
+      {abierto && (<>
+        <div style={S.tablaWrap}>
+          <table style={{ ...S.tabla, minWidth: 720 }}>
+            <thead><tr>
+              <th style={{ ...S.th, textAlign: 'left' }}>Posnet · medio</th><th style={S.th}>Cobrado</th><th style={S.th}>Comisión (con IVA)</th><th style={S.th}>IIBB</th><th style={S.th}>Imp. cheque</th><th style={S.th}>Costo total</th><th style={S.th}>%</th>
+            </tr></thead>
+            <tbody>
+              {d.filas.map(f => (
+                <tr key={f.posnet + f.tipo}>
+                  <td style={{ ...S.td, textAlign: 'left' }}>{NOMBRE_POSNET[f.posnet]} · {NOMBRE_TIPO[f.tipo]}</td>
+                  <td style={S.td}>{fmt$(f.monto)}</td><td style={S.td}>{fmt$(f.comision)}<div style={S.chico}>{pctTxt(f.tasa * IVA / 100)}</div></td>
+                  <td style={S.td}>{fmt$(f.iibb)}</td><td style={S.td}>{f.cheque ? fmt$(f.cheque) : '–'}</td><td style={S.td}>{fmt$(f.costo)}</td><td style={{ ...S.td, fontWeight: 700 }}>{pctTxt(f.monto ? f.costo / f.monto : 0)}</td>
+                </tr>
+              ))}
+              {d.servicio > 0 && (
+                <tr><td style={{ ...S.td, textAlign: 'left' }}>Servicio Payway (fijo del mes)</td><td style={S.td}>–</td><td style={S.td}>{fmt$(d.servicio)}</td><td style={S.td}>–</td><td style={S.td}>–</td><td style={S.td}>{fmt$(d.servicio)}</td><td style={S.td}>–</td></tr>
+              )}
+              <tr>
+                <td style={{ ...S.td, textAlign: 'left', fontWeight: 700 }}>Total</td><td style={{ ...S.td, fontWeight: 700 }}>{fmt$(cobradoPosnet)}</td>
+                <td style={{ ...S.td, fontWeight: 700 }}>{fmt$(d.total - totalIibb - totalCheque)}</td><td style={{ ...S.td, fontWeight: 700 }}>{fmt$(totalIibb)}</td><td style={{ ...S.td, fontWeight: 700 }}>{fmt$(totalCheque)}</td>
+                <td style={{ ...S.td, fontWeight: 700 }}>{fmt$(d.total)}</td><td style={{ ...S.td, fontWeight: 700 }}>{pctTxt(cobradoPosnet ? d.total / cobradoPosnet : 0)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div style={S.hint}>
+          Payway: crédito 2% + cobro anticipado (activo hasta oct 2026), débito sin arancel, servicio fijo por mes (bonificado nov 2026 – oct 2027).
+          Mercado Pago: crédito 4,19% argentina / 7,19% del exterior (se usa el promedio real, ≈80% del exterior), débito 2,75%, QR 0,80%.
+          Comisiones con IVA. Se suman la retención de Ingresos Brutos (2,5% de lo cobrado con tarjeta o QR) y el impuesto al cheque (Ley 25.413, {LEY_25413_BLANCO.toLocaleString('es-AR')}% de lo que Payway deposita en el banco), porque no se recuperan.
+        </div>
+      </>)}
+    </div>
+  )
 }
 
 const COLOR_REC = { alerta: '#ef4444', idea: 'var(--accent)', bien: '#22c55e' }
@@ -252,6 +300,8 @@ export default function IndiceEficiencia({ ventas = [] }) {
         </div>
         <div style={S.hint}>Los componentes sin dato o sin al menos {MIN_BASE} meses de historia no cuentan ese mes: su peso se reparte entre los demás.</div>
 
+        {sel.desglose && <DesgloseCobro d={sel.desglose} label={sel.label} />}
+
         {recs.length > 0 && (
           <div style={S.recs} aria-label="Recomendaciones">
             <div style={S.recsTitulo}>Recomendaciones · {sel.label}{sel.enCurso ? ' (mes en curso, puede cambiar)' : ''}</div>
@@ -295,5 +345,6 @@ const S = {
   recTitulo: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 17, lineHeight: 1.2 },
   recTexto: { fontFamily: 'Barlow, sans-serif', fontSize: 14, color: 'var(--text)', lineHeight: 1.45, marginTop: 4 },
   recAccion: { fontFamily: 'Barlow, sans-serif', fontSize: 14, color: 'var(--muted)', lineHeight: 1.45, marginTop: 6 },
+  desgloseBtn: { background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 15, color: 'var(--accent-text)', textAlign: 'left' },
   chico: { fontSize: 11, color: 'var(--muted)', fontWeight: 400, marginTop: 2 },
 }

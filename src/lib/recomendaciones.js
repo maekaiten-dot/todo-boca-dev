@@ -166,9 +166,9 @@ export function generarRecomendaciones(ventas, mes, comp, { fichadas = [], comis
         for (const p of reparto) {
           total += p.monto
           const pos = posnetDeParte(v, p.metodo)
-          const k = comisionDe(p.metodo, pos)
+          const k = comisionDe(p.metodo, pos, v.fecha)
           if (k > 0) { tarj += p.monto; com += p.monto * k }
-          if (k > 0 && /AMARILLO/i.test(pos || '')) { amar += p.monto; ahorro += p.monto * (k - comisionDe(p.metodo, 'BLANCO')) }
+          if (k > 0 && /AMARILLO/i.test(pos || '')) { amar += p.monto; ahorro += p.monto * (k - comisionDe(p.metodo, 'BLANCO', v.fecha)) }
         }
       }
       return { total, tarj, com, amar, ahorro }

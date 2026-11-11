@@ -10,7 +10,8 @@ import AvisoPrecios, { totalCambios, resumenCambios } from './components/AvisoPr
 import { BotonModoPartido, BarraModoPartido } from './components/ModoPartido.jsx'
 import { escucharCola, procesarCola } from './lib/colaVentas.js'
 import { calcularMasVendidos } from './lib/masVendidos.js'
-import { prepararGuardadoVentas, getModoPartido, setModoPartido, setModoPartidoLog, getHistoricoVentas, getPromos, getAlias, getArticulos, getUsuarios, registrarLog, calcularStockTodos, leerArticulosVistos, guardarArticulosVistos, getTutoriales, leerTutorialesVistos, guardarTutorialesVistos } from './api/sheets.js'
+import { prepararGuardadoVentas, getModoPartido, setModoPartido, setModoPartidoLog, getHistoricoVentas, getPromos, getAlias, getArticulos, getUsuarios, registrarLog, calcularStockTodos, leerArticulosVistos, guardarArticulosVistos, getTutoriales, leerTutorialesVistos, guardarTutorialesVistos, getConfig } from './api/sheets.js'
+import { tocaRevisar, CLAVES_REPOSICION, REPOSICION_DEFAULT, puedeVerReposicion } from './lib/reposicion.js'
 // Las solapas que no son Vender ni Hoy se bajan aparte (la app abre más rápido). Unos segundos
 // después de abrir se precargan en segundo plano, así al tocarlas ya están.
 const CARGAS = {
@@ -29,6 +30,7 @@ const CARGAS = {
   Administracion: () => import('./pages/Administracion.jsx'),
   Promos: () => import('./pages/Promos.jsx'),
   CobrosMP: () => import('./pages/CobrosMP.jsx'),
+  Reposicion: () => import('./pages/Reposicion.jsx'),
 }
 const LogVentas = lazy(CARGAS.LogVentas)
 const Estadisticas = lazy(CARGAS.Estadisticas)
@@ -45,6 +47,7 @@ const Asistencia = lazy(CARGAS.Asistencia)
 const Administracion = lazy(CARGAS.Administracion)
 const Promos = lazy(CARGAS.Promos)
 const CobrosMP = lazy(CARGAS.CobrosMP)
+const Reposicion = lazy(CARGAS.Reposicion)
 const precargarSolapas = () => Object.values(CARGAS).forEach(f => f().catch(() => {}))
 const CargandoSolapa = () => <div style={{ padding: 24, fontFamily: 'Barlow, sans-serif', color: 'var(--muted)' }}>Cargando…</div>
 
@@ -73,6 +76,7 @@ const TABS_POR_TIPO = {
 const TABS_MAS_ADMIN = [
   { id:'stats', label:'Estadísticas', icon:'📈', desc:'Ventas por día y por mes' },
   { id:'rota', label:'Rotación', icon:'🔄', desc:'Más vendidos y reposición' },
+  { id:'repo', label:'Reposición', icon:'🚚', desc:'Qué pedir, por urgencia o por proveedor' },
   { id:'promos', label:'Promos', icon:'🏷️', desc:'Armar promos y ver si funcionan' },
   { id:'ing', label:'Ingresos', icon:'📥', desc:'Mercadería que entró' },
   { id:'pagos', label:'Pagos', icon:'💳', desc:'Pagos a proveedores y gastos' },
@@ -227,6 +231,7 @@ export default function App() {
   const [versionTutos, setVersionTutos] = useState(0)
   const tutosRef = useRef([])
   const avisoCambios = (cambiosPrecio || tutosNuevos.length) ? { ...(cambiosPrecio || {}), tutoriales: tutosNuevos } : null
+  const [avisoReposicion, setAvisoReposicion] = useState(false)
   const [verAvisoPrecios, setVerAvisoPrecios] = useState(false) // Admin: abrió el detalle desde el aviso chico
   const perfilRef = useRef(perfilGuardado)
   perfilRef.current = perfilGuardado
@@ -478,6 +483,13 @@ export default function App() {
   }
 
   const esAdmin = perfilGuardado?.tipo?.toLowerCase() === 'admin'
+  // Aviso a los admin cuando toca revisar la reposición (cada X días; se guarda en CONFIG)
+  const hayReposicion = esAdmin && puedeVerReposicion(perfilGuardado?.nombre) && tabsMasDelLocal(true).some(t => t.id === 'repo')
+  function revisarAvisoReposicion() {
+    if (!hayReposicion) { setAvisoReposicion(false); return }
+    getConfig().then(c => setAvisoReposicion(tocaRevisar(c[CLAVES_REPOSICION.ultima]?.valor, Number(c[CLAVES_REPOSICION.cadaDias]?.valor) || REPOSICION_DEFAULT.cadaDias))).catch(() => {})
+  }
+  useEffect(() => { revisarAvisoReposicion() }, [hayReposicion])
   // Supervisor (solo donde el local lo habilita): ve todo lo del Admin, pero sin modificar
   const esSupervisor = !!LOCAL.supervisor && perfilGuardado?.tipo?.toLowerCase() === 'supervisor'
   const veAdmin = esAdmin || esSupervisor
@@ -486,7 +498,7 @@ export default function App() {
   const tabsBase = tabsDelLocal(tipoKey)
   // Gastos Fijos visible para todos los Admin, editable solo por Adrián
   const tabs = tabsBase
-  const tabsMas = tabsMasDelLocal(veAdmin)
+  const tabsMas = tabsMasDelLocal(veAdmin).filter(t => t.id !== 'repo' || hayReposicion)
   const tabMasActiva = tabsMas.find(t => t.id === tab)
   const empleadoActual = perfilGuardado?.nombre || ''
   const usuariosLogin = usuarios.filter(u => u.tipo?.toLowerCase() === 'admin' || (LOCAL.supervisor && u.tipo?.toLowerCase() === 'supervisor') || u.nombre === 'Tablet')
@@ -538,6 +550,9 @@ export default function App() {
                 📢 {resumenCambios(avisoCambios)}
               </button>
             )}
+            {avisoReposicion && (
+              <button style={S.avisoPreciosPill} onClick={() => handleTabChange('repo')} title="Toca revisar qué hay que reponer" aria-label="Revisar reposición">{typeof window !== 'undefined' && window.innerWidth < 600 ? '🚚' : '🚚 Revisar reposición'}</button>
+            )}
             {esAdmin && LOCAL.modoPartido && <BotonModoPartido activo={modo.activo} cambiando={cambiandoModo} onCambiar={cambiarModo} />}
             {LOCAL.fichar && <FicharTablet />}
             <div style={S.perfilPill}><span style={S.perfilLabel}>{empleadoActual}</span></div>
@@ -581,6 +596,9 @@ export default function App() {
           )}
           {veAdmin && tabsVisitadas.has('rota') && (
             <div style={tabStyle('rota')}><Suspense fallback={<CargandoSolapa />}><Rotacion articulos={articulos} stockMap={stockMap} /></Suspense></div>
+          )}
+          {hayReposicion && tabsVisitadas.has('repo') && (
+            <div style={tabStyle('repo')}><Suspense fallback={<CargandoSolapa />}><Reposicion articulos={articulos} stockMap={stockMap} perfilNombre={empleadoActual} onRevisado={revisarAvisoReposicion} /></Suspense></div>
           )}
           {esAdmin && LOCAL.planillaMP && tabsVisitadas.has('mp') && (
             <div style={tabStyle('mp')}><Suspense fallback={<CargandoSolapa />}><CobrosMP /></Suspense></div>

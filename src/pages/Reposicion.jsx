@@ -64,10 +64,11 @@ export default function Reposicion({ articulos = [], stockMap = {}, perfilNombre
       .map(([p, lista]) => ({ clave: p || '-', titulo: p || 'Sin proveedor cargado', items: lista, costo: lista.reduce((s, i) => s + i.pedir * i.ultimoCosto, 0) }))
   }, [items, vista])
 
-  if (error) return <div style={S.wrap}><div style={S.error}>⚠ {error}</div></div>
-  if (!datos) return <div style={S.wrap}><div style={S.muted}>Calculando la reposición…</div></div>
+  if (error) return <div style={S.page}><div style={S.wrap}><div style={S.error}>⚠ {error}</div></div></div>
+  if (!datos) return <div style={S.page}><div style={S.wrap}><div style={S.muted}>Calculando la reposición…</div></div></div>
 
   return (
+    <div style={S.page}>
     <div style={S.wrap}>
       <div style={S.filaTit}>
         <div>
@@ -142,10 +143,13 @@ export default function Reposicion({ articulos = [], stockMap = {}, perfilNombre
       ))}
       <div style={S.muted}>Ritmo: el mayor entre los últimos 30 y 90 días. Stock: último conteo + ingresos − ventas − bajas. "Pedir" es lo que falta para cubrir {dias} días a ese ritmo. En temporada de partidos el ritmo puede no repetirse: tomalo como punto de partida.</div>
     </div>
+    </div>
   )
 }
 
 const S = {
+  page: { flex: 1, minHeight: 0, overflowY: 'auto', width: '100%', paddingBottom: 24 },
+  // la solapa tiene alto fijo: el scroll lo hace page
   wrap: { padding: 16, display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 1100, margin: '0 auto' },
   filaTit: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' },
   tit: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 26, color: 'var(--accent-text)' },

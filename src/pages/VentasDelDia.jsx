@@ -2,6 +2,8 @@
 import { useState, useEffect, Fragment } from 'react'
 import { getVentasHoy, anularVenta, registrarLog, getGastosCajaHoy, POSNET_METODOS, usaPosnet, metodosDe, repartoPago, montoConMetodo, posnetDeParte, nombrePosnet } from '../api/sheets.js'
 import DetalleVentaModal from '../components/DetalleVentaModal.jsx'
+import BajaModal from '../components/BajaModal.jsx'
+import { LOCAL } from '../config/local.js'
 
 const METODO_ICONS = {
   'Efectivo Pesos':'💵','Efectivo ARS':'💵',
@@ -23,6 +25,7 @@ const textoPagos = pagos => pagos.map(p => `${p.metodo} $${Math.round(p.monto).t
 
 export default function VentasDelDia({ refreshKey, usuarios = [], perfilNombre = '', esAdmin = false, soloLectura = false, articulos = [] }) {
   const [ventas, setVentas] = useState([])
+  const [verBaja, setVerBaja] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [confirmAnular, setConfirmAnular] = useState(null)
@@ -161,6 +164,7 @@ export default function VentasDelDia({ refreshKey, usuarios = [], perfilNombre =
 
   return (
     <div style={S.page}>
+      {verBaja && <BajaModal articulos={articulos} usuarios={usuarios} perfilNombre={perfilNombre} onCerrar={() => setVerBaja(false)} onGuardada={msg => { setVerBaja(false); showToast(msg) }} />}
       {toast && (
         <div style={{...S.toast, ...(toast.type==='error' ? S.toastError : S.toastSuccess)}}>
           {toast.msg}
@@ -169,7 +173,10 @@ export default function VentasDelDia({ refreshKey, usuarios = [], perfilNombre =
 
       <div style={S.header}>
         <div style={S.headerTitle}>VENTAS DE HOY</div>
-        <button style={S.refreshBtn} onClick={cargar}>↻</button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {LOCAL.bajaEnHoy && !soloLectura && <button style={S.bajaBtn} onClick={() => setVerBaja(true)} title="Registrar algo que sale del stock sin venderse">➖ BAJA</button>}
+          <button style={S.refreshBtn} onClick={cargar}>↻</button>
+        </div>
       </div>
 
       {/* Resumen compacto: siempre visible, ocupa una sola franja */}
@@ -367,6 +374,7 @@ const S = {
   toastError: { background:'#ef4444', color:'#fff' },
   header: { display:'flex', alignItems:'center', justifyContent:'space-between', padding:'16px 20px 12px', borderBottom:'2px solid var(--accent)', flexShrink:0 },
   headerTitle: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:32, color:'var(--accent-text)', textTransform:'uppercase', letterSpacing:2 },
+  bajaBtn: { background:'var(--surface)', border:'1.5px solid #ef4444', borderRadius:10, color:'#f87171', fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:17, letterSpacing:1, height:44, padding:'0 14px', cursor:'pointer', whiteSpace:'nowrap' },
   refreshBtn: { background:'var(--surface)', border:'1.5px solid var(--border)', borderRadius:10, color:'var(--text)', fontSize:24, width:44, height:44, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' },
   resumenBar: { display:'flex', flexWrap:'wrap', alignItems:'center', gap:'6px 24px', margin:'10px 20px', padding:'8px 16px', background:'var(--surface)', border:'1.5px solid var(--border)', borderRadius:12, cursor:'pointer', textAlign:'left', flexShrink:0 },
   resumenItem: { display:'flex', flexDirection:'column' },

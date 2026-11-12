@@ -112,7 +112,7 @@ export default function BajaModal({ articulos = [], usuarios = [], perfilNombre 
 
 const S = {
   overlay: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 12 },
-  modal: { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, padding: 16, width: '100%', maxWidth: 560, maxHeight: '92vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 },
+  modal: { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, padding: 16, width: '100%', maxWidth: 560, maxHeight: '92vh', overflowY: 'auto', display: 'grid', gap: 8, alignContent: 'start' },
   tit: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 24, color: 'var(--accent-text)' },
   ayuda: { fontFamily: 'Barlow, sans-serif', fontSize: 13, color: 'var(--muted)', lineHeight: 1.4 },
   lbl: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 13, color: 'var(--muted)', letterSpacing: 1.5, marginTop: 4 },
@@ -121,8 +121,8 @@ const S = {
   optOn: { background: 'rgba(245,200,0,0.12)', border: '1.5px solid var(--accent)', color: 'var(--accent-text)' },
   search: { fontFamily: 'Barlow, sans-serif', fontSize: 16, padding: '11px 14px', background: 'var(--bg)', border: '1.5px solid var(--border)', borderRadius: 10, color: 'var(--text)', width: '100%', boxSizing: 'border-box' },
   qr: { display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, background: 'var(--surface2)', border: '1.5px solid var(--accent)', borderRadius: 10, color: 'var(--accent-text)', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 17, padding: '0 12px', cursor: 'pointer' },
-  lista: { display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 280, overflowY: 'auto' },
-  res: { display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 10, padding: '6px 10px', color: 'var(--text)', cursor: 'pointer', width: '100%' },
+  lista: { display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 280, overflowY: 'auto', flexShrink: 0 },  // sin flexShrink la lista se achicaba a nada en pantallas bajas
+  res: { flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 10, padding: '6px 10px', color: 'var(--text)', cursor: 'pointer', width: '100%' },
   resNombre: { display: 'block', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 17, lineHeight: 1.2 },
   resCod: { display: 'block', fontFamily: 'Barlow, sans-serif', fontSize: 12, color: 'var(--muted)' },
   sel: { display: 'flex', alignItems: 'center', gap: 10, fontFamily: 'Barlow, sans-serif', fontSize: 15, color: 'var(--text)', background: 'var(--surface2)', borderRadius: 10, padding: '8px 10px' },

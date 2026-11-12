@@ -31,6 +31,7 @@ const CARGAS = {
   Promos: () => import('./pages/Promos.jsx'),
   CobrosMP: () => import('./pages/CobrosMP.jsx'),
   Reposicion: () => import('./pages/Reposicion.jsx'),
+  Rentabilidad: () => import('./pages/Rentabilidad.jsx'),
 }
 const LogVentas = lazy(CARGAS.LogVentas)
 const Estadisticas = lazy(CARGAS.Estadisticas)
@@ -48,6 +49,7 @@ const Administracion = lazy(CARGAS.Administracion)
 const Promos = lazy(CARGAS.Promos)
 const CobrosMP = lazy(CARGAS.CobrosMP)
 const Reposicion = lazy(CARGAS.Reposicion)
+const Rentabilidad = lazy(CARGAS.Rentabilidad)
 const precargarSolapas = () => Object.values(CARGAS).forEach(f => f().catch(() => {}))
 const CargandoSolapa = () => <div style={{ padding: 24, fontFamily: 'Barlow, sans-serif', color: 'var(--muted)' }}>Cargando…</div>
 
@@ -77,6 +79,7 @@ const TABS_MAS_ADMIN = [
   { id:'stats', label:'Estadísticas', icon:'📈', desc:'Ventas por día y por mes' },
   { id:'rota', label:'Rotación', icon:'🔄', desc:'Más vendidos y reposición' },
   { id:'repo', label:'Reposición', icon:'🚚', desc:'Qué pedir, por urgencia o por proveedor' },
+  { id:'rent', label:'Rentabilidad', icon:'💰', desc:'Margen real y GMROI por artículo' },
   { id:'promos', label:'Promos', icon:'🏷️', desc:'Armar promos y ver si funcionan' },
   { id:'ing', label:'Ingresos', icon:'📥', desc:'Mercadería que entró' },
   { id:'pagos', label:'Pagos', icon:'💳', desc:'Pagos a proveedores y gastos' },
@@ -596,6 +599,9 @@ export default function App() {
           )}
           {veAdmin && tabsVisitadas.has('rota') && (
             <div style={tabStyle('rota')}><Suspense fallback={<CargandoSolapa />}><Rotacion articulos={articulos} stockMap={stockMap} /></Suspense></div>
+          )}
+          {esAdmin && tabsVisitadas.has('rent') && (
+            <div style={tabStyle('rent')}><Suspense fallback={<CargandoSolapa />}><Rentabilidad articulos={articulos} stockMap={stockMap} /></Suspense></div>
           )}
           {hayReposicion && tabsVisitadas.has('repo') && (
             <div style={tabStyle('repo')}><Suspense fallback={<CargandoSolapa />}><Reposicion articulos={articulos} stockMap={stockMap} perfilNombre={empleadoActual} onRevisado={revisarAvisoReposicion} /></Suspense></div>

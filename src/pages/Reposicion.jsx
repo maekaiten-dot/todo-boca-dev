@@ -23,7 +23,9 @@ export default function Reposicion({ articulos = [], stockMap = {}, perfilNombre
   const [borrador, setBorrador] = useState(REPOSICION_DEFAULT)
   const [guardando, setGuardando] = useState(false)
 
-  useEffect(() => {
+  const [cargando, setCargando] = useState(false)
+  function cargar() {
+    setCargando(true); setError('')
     Promise.all([getHistoricoVentas({ unificar: true }), getIngresos({ unificar: true }).catch(() => []), getConfig().catch(() => ({}))])
       .then(([ventas, ingresos, cfg]) => {
         const num = (k, d) => { const v = Number(String(cfg[CLAVES_REPOSICION[k]]?.valor ?? '').replace(',', '.')); return v > 0 || (k === 'demoraDias' && v === 0 && cfg[CLAVES_REPOSICION[k]]) ? v : d }
@@ -37,8 +39,9 @@ export default function Reposicion({ articulos = [], stockMap = {}, perfilNombre
           const f = fechaDeDia(hoyDia())
           setConfig({ [CLAVES_REPOSICION.ultima]: f }, perfilNombre).then(() => { setUltima(f); onRevisado?.() }).catch(() => {})
         }
-      }).catch(e => setError(e.message))
-  }, [])
+      }).catch(e => setError(e.message)).finally(() => setCargando(false))
+  }
+  useEffect(() => { cargar() }, [])
 
   const { items, dias } = useMemo(() => datos ? calcularReposicion({ ...datos, articulos, stockMap, ...valores }) : { items: [], dias: 0 }, [datos, articulos, stockMap, valores])
   const negativos = items.filter(i => i.negativo)
@@ -64,7 +67,7 @@ export default function Reposicion({ articulos = [], stockMap = {}, perfilNombre
       .map(([p, lista]) => ({ clave: p || '-', titulo: p || 'Sin proveedor cargado', items: lista, costo: lista.reduce((s, i) => s + i.pedir * i.ultimoCosto, 0) }))
   }, [items, vista])
 
-  if (error) return <div style={S.page}><div style={S.wrap}><div style={S.error}>⚠ {error}</div></div></div>
+  if (error) return <div style={S.page}><div style={S.wrap}><div style={S.error}>⚠ {error}</div><button style={S.btnChico} onClick={cargar}>Reintentar</button></div></div>
   if (!datos) return <div style={S.page}><div style={S.wrap}><div style={S.muted}>Calculando la reposición…</div></div></div>
 
   return (
@@ -80,6 +83,7 @@ export default function Reposicion({ articulos = [], stockMap = {}, perfilNombre
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button style={S.btnChico} onClick={() => { setBorrador(valores); setEditando(e => !e) }}>{editando ? 'Cancelar' : 'Valores'}</button>
+          <button style={S.refreshBtn} onClick={cargar} disabled={cargando} aria-label="Actualizar" title="Volver a leer las ventas">{cargando ? '…' : '↻'}</button>
         </div>
       </div>
 
@@ -148,6 +152,7 @@ export default function Reposicion({ articulos = [], stockMap = {}, perfilNombre
 }
 
 const S = {
+  refreshBtn: { background: 'var(--surface)', border: '1.5px solid var(--border)', borderRadius: 10, color: 'var(--text)', fontSize: 24, width: 44, height: 44, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   page: { flex: 1, minHeight: 0, overflowY: 'auto', width: '100%', paddingBottom: 24 },
   // la solapa tiene alto fijo: el scroll lo hace page
   wrap: { padding: 16, display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 1100, margin: '0 auto' },

@@ -23,10 +23,13 @@ export default function Rentabilidad({ articulos = [], stockMap = {} }) {
   const [verTodos, setVerTodos] = useState(false)
   const [ayuda, setAyuda] = useState(false)
 
-  useEffect(() => {
+  const [cargando, setCargando] = useState(false)
+  function cargar() {
+    setCargando(true); setError('')
     Promise.all([getHistoricoVentas({ unificar: true }), getIngresos({ unificar: true }).catch(() => [])])
-      .then(([ventas, ingresos]) => setDatos({ ventas, ingresos })).catch(e => setError(e.message))
-  }, [])
+      .then(([ventas, ingresos]) => setDatos({ ventas, ingresos })).catch(e => setError(e.message)).finally(() => setCargando(false))
+  }
+  useEffect(() => { cargar() }, [])
 
   const { items } = useMemo(() => datos ? calcularRentabilidad({ ...datos, articulos, stockMap, dias }) : { items: [] }, [datos, articulos, stockMap, dias])
   const total = useMemo(() => sumarRentabilidad(items, dias), [items, dias])
@@ -41,7 +44,7 @@ export default function Rentabilidad({ articulos = [], stockMap = {} }) {
   const sinCosto = items.filter(x => x.vendidasSinCosto > 0)
   const revisar = items.filter(x => x.gmroi != null && x.gmroi < 1 && x.invActual > 0).sort((a, b) => b.invActual - a.invActual)
 
-  if (error) return <div style={S.page}><div style={S.wrap}><div style={S.error}>⚠ {error}</div></div></div>
+  if (error) return <div style={S.page}><div style={S.wrap}><div style={S.error}>⚠ {error}</div><button style={S.btnChico} onClick={cargar}>Reintentar</button></div></div>
   if (!datos) return <div style={S.page}><div style={S.wrap}><div style={S.muted}>Calculando márgenes…</div></div></div>
 
   const mostradas = verTodos ? filas : filas.slice(0, 60)
@@ -50,7 +53,10 @@ export default function Rentabilidad({ articulos = [], stockMap = {} }) {
       <div style={S.wrap}>
         <div style={S.filaTit}>
           <div style={S.tit}>Rentabilidad</div>
-          <button style={S.btnChico} onClick={() => setAyuda(a => !a)}>{ayuda ? 'Cerrar' : '¿Cómo se calcula?'}</button>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button style={S.btnChico} onClick={() => setAyuda(a => !a)}>{ayuda ? 'Cerrar' : '¿Cómo se calcula?'}</button>
+            <button style={S.refreshBtn} onClick={cargar} disabled={cargando} aria-label="Actualizar" title="Volver a leer las ventas">{cargando ? '…' : '↻'}</button>
+          </div>
         </div>
         {ayuda && (
           <div style={S.ayuda}>
@@ -151,6 +157,7 @@ function Card({ t, v, s, color }) {
 }
 
 const S = {
+  refreshBtn: { background: 'var(--surface)', border: '1.5px solid var(--border)', borderRadius: 10, color: 'var(--text)', fontSize: 24, width: 44, height: 44, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   page: { flex: 1, minHeight: 0, overflowY: 'auto', width: '100%', paddingBottom: 24 },
   wrap: { padding: 16, display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 1200, margin: '0 auto' },
   filaTit: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' },

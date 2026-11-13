@@ -577,7 +577,7 @@ export default function App() {
             )}
           </div>
           {tabsVisitadas.has('hoy') && (
-            <div style={tabStyle('hoy')}>{LOCAL.hoySimple && !veAdmin ? <HoySimple refreshKey={refreshKey} articulos={articulos} /> : <VentasDelDia soloLectura={esSupervisor} refreshKey={refreshKey} puedeAnular={true} usuarios={usuarios} perfilNombre={empleadoActual} esAdmin={veAdmin} articulos={articulos} />}</div>
+            <div style={tabStyle('hoy')}>{LOCAL.hoySimple && !veAdmin ? <HoySimple refreshKey={refreshKey} articulos={articulos} /> : <VentasDelDia soloLectura={esSupervisor} refreshKey={refreshKey} puedeAnular={true} usuarios={usuarios} perfilNombre={empleadoActual} esAdmin={veAdmin} articulos={articulos} verEquilibrio={esAdmin} />}</div>
           )}
           {tabsVisitadas.has('caja') && (
             <div style={tabStyle('caja')}><Suspense fallback={<CargandoSolapa />}><GastosCaja usuarios={usuarios} articulos={articulos} perfilNombre={empleadoActual} onRegistrado={() => setRefreshKey(k => k + 1)} /></Suspense></div>

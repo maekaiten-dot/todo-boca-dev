@@ -2,6 +2,7 @@
 import { useState, useEffect, Fragment } from 'react'
 import { getVentasHoy, anularVenta, registrarLog, getGastosCajaHoy, POSNET_METODOS, usaPosnet, metodosDe, repartoPago, montoConMetodo, posnetDeParte, nombrePosnet } from '../api/sheets.js'
 import DetalleVentaModal from '../components/DetalleVentaModal.jsx'
+import EquilibrioBar from '../components/EquilibrioBar.jsx'
 
 const METODO_ICONS = {
   'Efectivo Pesos':'💵','Efectivo ARS':'💵',
@@ -21,7 +22,7 @@ const iconos = m => metodosDe(m).map(x => METODO_ICONS[x] || '💰').join('') ||
 // "Efectivo Pesos $20.000 + Tarjeta de Débito $15.000" (montos de toda la venta)
 const textoPagos = pagos => pagos.map(p => `${p.metodo} $${Math.round(p.monto).toLocaleString('es-AR')}`).join(' + ')
 
-export default function VentasDelDia({ refreshKey, usuarios = [], perfilNombre = '', esAdmin = false, soloLectura = false, articulos = [] }) {
+export default function VentasDelDia({ refreshKey, usuarios = [], perfilNombre = '', esAdmin = false, soloLectura = false, articulos = [], verEquilibrio = false }) {
   const [ventas, setVentas] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -190,6 +191,9 @@ export default function VentasDelDia({ refreshKey, usuarios = [], perfilNombre =
         </div>
         <span style={S.resumenToggle}>{detalleAbierto ? 'Ocultar ▴' : 'Detalle ▾'}</span>
       </button>
+
+      {/* Punto de equilibrio: solo los Admin */}
+      {verEquilibrio && <EquilibrioBar totalDia={totalDia} articulos={articulos} refreshKey={refreshKey} />}
 
       {detalleAbierto && (
         <div style={S.detalleGrid}>

@@ -388,7 +388,7 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
         </div>
         <div style={S.resumenCard}>
           <div style={{...S.resumenValue, color:'#f59e0b'}}>${Math.round(totalPendiente).toLocaleString('es-AR')}</div>
-          <div style={S.resumenLabel}>Deuda pendiente (detalle por mes abajo)</div>
+          <div style={S.resumenLabel}>Deuda pendiente</div>
         </div>
       </div>
       <DeudasPorMes pagos={pagos} />
@@ -885,7 +885,7 @@ const S = {
   filtroTabs: { display:'flex', gap:4 },
   filtroTab: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:700, fontSize:13, padding:'7px 12px', background:'var(--surface)', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--muted)', cursor:'pointer' },
   filtroTabActive: { background:'rgba(245,200,0,0.12)', border:'1.5px solid var(--accent)', color:'var(--accent-text)' },
-  tableWrap: { flex:1, overflowX:'auto', padding:'0 20px 20px' },
+  tableWrap: { flex:'1 0 auto', overflowX:'auto', padding:'0 20px 20px' },
   table: { width:'100%', borderCollapse:'collapse' },
   th: { fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:12, color:'var(--muted)', letterSpacing:1, textTransform:'uppercase', padding:'8px 10px', borderBottom:'2px solid var(--border)', textAlign:'left', background:'var(--surface)', position:'sticky', top:0, zIndex:1, whiteSpace:'nowrap' },
   thOrden: { cursor:'pointer', userSelect:'none' },

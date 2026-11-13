@@ -20,7 +20,6 @@ const CARGAS = {
   Articulos: () => import('./pages/Articulos.jsx'),
   Ingresos: () => import('./pages/Ingresos.jsx'),
   Pagos: () => import('./pages/Pagos.jsx'),
-  GastosFijos: () => import('./pages/GastosFijos.jsx'),
   Rotacion: () => import('./pages/Rotacion.jsx'),
   GastosCaja: () => import('./pages/GastosCaja.jsx'),
   Tutoriales: () => import('./pages/Tutoriales.jsx'),
@@ -38,7 +37,6 @@ const Estadisticas = lazy(CARGAS.Estadisticas)
 const Articulos = lazy(CARGAS.Articulos)
 const Ingresos = lazy(CARGAS.Ingresos)
 const Pagos = lazy(CARGAS.Pagos)
-const GastosFijos = lazy(CARGAS.GastosFijos)
 const Rotacion = lazy(CARGAS.Rotacion)
 const GastosCaja = lazy(CARGAS.GastosCaja)
 const Tutoriales = lazy(CARGAS.Tutoriales)
@@ -83,7 +81,6 @@ const TABS_MAS_ADMIN = [
   { id:'promos', label:'Promos', icon:'🏷️', desc:'Armar promos y ver si funcionan' },
   { id:'ing', label:'Ingresos', icon:'📥', desc:'Mercadería que entró' },
   { id:'pagos', label:'Pagos', icon:'💳', desc:'Pagos a proveedores y gastos' },
-  { id:'gastos', label:'Gastos fijos', icon:'📌', desc:'Gastos fijos del mes' },
   { id:'conteo', label:'Conteo y stock', icon:'🔢', desc:'Contar, bajas y diferencias' },
   { id:'tutos', label:'Tutoriales', icon:'📘', desc:'Instructivos para el equipo' },
   { id:'asis', label:'Asistencia', icon:'🗓', desc:'Tardes, francos y fichadas faltantes' },
@@ -626,9 +623,6 @@ export default function App() {
           )}
           {veAdmin && tabsVisitadas.has('admin') && (
             <div style={tabStyle('admin')}><Suspense fallback={<CargandoSolapa />}><Administracion perfilNombre={empleadoActual} /></Suspense></div>
-          )}
-          {veAdmin && tabsVisitadas.has('gastos') && (
-            <div style={tabStyle('gastos')}><Suspense fallback={<CargandoSolapa />}><GastosFijos soloLectura={!esAdrian} /></Suspense></div>
           )}
         </div>
 

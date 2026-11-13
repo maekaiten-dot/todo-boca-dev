@@ -4,7 +4,7 @@ import { parseMonto } from '../lib/montos.js'
 import { getPagos, registrarPago, actualizarPago, anularPago, getArticulosAdmin, idCanonico, generarIdCompra, claveCompra, editarArticulo } from '../api/sheets.js'
 import CompraModal, { armarCompras, textoRenglones } from '../components/CompraModal.jsx'
 import PagosPorMes from '../components/PagosPorMes.jsx'
-import DeudasPorMes from '../components/DeudasPorMes.jsx'
+import DeudasPorMes, { saldoPago } from '../components/DeudasPorMes.jsx'
 import { GRUPOS_GASTO, sugerirEtiqueta, sugerirMes, mesesParaElegir, nombreMesGasto } from '../lib/etiquetasGastos.js'
 import BarcodeScanner from '../components/BarcodeScanner.jsx'
 import EscanearFactura from '../components/EscanearFactura.jsx'
@@ -14,9 +14,11 @@ function getEstado(p) {
   if (p.anulado) return 'ANULADO'
   if (p.tipo === 'GASTO') return 'GASTO'
   if (p.tipo === 'MERCADERÍA') {
-    if (p.fechaIngreso && p.pagado)  return 'COMPLETO'
-    if (p.fechaIngreso && !p.pagado) return 'PENDIENTE_PAGO'
-    if (!p.fechaIngreso && p.pagado) return 'PENDIENTE_MERCADERIA'
+    // Con todo el costo pagado cuenta como pagado aunque no se haya marcado "Pagado: Sí"
+    const pagado = p.pagado || (p.costoTotal > 0 && p.montoPagado >= p.costoTotal)
+    if (p.fechaIngreso && pagado)  return 'COMPLETO'
+    if (p.fechaIngreso && !pagado) return 'PENDIENTE_PAGO'
+    if (!p.fechaIngreso && pagado) return 'PENDIENTE_MERCADERIA'
   }
   return 'GASTO'
 }
@@ -156,6 +158,8 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
       const compra = !esMerc ? (form.compraSel && form.compraSel !== 'NUEVA' ? form.compraSel : '') : form.compraSel === 'NUEVA' ? await generarIdCompra() : form.compraSel
       if (!esMerc && compra && !(parseMonto(form.costoUnitario) > 0)) { showToast('Poné el importe del gasto', 'error'); setSaving(false); return }
       const comprobante = esMerc || compra ? form.comprobante.trim() : ''
+      // Mercadería con todo el costo pagado: queda marcada como pagada (si no, seguía figurando como deuda)
+      const pagadoFinal = form.pagado || (esMerc && costoTotal > 0 && parseMonto(form.montoPagado) >= costoTotal)
       const datosGasto = !esMerc ? { ...(compra ? { cantidad: '1' } : { cantidad: '0', costoUnitario: '0' }), etiqueta: form.etiqueta, correspondeA: form.correspondeA || sugerirMes(form.descripcion, form.fechaPago || hoy(), form.etiqueta) } : { etiqueta: '', correspondeA: '' }
       // Costo y precio del artículo (si se pidió actualizarlos)
       const cambiosArt = []
@@ -168,12 +172,12 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
       const notaArt = cambiosArt.length ? ` · artículo actualizado (${cambiosArt.join(', ')})` : ''
       if (editando) {
         const notaIngreso = await actualizarPago(editando.rowNum, {
-          ...form, ...datosGasto, compra, comprobante, compraAnterior: editando.compra || '', comprobanteAnterior: editando.comprobante || '',
+          ...form, pagado: pagadoFinal, ...datosGasto, compra, comprobante, compraAnterior: editando.compra || '', comprobanteAnterior: editando.comprobante || '',
           idPago: editando.idPago, anulado: editando.anulado,
         }, form.empleado)
         showToast(`Pago actualizado${notaIngreso || ''}${notaArt}`, 'success', notaIngreso || notaArt ? 6000 : 3000)
       } else {
-        await registrarPago({ ...form, ...datosGasto, compra, comprobante })
+        await registrarPago({ ...form, pagado: pagadoFinal, ...datosGasto, compra, comprobante })
         showToast(`${otro ? `Guardado en ${compra}: cargá el siguiente producto` : `Pago registrado${compra ? ` · compra ${compra}` : ''}`}${notaArt}`, 'success', notaArt ? 6000 : 3000)
       }
       if (otro && !editando) {
@@ -339,7 +343,7 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
 
   // Totales resumen
   const totalPagado = pagos.filter(p => !p.anulado && p.pagado).reduce((s, p) => s + p.montoPagado, 0)
-  const totalPendiente = pagos.filter(p => !p.anulado && !p.pagado && p.tipo === 'MERCADERÍA').reduce((s, p) => s + p.costoTotal, 0)
+  const totalPendiente = pagos.filter(p => !p.anulado && p.tipo === 'MERCADERÍA').reduce((s, p) => s + saldoPago(p), 0)
 
   if (loading) return <div style={S.center}><div style={S.loadingText}>Cargando pagos...</div></div>
   if (error) return (
@@ -745,7 +749,7 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
                   <label style={S.label}>MONTO PAGADO {gastoDeCompra && <span style={{fontWeight:400}}>(lo que ya pagaste)</span>}</label>
                   <input style={S.input} type="text" inputMode="numeric" value={form.montoPagado} onChange={e => setForm(f => ({...f, montoPagado: e.target.value}))} />
                   {form.tipo === 'MERCADERÍA' && costoTotal > 0 && (
-                    <button style={S.hoyBtn} onClick={() => setForm(f => ({...f, montoPagado: String(costoTotal)}))}>= Costo total</button>
+                    <button style={S.hoyBtn} onClick={() => setForm(f => ({...f, montoPagado: String(costoTotal), pagado: true}))}>= Costo total</button>
                   )}
                   {gastoDeCompra && parseMonto(form.costoUnitario) > 0 && (
                     <button style={S.hoyBtn} onClick={() => setForm(f => ({...f, montoPagado: String(parseMonto(f.costoUnitario)), pagado: true}))}>= Importe (ya lo pagué)</button>

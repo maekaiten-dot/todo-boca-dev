@@ -8,15 +8,21 @@ const mesDe = f => { const p = String(f || '').replace(/^'/, '').split(' ')[0].s
 const nombreMes = k => { if (!k) return 'Sin fecha de ingreso'; const [a, m] = k.split('-'); const n = MESES[Number(m) - 1]; return `${n[0].toUpperCase()}${n.slice(1)} ${a}` }
 const fmt$ = n => '$' + Math.round(n || 0).toLocaleString('es-AR')
 
+// Lo que falta pagar de un renglón: nada si está marcado como pagado; si no, el costo menos lo que ya se
+// pagó (un renglón con todo el monto pagado pero sin marcar "pagado" no es deuda).
+export const saldoPago = p => p.pagado ? 0 : Math.max(0, (p.costoTotal || 0) - (p.montoPagado || 0))
+
 export function deudasPorMes(pagos) {
   const m = {}
   for (const p of pagos) {
-    if (p.anulado || p.pagado || p.tipo !== 'MERCADERÍA') continue
+    if (p.anulado || p.tipo !== 'MERCADERÍA') continue
+    const falta = saldoPago(p)
+    if (!(falta > 0)) continue
     const k = mesDe(p.fechaIngreso) || ''
     const x = m[k] || (m[k] = { mes: k, total: 0, renglones: 0, prov: {} })
-    x.total += p.costoTotal; x.renglones++
+    x.total += falta; x.renglones++
     const pr = (p.proveedor || 'Sin proveedor').trim()
-    x.prov[pr] = (x.prov[pr] || 0) + p.costoTotal
+    x.prov[pr] = (x.prov[pr] || 0) + falta
   }
   // Los más viejos primero (son los que hay que pagar antes); "sin fecha" al final
   return Object.values(m).sort((a, b) => !a.mes ? 1 : !b.mes ? -1 : a.mes.localeCompare(b.mes))

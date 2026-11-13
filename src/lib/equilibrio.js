@@ -29,7 +29,8 @@ export function gastosFijosVigentes(pagos, mesActual) {
     if (!ETIQUETAS_FIJAS.includes(etiqueta)) continue
     const mes = p.correspondeA || sugerirMes(p.descripcion, p.fechaPago || p.fechaIngreso, etiqueta)
     if (!mes || mesNum(mes) > mesNum(mesActual) || mesNum(mesActual) - mesNum(mes) > MESES_VIGENCIA) continue
-    const monto = Number(p.montoPagado) || Number(p.costoTotal) || 0
+    // Lo que cuesta el gasto (importe), aunque todavía no esté pagado; los gastos viejos solo tienen lo pagado
+    const monto = Math.max(Number(p.montoPagado) || 0, Number(p.costoTotal) || 0)
     if (!(monto > 0)) continue
     const e = (porEtq[etiqueta] ||= {})
     e[mes] = (e[mes] || 0) + monto

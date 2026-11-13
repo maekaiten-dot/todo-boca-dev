@@ -1,11 +1,12 @@
 // src/components/DeudasPorMes.jsx
-// Lo que falta pagar de mercadería, agrupado por el mes en que entró (fecha de ingreso).
+// Lo que falta pagar, por mes: la mercadería por el mes en que entró (fecha de ingreso) y los gastos sin
+// pagar por el mes al que corresponden.
 // Tocando un mes se ve cuánto se le debe a cada proveedor. Plegado por defecto (se recuerda en el dispositivo).
 import { useMemo, useState } from 'react'
 
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
 const mesDe = f => { const p = String(f || '').replace(/^'/, '').split(' ')[0].split('/'); return p.length >= 3 && p[2] ? `${p[2]}-${String(p[1]).padStart(2, '0')}` : null }
-const nombreMes = k => { if (!k) return 'Sin fecha de ingreso'; const [a, m] = k.split('-'); const n = MESES[Number(m) - 1]; return `${n[0].toUpperCase()}${n.slice(1)} ${a}` }
+const nombreMes = k => { if (!k) return 'Sin fecha'; const [a, m] = k.split('-'); const n = MESES[Number(m) - 1]; return `${n[0].toUpperCase()}${n.slice(1)} ${a}` }
 const fmt$ = n => '$' + Math.round(n || 0).toLocaleString('es-AR')
 
 // Lo que falta pagar de un renglón: nada si está marcado como pagado; si no, el costo menos lo que ya se
@@ -15,13 +16,14 @@ export const saldoPago = p => p.pagado ? 0 : Math.max(0, (p.costoTotal || 0) - (
 export function deudasPorMes(pagos) {
   const m = {}
   for (const p of pagos) {
-    if (p.anulado || p.tipo !== 'MERCADERÍA') continue
+    if (p.anulado) continue
     const falta = saldoPago(p)
     if (!(falta > 0)) continue
-    const k = mesDe(p.fechaIngreso) || ''
+    const esGasto = p.tipo === 'GASTO'
+    const k = (esGasto ? (/^\d{4}-\d{2}$/.test(p.correspondeA || '') ? p.correspondeA : mesDe(p.fechaPago)) : mesDe(p.fechaIngreso)) || ''
     const x = m[k] || (m[k] = { mes: k, total: 0, renglones: 0, prov: {} })
     x.total += falta; x.renglones++
-    const pr = (p.proveedor || 'Sin proveedor').trim()
+    const pr = esGasto ? `${(p.proveedor || p.etiqueta || p.descripcion || 'Gasto').trim()} (gasto)` : (p.proveedor || 'Sin proveedor').trim()
     x.prov[pr] = (x.prov[pr] || 0) + falta
   }
   // Los más viejos primero (son los que hay que pagar antes); "sin fecha" al final

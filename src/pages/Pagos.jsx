@@ -12,7 +12,8 @@ import EscanearFactura from '../components/EscanearFactura.jsx'
 // ── Helpers de estado ─────────────────────────────────────────────────────────
 function getEstado(p) {
   if (p.anulado) return 'ANULADO'
-  if (p.tipo === 'GASTO') return 'GASTO'
+  // Gasto con importe cargado y todavía no pagado (o pagado en parte)
+  if (p.tipo === 'GASTO') return saldoPago(p) > 0 ? 'GASTO_PENDIENTE' : 'GASTO'
   if (p.tipo === 'MERCADERÍA') {
     // Con todo el costo pagado cuenta como pagado aunque no se haya marcado "Pagado: Sí"
     const pagado = p.pagado || (p.costoTotal > 0 && p.montoPagado >= p.costoTotal)
@@ -28,6 +29,7 @@ const ESTADO_CONFIG = {
   PENDIENTE_PAGO:        { color:'#f59e0b', bg:'rgba(245,158,11,0.12)',  label:'Recibido, pago pendiente' },
   PENDIENTE_MERCADERIA:  { color:'#3b82f6', bg:'rgba(59,130,246,0.12)',  label:'Pagado, mercadería pendiente' },
   GASTO:                 { color:'#a78bfa', bg:'rgba(167,139,250,0.12)', label:'Gasto independiente' },
+  GASTO_PENDIENTE:       { color:'#f472b6', bg:'rgba(244,114,182,0.12)', label:'Gasto sin pagar' },
   ANULADO:               { color:'#ef4444', bg:'rgba(239,68,68,0.12)',   label:'Anulado' },
 }
 
@@ -125,7 +127,10 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
       tipo: p.tipo, fechaIngreso: p.fechaIngreso, fechaPago: p.fechaPago,
       articuloId: p.articuloId, articuloNombre: p.articuloNombre,
       articuloFoto: articulos.find(a => a.id === p.articuloId)?.foto || '',
-      cantidad: String(p.cantidad), costoUnitario: String(p.costoUnitario),
+      // Gastos cargados antes de que existiera "Importe": el importe es lo pagado
+      ...(p.tipo === 'GASTO' && !(p.costoTotal > 0)
+        ? { cantidad: '1', costoUnitario: String(p.montoPagado || '') }
+        : { cantidad: String(p.cantidad), costoUnitario: String(p.costoUnitario) }),
       descripcion: p.descripcion, proveedor: p.proveedor,
       montoPagado: String(p.montoPagado), pagado: p.pagado,
       empleado: p.empleado || empleado,
@@ -156,11 +161,13 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
       const esMerc = form.tipo === 'MERCADERÍA'
       // Un gasto puede ir asociado a una compra ya cargada (flete, envío): suma al total de esa compra
       const compra = !esMerc ? (form.compraSel && form.compraSel !== 'NUEVA' ? form.compraSel : '') : form.compraSel === 'NUEVA' ? await generarIdCompra() : form.compraSel
-      if (!esMerc && compra && !(parseMonto(form.costoUnitario) > 0)) { showToast('Poné el importe del gasto', 'error'); setSaving(false); return }
+      if (!esMerc && !(parseMonto(form.costoUnitario) > 0)) { showToast('Poné el importe del gasto', 'error'); setSaving(false); return }
       const comprobante = esMerc || compra ? form.comprobante.trim() : ''
       // Mercadería con todo el costo pagado: queda marcada como pagada (si no, seguía figurando como deuda)
-      const pagadoFinal = form.pagado || (esMerc && costoTotal > 0 && parseMonto(form.montoPagado) >= costoTotal)
-      const datosGasto = !esMerc ? { ...(compra ? { cantidad: '1' } : { cantidad: '0', costoUnitario: '0' }), etiqueta: form.etiqueta, correspondeA: form.correspondeA || sugerirMes(form.descripcion, form.fechaPago || hoy(), form.etiqueta) } : { etiqueta: '', correspondeA: '' }
+      // (igual un gasto con todo el importe pagado)
+      const pagadoFinal = form.pagado || (montoTotalForm > 0 && parseMonto(form.montoPagado) >= montoTotalForm)
+      // Gasto: cantidad 1 × importe → COSTO TOTAL es lo que cuesta; MONTO PAGADO, lo que ya se pagó
+      const datosGasto = !esMerc ? { ...(!pagadoFinal && !(parseMonto(form.montoPagado) > 0) ? { fechaPago: '' } : {}), cantidad: '1', etiqueta: form.etiqueta, correspondeA: form.correspondeA || sugerirMes(form.descripcion, form.fechaPago || hoy(), form.etiqueta) } : { etiqueta: '', correspondeA: '' }
       // Costo y precio del artículo (si se pidió actualizarlos)
       const cambiosArt = []
       if (esMerc && artSel && (cambiaCosto && form.actualizarCosto || precioNuevoOk)) {
@@ -263,7 +270,13 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
   }
 
   const pagosFiltrados = pagos
-    .filter(p => filtroEstado === 'TODOS' || getEstado(p) === filtroEstado)
+    .filter(p => {
+      if (filtroEstado === 'TODOS') return true
+      const e = getEstado(p)
+      // Los gastos sin pagar aparecen con los pendientes de pago y con los gastos
+      if (e === 'GASTO_PENDIENTE') return filtroEstado === 'PENDIENTE_PAGO' || filtroEstado === 'GASTO'
+      return e === filtroEstado
+    })
     .filter(p => {
       if (!busqueda.trim()) return true
       const q = normalizr(busqueda)
@@ -329,8 +342,7 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
 
   const costoTotal = (Number(form.cantidad) || 0) * parseMonto(form.costoUnitario)
   // Gasto asociado a una compra (flete…): "Importe" es lo que cuesta, "Monto pagado" lo que ya se pagó
-  const gastoDeCompra = form.tipo === 'GASTO' && !!form.compraSel && form.compraSel !== 'NUEVA'
-  const montoTotalForm = form.tipo === 'MERCADERÍA' ? costoTotal : gastoDeCompra ? parseMonto(form.costoUnitario) : 0
+  const montoTotalForm = form.tipo === 'MERCADERÍA' ? costoTotal : parseMonto(form.costoUnitario)
   // Costo y precio del artículo elegido, para ofrecer actualizarlos
   const artSel = form.tipo === 'MERCADERÍA' && form.articuloId ? articulos.find(a => a.id === form.articuloId) : null
   const cuForm = Math.round(parseMonto(form.costoUnitario) * 100) / 100
@@ -343,7 +355,7 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
 
   // Totales resumen
   const totalPagado = pagos.filter(p => !p.anulado && p.pagado).reduce((s, p) => s + p.montoPagado, 0)
-  const totalPendiente = pagos.filter(p => !p.anulado && p.tipo === 'MERCADERÍA').reduce((s, p) => s + saldoPago(p), 0)
+  const totalPendiente = pagos.filter(p => !p.anulado).reduce((s, p) => s + saldoPago(p), 0)
 
   if (loading) return <div style={S.center}><div style={S.loadingText}>Cargando pagos...</div></div>
   if (error) return (
@@ -735,30 +747,33 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
                       </button>
                     ))}
                   </div>
-                  {form.compraSel && (<>
-                    <label style={{...S.label, marginTop:6}}>IMPORTE DEL GASTO *</label>
-                    <input style={S.input} inputMode="numeric" value={form.costoUnitario} onChange={e => setForm(f => ({...f, costoUnitario: e.target.value, cantidad: '1'}))} placeholder="Ej: 15000" aria-label="Importe del gasto" />
-                    <div style={{fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)'}}>Es lo que cuesta el flete o gasto. Se suma al total de la compra {form.compraSel} y cuenta en lo comprado del mes. Si ya lo pagaste, tocá "= Importe (ya lo pagué)" en Monto pagado; si no, dejalo en 0 y se paga después con la compra.</div>
-                  </>)}
+                  <label style={{...S.label, marginTop:6}}>IMPORTE DEL GASTO *</label>
+                  <input style={S.input} inputMode="numeric" value={form.costoUnitario} onChange={e => setForm(f => ({...f, costoUnitario: e.target.value, cantidad: '1'}))} placeholder="Ej: 15000" aria-label="Importe del gasto" />
+                  <div style={{fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)'}}>
+                    {form.compraSel
+                      ? <>Es lo que cuesta el flete o gasto. Se suma al total de la compra {form.compraSel} y cuenta en lo comprado del mes. </>
+                      : <>Es lo que cuesta el gasto. </>}
+                    Si ya lo pagaste, tocá "= Importe (ya lo pagué)" en Monto pagado; si no, dejá Monto pagado en 0 y queda como deuda hasta que lo pagues.
+                  </div>
                 </div>
               )}
 
               {/* Monto pagado y pagado */}
               <div style={S.fieldRow}>
                 <div style={S.fieldGroup}>
-                  <label style={S.label}>MONTO PAGADO {gastoDeCompra && <span style={{fontWeight:400}}>(lo que ya pagaste)</span>}</label>
+                  <label style={S.label}>MONTO PAGADO {form.tipo === 'GASTO' && <span style={{fontWeight:400}}>(lo que ya pagaste)</span>}</label>
                   <input style={S.input} type="text" inputMode="numeric" value={form.montoPagado} onChange={e => setForm(f => ({...f, montoPagado: e.target.value}))} />
                   {form.tipo === 'MERCADERÍA' && costoTotal > 0 && (
                     <button style={S.hoyBtn} onClick={() => setForm(f => ({...f, montoPagado: String(costoTotal), pagado: true}))}>= Costo total</button>
                   )}
-                  {gastoDeCompra && parseMonto(form.costoUnitario) > 0 && (
-                    <button style={S.hoyBtn} onClick={() => setForm(f => ({...f, montoPagado: String(parseMonto(f.costoUnitario)), pagado: true}))}>= Importe (ya lo pagué)</button>
+                  {form.tipo === 'GASTO' && parseMonto(form.costoUnitario) > 0 && (
+                    <button style={S.hoyBtn} onClick={() => setForm(f => ({...f, montoPagado: String(parseMonto(f.costoUnitario)), pagado: true, fechaPago: f.fechaPago || hoy()}))}>= Importe (ya lo pagué)</button>
                   )}
                 </div>
                 <div style={S.fieldGroup}>
                   <label style={S.label}>¿PAGADO?</label>
                   <div style={S.tipoBtns}>
-                    <button style={{...S.tipoBtn, ...(form.pagado ? S.tipoBtnActive : {})}} onClick={() => setForm(f => ({...f, pagado: true, montoPagado: parseMonto(f.montoPagado) > 0 ? f.montoPagado : String(montoTotalForm || f.montoPagado)}))}>✓ Sí</button>
+                    <button style={{...S.tipoBtn, ...(form.pagado ? S.tipoBtnActive : {})}} onClick={() => setForm(f => ({...f, pagado: true, fechaPago: f.fechaPago || hoy(), montoPagado: parseMonto(f.montoPagado) > 0 ? f.montoPagado : String(montoTotalForm || f.montoPagado)}))}>✓ Sí</button>
                     <button style={{...S.tipoBtn, ...(!form.pagado ? S.tipoBtnActive : {})}} onClick={() => setForm(f => ({...f, pagado: false}))}>✗ No</button>
                   </div>
                 </div>

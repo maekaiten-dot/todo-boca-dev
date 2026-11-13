@@ -1,7 +1,7 @@
 // src/lib/costosCobro.js
 // Costo de cobrar con cada medio de pago y cada posnet, mes por mes (valores reales de los
 // resúmenes de Payway y de los cobros de Mercado Pago). Todo en % antes de IVA; el IVA se suma aparte.
-// Incluye el impuesto al cheque (Ley 25.413) de lo que deposita Payway y la retención de Ingresos Brutos (2,5% de lo cobrado, en los dos posnets y en el QR): como
+// Incluye el impuesto al cheque (Ley 25.413) de lo que deposita Payway (hasta oct 2026) y la retención de Ingresos Brutos (2,5% de lo cobrado, en los dos posnets y en el QR): como
 // monotributista no se recupera, así que es un costo más. No lleva IVA.
 //
 // PAYWAY (posnet BLANCO)
@@ -19,9 +19,20 @@
 export const IVA = 1.21
 export const IIBB = 2.5   // retención de Ingresos Brutos, % de lo cobrado con tarjeta o QR
 // Impuesto a los créditos bancarios (Ley 25.413) sobre lo que Payway deposita en el banco (lo cobrado
-// menos comisiones e IIBB). El banco cobra 1,2% (nov 2026); si lo baja a 0,6%, cambiar acá.
+// menos comisiones e IIBB), en % por mes de venta. El Galicia cobró 1,2% hasta el 11/11/2026 y desde el
+// 12/11/2026 ya no lo cobra (visto en las acreditaciones). Se toma por mes: desde nov 2026, 0.
+// Si lo vuelve a cobrar, agregar un renglón con el mes y el %.
 // Los cobros de Mercado Pago quedan en la cuenta de Mercado Pago y no lo pagan.
-export const LEY_25413_BLANCO = 1.2
+export const LEY_25413_POR_MES = [
+  { desde: '0000-00', pct: 1.2 },
+  { desde: '2026-11', pct: 0 },
+]
+export function leyChequeDelMes(mes) {
+  let p = 0
+  for (const x of LEY_25413_POR_MES) if ((mes || '9999-99') >= x.desde) p = x.pct
+  return p
+}
+export const LEY_25413_BLANCO = leyChequeDelMes('9999-99')   // el % de hoy
 export const ARANCEL_CREDITO_PAYWAY = 2
 // Cobro anticipado de Payway: % del crédito de cada mes (resúmenes nov 2025 – oct 2026)
 export const ANTICIPO_PAYWAY = {
@@ -72,7 +83,7 @@ export function tasaCobro(tipo, posnet, mes) {
 export function costoTotalTasa(tipo, posnet, mes) {
   if (!tipo) return 0
   const base = (tasaCobro(tipo, posnet, mes) * IVA + IIBB) / 100
-  return base + (impChequeAplica(tipo, posnet) ? (1 - base) * LEY_25413_BLANCO / 100 : 0)
+  return base + (impChequeAplica(tipo, posnet) ? (1 - base) * leyChequeDelMes(mes) / 100 : 0)
 }
 // El impuesto al cheque se paga sobre lo que deposita Payway por las tarjetas (posnet blanco). El QR de
 // Payway entra al instante y el banco no le cobra el impuesto (venta del 9/11/2026).

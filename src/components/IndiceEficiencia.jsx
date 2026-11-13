@@ -11,7 +11,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { repartoPago, posnetDeParte } from '../api/sheets.js'
 import { generarRecomendaciones, costoValido } from '../lib/recomendaciones.js'
-import { comisionDe, tipoDeMetodo, posnetNormal, tasaCobro, servicioPaywayDelMes, IVA, IIBB, LEY_25413_BLANCO, impChequeAplica, NOMBRE_POSNET, NOMBRE_TIPO } from '../lib/costosCobro.js'
+import { comisionDe, tipoDeMetodo, posnetNormal, tasaCobro, servicioPaywayDelMes, IVA, IIBB, leyChequeDelMes, impChequeAplica, NOMBRE_POSNET, NOMBRE_TIPO } from '../lib/costosCobro.js'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Cell } from 'recharts'
 
 export const COMPONENTES = [
@@ -92,7 +92,7 @@ export function calcularIndice(ventas, { indices = null, horas = {}, mesActual }
       const k = `${pos}|${tipo}`
       const d = (x.cobro[k] ||= { posnet: pos, tipo, monto: 0, comision: 0, iibb: 0, cheque: 0, costo: 0, tasa: tasaCobro(tipo, pos, mes) })
       const com = p.monto * d.tasa * IVA / 100, ib = p.monto * IIBB / 100
-      const ch = impChequeAplica(tipo, pos) ? (p.monto - com - ib) * LEY_25413_BLANCO / 100 : 0
+      const ch = impChequeAplica(tipo, pos) ? (p.monto - com - ib) * leyChequeDelMes(mes) / 100 : 0
       d.monto += p.monto; d.comision += com; d.iibb += ib; d.cheque += ch; d.costo += com + ib + ch
       x.comision += com + ib + ch
     }
@@ -191,7 +191,7 @@ function DesgloseCobro({ d, label }) {
         <div style={S.hint}>
           Payway: crédito 2% + cobro anticipado (activo hasta oct 2026), débito sin arancel, QR 0,80%, servicio fijo por mes (bonificado nov 2026 – oct 2027).
           Mercado Pago: crédito 4,19% argentina / 7,19% del exterior (se usa el promedio real, ≈80% del exterior), débito 2,75%, QR 0,80%.
-          Comisiones con IVA. Se suman la retención de Ingresos Brutos (2,5% de lo cobrado con tarjeta o QR) y el impuesto al cheque (Ley 25.413, {LEY_25413_BLANCO.toLocaleString('es-AR')}% de lo que Payway deposita por las tarjetas; el QR de Payway no lo paga), porque no se recuperan.
+          Comisiones con IVA. Se suman la retención de Ingresos Brutos (2,5% de lo cobrado con tarjeta o QR) y el impuesto al cheque (Ley 25.413, 1,2% de lo que Payway depositaba por las tarjetas hasta octubre 2026; desde noviembre el banco ya no lo cobra; el QR de Payway nunca lo pagó), porque no se recuperan.
         </div>
       </>)}
     </div>

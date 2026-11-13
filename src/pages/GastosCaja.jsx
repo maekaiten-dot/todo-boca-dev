@@ -4,6 +4,8 @@
 import { useState, useEffect } from 'react'
 import { parseMonto } from '../lib/montos.js'
 import { getGastosCajaHoy, registrarGastoCaja, anularGastoCaja } from '../api/sheets.js'
+import { LOCAL } from '../config/local.js'
+import BajaModal from '../components/BajaModal.jsx'
 
 export const CATEGORIAS_CAJA = {
   SALIDA: [
@@ -22,7 +24,8 @@ export const CATEGORIAS_CAJA = {
 const fmt$ = n => '$' + Math.round(n).toLocaleString('es-AR')
 // "12.500" o "12500" o "12500,50" → 12500.5
 
-export default function GastosCaja({ usuarios = [], perfilNombre = '', onRegistrado }) {
+export default function GastosCaja({ usuarios = [], articulos = [], perfilNombre = '', onRegistrado }) {
+  const [verBaja, setVerBaja] = useState(false)
   const empleados = usuarios.filter(u => u.nombre !== 'Tablet')
   const perfilEsEmpleado = empleados.some(u => u.nombre === perfilNombre)
 
@@ -114,13 +117,17 @@ export default function GastosCaja({ usuarios = [], perfilNombre = '', onRegistr
   return (
     <div style={S.page}>
       {toast && <div style={{ ...S.toast, ...(toast.type === 'error' ? S.toastError : S.toastSuccess) }}>{toast.msg}</div>}
+      {verBaja && <BajaModal articulos={articulos} usuarios={usuarios} perfilNombre={perfilNombre} onCerrar={() => setVerBaja(false)} onGuardada={msg => { setVerBaja(false); showToast(msg, 'success') }} />}
 
       <div style={S.header}>
         <div>
           <div style={S.headerTitle}>GASTOS DE CAJA</div>
           <div style={S.headerSub}>Registrá solo lo que sale o entra en efectivo de la caja</div>
         </div>
-        <button style={S.refreshBtn} onClick={cargar} aria-label="Actualizar">↻</button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {LOCAL.bajaEnGastos && <button style={S.bajaBtn} onClick={() => setVerBaja(true)} title="Registrar algo que sale del stock sin venderse">➖ BAJA</button>}
+          <button style={S.refreshBtn} onClick={cargar} aria-label="Actualizar">↻</button>
+        </div>
       </div>
 
       <div style={S.layout}>
@@ -266,6 +273,7 @@ const S = {
   headerTitle: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 28, color:'var(--accent-text)', textTransform: 'uppercase', letterSpacing: 2 },
   headerSub: { fontFamily: 'Barlow, sans-serif', fontSize: 13, color: 'var(--muted)' },
   refreshBtn: { background: 'var(--surface)', border: '1.5px solid var(--border)', borderRadius: 10, color: 'var(--text)', fontSize: 24, width: 44, height: 44, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  bajaBtn: { background: 'var(--surface)', border: '1.5px solid #ef4444', borderRadius: 10, color: '#f87171', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 17, letterSpacing: 1, height: 44, padding: '0 14px', cursor: 'pointer', whiteSpace: 'nowrap' },
   layout: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16, padding: '16px 20px 24px', alignItems: 'start' },
   card: { background: 'var(--surface)', border: '1.5px solid var(--border)', borderRadius: 14, padding: 16, display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 },
   fieldLabel: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 13, color: 'var(--muted)', letterSpacing: 1.5, marginTop: 8 },

@@ -4,6 +4,8 @@ import { parseMonto } from '../lib/montos.js'
 import { getPagos, registrarPago, actualizarPago, anularPago, getArticulosAdmin, idCanonico, generarIdCompra, claveCompra, editarArticulo } from '../api/sheets.js'
 import CompraModal, { armarCompras, textoRenglones } from '../components/CompraModal.jsx'
 import PagosPorMes from '../components/PagosPorMes.jsx'
+import DeudasPorMes from '../components/DeudasPorMes.jsx'
+import { GRUPOS_GASTO, sugerirEtiqueta, sugerirMes, mesesParaElegir, nombreMesGasto } from '../lib/etiquetasGastos.js'
 import BarcodeScanner from '../components/BarcodeScanner.jsx'
 import EscanearFactura from '../components/EscanearFactura.jsx'
 
@@ -37,6 +39,7 @@ const FORM_VACIO = {
   empleado: '',
   compraSel: 'NUEVA', comprobante: '',
   actualizarCosto: true, precioNuevo: '', cambiarPrecio: false,
+  etiqueta: '', correspondeA: '', etiquetaTocada: false,
 }
 
 // "$8.000", "8.000" o "8000" → 8000
@@ -108,7 +111,7 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
 
   // Nuevo gasto (flete, envío…) asociado a una compra
   function abrirGastoDeCompra(c) {
-    setForm({ ...FORM_VACIO, tipo: 'GASTO', empleado, fechaPago: hoy(), descripcion: 'Flete', compraSel: c.compra, comprobante: c.comprobante || '', costoUnitario: '', cantidad: '1' })
+    setForm({ ...FORM_VACIO, tipo: 'GASTO', empleado, fechaPago: hoy(), descripcion: 'Flete', etiqueta: 'Flete', compraSel: c.compra, comprobante: c.comprobante || '', costoUnitario: '', cantidad: '1' })
     setEditando(null)
     setArtBusqueda('')
     setModalAbierto(true)
@@ -126,6 +129,11 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
       empleado: p.empleado || empleado,
       compraSel: p.compra || '', comprobante: p.comprobante || '',
       actualizarCosto: true, precioNuevo: '', cambiarPrecio: false,
+      // Gastos viejos sin etiqueta: se sugiere una según la descripción (se guarda al tocar Guardar)
+      etiqueta: p.etiqueta || (p.tipo === 'GASTO' ? sugerirEtiqueta(p.descripcion) : ''),
+      // Sin mes guardado queda vacío: se sugiere en vivo según descripción, etiqueta y fecha de pago
+      correspondeA: p.correspondeA || '',
+      etiquetaTocada: !!p.etiqueta,
     })
     setArtBusqueda('')
     setModalAbierto(true)
@@ -140,6 +148,7 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
   async function guardar(otro = false) {
     if (form.tipo === 'MERCADERÍA' && !form.articuloId) { showToast('Seleccioná un artículo', 'error'); return }
     if (form.tipo === 'GASTO' && !form.descripcion.trim()) { showToast('Ingresá una descripción', 'error'); return }
+    if (form.tipo === 'GASTO' && !form.etiqueta) { showToast('Elegí una etiqueta para el gasto', 'error'); return }
     setSaving(true)
     try {
       const esMerc = form.tipo === 'MERCADERÍA'
@@ -147,7 +156,7 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
       const compra = !esMerc ? (form.compraSel && form.compraSel !== 'NUEVA' ? form.compraSel : '') : form.compraSel === 'NUEVA' ? await generarIdCompra() : form.compraSel
       if (!esMerc && compra && !(parseMonto(form.costoUnitario) > 0)) { showToast('Poné el importe del gasto', 'error'); setSaving(false); return }
       const comprobante = esMerc || compra ? form.comprobante.trim() : ''
-      const datosGasto = !esMerc ? (compra ? { cantidad: '1' } : { cantidad: '0', costoUnitario: '0' }) : {}
+      const datosGasto = !esMerc ? { ...(compra ? { cantidad: '1' } : { cantidad: '0', costoUnitario: '0' }), etiqueta: form.etiqueta, correspondeA: form.correspondeA || sugerirMes(form.descripcion, form.fechaPago || hoy(), form.etiqueta) } : { etiqueta: '', correspondeA: '' }
       // Costo y precio del artículo (si se pidió actualizarlos)
       const cambiosArt = []
       if (esMerc && artSel && (cambiaCosto && form.actualizarCosto || precioNuevoOk)) {
@@ -379,9 +388,10 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
         </div>
         <div style={S.resumenCard}>
           <div style={{...S.resumenValue, color:'#f59e0b'}}>${Math.round(totalPendiente).toLocaleString('es-AR')}</div>
-          <div style={S.resumenLabel}>Deuda pendiente</div>
+          <div style={S.resumenLabel}>Deuda pendiente (detalle por mes abajo)</div>
         </div>
       </div>
+      <DeudasPorMes pagos={pagos} />
 
       {/* Referencias de colores */}
       <div style={S.referencias}>
@@ -500,7 +510,7 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
                     <td style={{...S.td, ...S.tdNombre}}>
                       <div style={{display:'flex', alignItems:'center', gap:8}}>
                         {art?.foto && <img src={art.foto} alt="" style={S.miniThumb} onError={e => e.currentTarget.style.display='none'} />}
-                        <span>{p.articuloNombre || p.descripcion}</span>
+                        <span>{p.articuloNombre || p.descripcion}{p.tipo === 'GASTO' && p.etiqueta && <span style={{ display: 'block', fontSize: 11, color: 'var(--muted)' }}>{p.etiqueta}{p.correspondeA ? ` · ${nombreMesGasto(p.correspondeA)}` : ''}</span>}</span>
                       </div>
                     </td>
                     <td style={S.td}>{p.fechaIngreso || <span style={{color:'var(--muted)'}}>—</span>}</td>
@@ -604,7 +614,32 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
               {form.tipo === 'GASTO' && (
                 <div style={S.fieldGroup}>
                   <label style={S.label}>DESCRIPCIÓN *</label>
-                  <input style={S.input} value={form.descripcion} onChange={e => setForm(f => ({...f, descripcion: e.target.value}))} placeholder="Alquiler, panadería, etc." />
+                  <input style={S.input} value={form.descripcion} onChange={e => { const d = e.target.value; setForm(f => ({ ...f, descripcion: d, ...(f.etiquetaTocada ? {} : { etiqueta: sugerirEtiqueta(d) }) })) }} placeholder="Alquiler, panadería, etc." />
+                </div>
+              )}
+              {form.tipo === 'GASTO' && (
+                <div style={S.fieldGroup}>
+                  <label style={S.label}>ETIQUETA *</label>
+                  {GRUPOS_GASTO.map(g => (
+                    <div key={g.grupo} style={{ marginBottom: 6 }}>
+                      <div style={{ fontFamily: 'Barlow, sans-serif', fontSize: 11, color: 'var(--muted)', margin: '2px 0 4px' }}>{g.grupo}</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                        {g.etiquetas.map(e => (
+                          <button key={e} type="button" onClick={() => setForm(f => ({ ...f, etiqueta: e, etiquetaTocada: true }))}
+                            style={{ ...S.tipoBtn, flex: '0 0 auto', padding: '6px 10px', fontSize: 13, ...(form.etiqueta === e ? S.tipoBtnActive : {}) }}>{e}</button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {form.tipo === 'GASTO' && (
+                <div style={S.fieldGroup}>
+                  <label style={S.label}>CORRESPONDE A (MES)</label>
+                  <select style={S.input} value={form.correspondeA || sugerirMes(form.descripcion, form.fechaPago || hoy(), form.etiqueta)} onChange={e => setForm(f => ({ ...f, correspondeA: e.target.value }))}>
+                    {[...new Set([...(form.correspondeA ? [form.correspondeA] : []), ...mesesParaElegir()])].map(k => <option key={k} value={k}>{nombreMesGasto(k)}</option>)}
+                  </select>
+                  <div style={{ fontFamily: 'Barlow, sans-serif', fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Ej.: el sueldo de octubre pagado en noviembre va en octubre.</div>
                 </div>
               )}
 

@@ -580,7 +580,7 @@ export default function App() {
             <div style={tabStyle('hoy')}>{LOCAL.hoySimple && !veAdmin ? <HoySimple refreshKey={refreshKey} articulos={articulos} /> : <VentasDelDia soloLectura={esSupervisor} refreshKey={refreshKey} puedeAnular={true} usuarios={usuarios} perfilNombre={empleadoActual} esAdmin={veAdmin} articulos={articulos} />}</div>
           )}
           {tabsVisitadas.has('caja') && (
-            <div style={tabStyle('caja')}><Suspense fallback={<CargandoSolapa />}><GastosCaja usuarios={usuarios} perfilNombre={empleadoActual} onRegistrado={() => setRefreshKey(k => k + 1)} /></Suspense></div>
+            <div style={tabStyle('caja')}><Suspense fallback={<CargandoSolapa />}><GastosCaja usuarios={usuarios} articulos={articulos} perfilNombre={empleadoActual} onRegistrado={() => setRefreshKey(k => k + 1)} /></Suspense></div>
           )}
           {veAdmin && tabsVisitadas.has('log') && (
             <div style={tabStyle('log')}><Suspense fallback={<CargandoSolapa />}><LogVentas soloLectura={esSupervisor} esAdmin={veAdmin} articulos={articulos} usuarios={usuarios} perfilNombre={empleadoActual} /></Suspense></div>

@@ -652,7 +652,8 @@ export function calcularRedondeoSocio({ montoActual, metodoPago, socio }) {
 
 // fechaVenta: { fecha: 'd/m/aaaa', hora: 'hh:mm' } para cargar una venta de otro día (solo Admin).
 // Queda la constancia en EDICIONES: quién la cargó y cuándo.
-export async function registrarVenta({ items, devueltos = [], metodoPago, pagos = null, descCarrito = 0, empleado = '', notas = '', descuentoImanes = 0, descuentoPromo = 0, socio = false, descuentoXXXLEsperado = 0, totalEsperado = null, posnet = '', fechaVenta = null, cargadaPor = '', promos = [], descuentoPromosConfigEsperado = null, uid = '', momento = null, estadoXXXL = null }) {
+export async function registrarVenta({ items, devueltos = [], metodoPago, pagos = null, descCarrito = 0, empleado = '', notas = '', descuentoImanes = 0, descuentoPromo = 0, socio = false, descuentoXXXLEsperado = 0, totalEsperado = null, posnet = '', fechaVenta = null, cargadaPor = '', promos = [], descuentoPromosConfigEsperado = null, uid = '', momento = null, estadoXXXL = null, partido = false }) {
+  // partido: la venta se hizo con el MODO PARTIDO prendido → 'SI' en AO (PARTIDO).
   // uid: clave única de esta carga (columna AN). Si la venta ya está en la planilla con esa clave
   // (por ejemplo, se guardó pero se cortó internet antes de la respuesta), no se vuelve a cargar.
   // momento: { fecha, hora } en que se cobró (ventas que esperaron en la cola del modo partido).
@@ -850,6 +851,10 @@ export async function registrarVenta({ items, devueltos = [], metodoPago, pagos 
   })
   // Clave de la carga en AN (todas las filas de la venta)
   rows.forEach(r => { while (r.length < IDX_UID) r.push(''); r[IDX_UID] = uid })
+  if (partido) {
+    await asegurarColumna(COL_PARTIDO, 'PARTIDO')
+    rows.forEach(r => { while (r.length < IDX_PARTIDO) r.push(''); r[IDX_PARTIDO] = 'SI' })
+  }
 
   // Se AGREGA al final de la hoja con "appendCells": Google pone las filas una después de otra
   // aunque carguen varios dispositivos a la vez (nunca se pisan) y SIEMPRE desde la columna A.
@@ -1022,6 +1027,9 @@ async function leerDetalleFresco() {
 
 const COL_UID = 'AN'
 const IDX_UID = 39
+// AO: PARTIDO ('SI' = vendida con el modo partido prendido)
+const COL_PARTIDO = 'AO'
+const IDX_PARTIDO = 40
 export function nuevoUid() {
   const r = (globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`)
   return r.replace(/-/g, '').slice(0, 16)
@@ -1892,8 +1900,27 @@ function msModificadoPago(modificado, idPago) {
   return x ? Date.UTC(2000 + Number(x[1]), Number(x[2]) - 1, Number(x[3]), 3) + Number(x[4]) : 0
 }
 
+// PAGOS · S: ETIQUETA (concepto del gasto, ver src/lib/etiquetasGastos.js) · T: CORRESPONDE A (mes "aaaa-mm")
+let _columnasGastoOk = false
+async function asegurarColumnasGasto() {
+  if (_columnasGastoOk) return
+  try {
+    const v = ((await sheetsGet('PAGOS!S1:T1')).values || [])[0] || []
+    if (!v[0] || !v[1]) await sheetsUpdate('PAGOS!S1:T1', [['ETIQUETA', 'CORRESPONDE A']])
+    _columnasGastoOk = true
+  } catch (e) { console.warn('No se pudieron crear las columnas de etiqueta de gastos', e) }
+}
+// "'2026-10", "2026-10" o la fecha en que Sheets lo haya convertido ("1/10/2026") → "2026-10"
+function mesGasto(v) {
+  const s = String(v || '').replace(/^'/, '').trim()
+  if (/^\d{4}-\d{2}/.test(s)) return s.slice(0, 7)
+  const p = s.split(' ')[0].split('/')
+  return p.length >= 3 && p[2] ? `${p[2]}-${String(p[1]).padStart(2, '0')}` : ''
+}
+const columnasGasto = (tipo, etiqueta, correspondeA) => tipo === 'GASTO' ? [etiqueta || '', correspondeA ? `'${correspondeA}` : ''] : ['', '']
+
 export async function getPagos() {
-  const data = await sheetsGet('PAGOS!A2:R')
+  const data = await sheetsGet('PAGOS!A2:T')
   const rows = data.values || []
   return rows.filter(r=>r[0]).map((r, idx) => ({
     rowNum:idx+2, idPago:r[0]||'', tipo:r[1]||'',
@@ -1906,6 +1933,7 @@ export async function getPagos() {
     pagado:r[12]==='TRUE'||r[12]===true, empleado:r[13]||'', anulado:r[14]==='TRUE'||r[14]===true,
     modificado: String(r[15] || '').replace(/^'/, ''), modificadoMs: msModificadoPago(r[15], r[0]),
     compra: String(r[16] || '').trim(), comprobante: String(r[17] || '').replace(/^'/, '').trim(),
+    etiqueta: String(r[18] || '').trim(), correspondeA: mesGasto(r[19]),
   }))
 }
 
@@ -1980,7 +2008,7 @@ export async function actualizarComprobanteCompra(renglones, comprobante) {
   await sheetsBatchUpdate(data)
 }
 
-export async function registrarPago({ tipo, fechaIngreso, fechaPago, articuloId, articuloNombre, cantidad, costoUnitario, descripcion, proveedor, montoPagado, pagado, empleado, compra = '', comprobante = '' }) {
+export async function registrarPago({ etiqueta = '', correspondeA = '', tipo, fechaIngreso, fechaPago, articuloId, articuloNombre, cantidad, costoUnitario, descripcion, proveedor, montoPagado, pagado, empleado, compra = '', comprobante = '' }) {
   const dt = getArgentinaDate()
   const data = await sheetsGet('PAGOS!A2:A')
   const rows = data.values || []
@@ -1996,6 +2024,11 @@ export async function registrarPago({ tipo, fechaIngreso, fechaPago, articuloId,
   if (esCompra) await asegurarColumnasCompra()
   const extra = esCompra ? [compra || '', comprobante ? `'${comprobante}` : ''] : []
   const row = [idPago,tipo||'GASTO',fechaIngreso?`'${fechaIngreso}`:'',fechaPago?`'${fechaPago}`:'',articuloId||'',articuloNombre||'',cant,cu,costoTotal,descripcion||'',proveedor||'',mp,pagado?'TRUE':'FALSE',empleado||'','FALSE',ahoraModificado(),...extra]
+  if (tipo !== 'MERCADERÍA' && (etiqueta || correspondeA)) {
+    await asegurarColumnasGasto()
+    while (row.length < 18) row.push('')
+    row.push(...columnasGasto(tipo, etiqueta, correspondeA))
+  }
   await sheetsAppend('PAGOS!A1', [row])
   if (tipo==='MERCADERÍA'&&fechaIngreso&&articuloId) {
     await asegurarModificadoIngresos()
@@ -2029,6 +2062,10 @@ export async function actualizarPago(rowNum, campos, empleado = '') {
   const mod = ahoraModificado()
   const row = [campos.idPago,campos.tipo||'GASTO',campos.fechaIngreso?`'${campos.fechaIngreso}`:'',campos.fechaPago?`'${campos.fechaPago}`:'',campos.articuloId||'',campos.articuloNombre||'',cant,cu,costoTotal,campos.descripcion||'',campos.proveedor||'',mp,campos.pagado?'TRUE':'FALSE',campos.empleado||'',campos.anulado?'TRUE':'FALSE',mod,...extra]
   await sheetsUpdate(`PAGOS!A${rowNum}:${extra.length ? 'R' : 'P'}${rowNum}`, [row])
+  if (campos.etiqueta !== undefined || campos.correspondeA !== undefined) {
+    await asegurarColumnasGasto()
+    await sheetsUpdate(`PAGOS!S${rowNum}:T${rowNum}`, [columnasGasto(campos.tipo || 'GASTO', campos.etiqueta, campos.correspondeA)])
+  }
 
   const debeTener = campos.tipo === 'MERCADERÍA' && !!campos.fechaIngreso && !!campos.articuloId && !campos.anulado
   const existente = await filaIngresoDePago(campos.idPago)

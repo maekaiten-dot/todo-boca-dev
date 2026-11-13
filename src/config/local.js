@@ -43,7 +43,7 @@ const LOCALES = {
     // Promos fijas por código (imanes, alfajores, llaveros/remeras/chombas, 2x1 XXXL)
     promosFijas: true,
     modoPartido: true,
-    bajaEnHoy: true,        // botón para registrar bajas (consumo del personal, roturas) en Hoy
+    bajaEnGastos: true,     // botón para registrar bajas (consumo del personal, roturas) en Gastos
     fichar: true,
     // Barra inferior con letra e íconos más grandes
     barraGrande: false,
@@ -73,7 +73,7 @@ const LOCALES = {
     // las promos de imanes, alfajores, etc. de la Esquina
     promosFijas: false,
     modoPartido: false,
-    bajaEnHoy: false,
+    bajaEnGastos: false,
     // Las fichadas son de la Esquina: por ahora no se muestran acá
     fichar: false,
     barraGrande: true,

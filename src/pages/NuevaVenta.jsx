@@ -507,6 +507,8 @@ export default function NuevaVenta({ promos = [], articulos, loadingArticulos, o
         ...(esAdmin && fechaOtra ? { fechaVenta: { fecha: fechaOtraTexto.split(' ')[0], hora: fechaOtra.hora }, cargadaPor: cargadoPor } : {}),
         // En la cola no se vuelve a consultar la promo XXXL: vale lo que se mostró al cobrar
         ...(modoPartido && promoXXXLEstado && !promoXXXLEstado.error ? { estadoXXXL: promoXXXLEstado } : {}),
+        // Queda marcada en la planilla como venta de partido (columna AO)
+        ...(modoPartido ? { partido: true } : {}),
       }
   }
 

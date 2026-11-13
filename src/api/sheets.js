@@ -863,6 +863,7 @@ export async function registrarVenta({ items, devueltos = [], metodoPago, pagos 
   void nextRow
   await agregarFilasDetalle(rows)
   detalleCambio()
+  mantenerFilasLibresDetalle()
   // En segundo plano (la venta ya quedó guardada): se ubica la venta por su clave y se confirma
   // que su número no se repita con el de otro dispositivo; si se repite, se corrige solo.
   const idProvisorio = idVenta
@@ -933,6 +934,36 @@ export function prepararGuardadoVentas() {
 
 // Agrega filas al final de DETALLE DE VENTAS empezando en la columna A (appendCells)
 let _sheetIdDetalle = null
+// ── Filas libres al final de una hoja ────────────────────────────────────────
+// Escribir en una fila que no existe (la hoja se quedó sin filas vacías al final) da error 400 y la app
+// mostraba "error de conexión" hasta que alguien agregaba filas a mano. Antes de escribir filas nuevas
+// se verifica que la hoja llegue hasta esa fila; si no, se le agregan filas (las necesarias + un margen).
+const MARGEN_FILAS = 500
+let _ultimoControlFilasDetalle = 0
+export async function asegurarFilas(titulo, filaNecesaria) {
+  const token = await getAccessToken()
+  const metaRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}?fields=sheets.properties(sheetId,title,gridProperties.rowCount)`, { headers: { Authorization: `Bearer ${token}` } })
+  if (!metaRes.ok) throw new Error(`Sheets META error: ${metaRes.status}`)
+  const hoja = ((await metaRes.json()).sheets || []).find(h => h.properties?.title === titulo)
+  if (!hoja) return
+  const filas = hoja.properties.gridProperties?.rowCount || 0
+  if (filaNecesaria <= filas) return
+  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}:batchUpdate`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requests: [{ appendDimension: { sheetId: hoja.properties.sheetId, dimension: 'ROWS', length: filaNecesaria - filas + MARGEN_FILAS } }] }),
+  })
+  if (!res.ok) throw new Error(`Sheets ADD ROWS error: ${res.status}`)
+  registrarLog({ accion: 'FILAS_AGREGADAS', detalle: `${titulo}: se agregaron ${filaNecesaria - filas + MARGEN_FILAS} filas vacías al final`, resultado: 'OK' }).catch(() => {})
+}
+// Después de cada venta, como mucho una vez cada 10 minutos y sin hacer esperar a nadie: que
+// DETALLE DE VENTAS tenga siempre al menos 200 filas vacías al final (para cargar a mano o editar).
+function mantenerFilasLibresDetalle() {
+  if (!DV.filas || Date.now() - _ultimoControlFilasDetalle < 10 * 60 * 1000) return
+  _ultimoControlFilasDetalle = Date.now()
+  asegurarFilas('DETALLE DE VENTAS', DV.filas.length + 1 + 200).catch(e => console.warn('No se pudieron agregar filas a DETALLE DE VENTAS', e))
+}
+
 async function agregarFilasDetalle(rows) {
   const token = await getAccessToken()
   if (_sheetIdDetalle == null) {
@@ -1198,6 +1229,8 @@ export async function editarVenta({ venta, lineas, metodoPago, pagos = null, pos
       '', '', '', '', posnetVenta, '', textoPagosVenta, ediciones,
     ]] })
   }
+  // Los renglones nuevos van después de la última fila con datos: que la hoja llegue hasta ahí
+  if (fila > lastDataRow) await asegurarFilas('DETALLE DE VENTAS', fila)
   await sheetsBatchUpdate(data)
   detalleCambio(data.map(d => Number(String(d.range).match(/(\d+)$/)?.[1]) || 0))
   await registrarLog({ accion: 'VENTA_EDITADA', detalle: `${venta.idVenta} · ${registro} · Total ${fmtPesos(total)}`, idReferencia: venta.idVenta, empleado: editor, resultado: 'OK' })
@@ -1286,6 +1319,7 @@ async function proximaFilaHist() {
   const data = await sheetsGet(`${HOJA_HIST}!A:A`)
   let ultima = 1
   ;(data.values || []).forEach((r, i) => { if (String(r[0] || '').trim()) ultima = i + 1 })
+  await asegurarFilas(HOJA_HIST, ultima + 2)   // se pueden escribir hasta 2 filas nuevas
   return ultima + 1
 }
 

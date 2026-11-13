@@ -274,7 +274,7 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
       if (filtroEstado === 'TODOS') return true
       const e = getEstado(p)
       // Los gastos sin pagar aparecen con los pendientes de pago y con los gastos
-      if (e === 'GASTO_PENDIENTE') return filtroEstado === 'PENDIENTE_PAGO' || filtroEstado === 'GASTO'
+      if (e === 'GASTO_PENDIENTE') return ['GASTO_PENDIENTE', 'PENDIENTE_PAGO', 'GASTO'].includes(filtroEstado)
       return e === filtroEstado
     })
     .filter(p => {
@@ -430,12 +430,14 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
           {busqueda && <button style={S.clearBtn} onClick={() => setBusqueda('')}>✕</button>}
         </div>
         <div style={S.filtroTabs}>
-          {['TODOS', 'COMPLETO', 'PENDIENTE_PAGO', 'PENDIENTE_MERCADERIA', 'GASTO'].map(f => (
-            <button key={f} style={{...S.filtroTab, ...(filtroEstado===f ? S.filtroTabActive : {})}} onClick={() => setFiltroEstado(f)}>
+          {['TODOS', 'COMPLETO', 'PENDIENTE_PAGO', 'PENDIENTE_MERCADERIA', 'GASTO', 'GASTO_PENDIENTE'].map(f => (
+            <button key={f} style={{...S.filtroTab, ...(filtroEstado===f ? S.filtroTabActive : {})}} onClick={() => setFiltroEstado(f)}
+              title={f === 'TODOS' ? 'Todos' : ESTADO_CONFIG[f]?.label} aria-label={f === 'TODOS' ? 'Todos' : ESTADO_CONFIG[f]?.label}>
               {f === 'TODOS' ? 'Todos' :
                f === 'COMPLETO' ? '🟢' :
                f === 'PENDIENTE_PAGO' ? '🟡' :
-               f === 'PENDIENTE_MERCADERIA' ? '🔵' : '⚪'}
+               f === 'PENDIENTE_MERCADERIA' ? '🔵' :
+               f === 'GASTO_PENDIENTE' ? <span style={{ display: 'inline-block', width: 16, height: 16, borderRadius: '50%', background: ESTADO_CONFIG.GASTO_PENDIENTE.color, verticalAlign: 'middle' }} /> : '⚪'}
             </button>
           ))}
         </div>

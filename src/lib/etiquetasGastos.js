@@ -55,13 +55,14 @@ export const ETIQUETAS_MES_VENCIDO = new Set([
   'Bono presentismo Stefi', 'Bono presentismo Brenda', 'Bono fin de semana Stefi', 'Bono fin de semana Brenda',
   'Horas extra y partidos', 'Impuesto 931 empleadores', 'Obra social y sindicato',
   'Alquiler local', 'Servicios local', 'Servicios depto abuela', 'Contador',
+  'Regalías hermanos',   // las del mes t se pagan alrededor del 20 de t+1
 ])
 
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
 // Mes al que corresponde un gasto (criterio de lo devengado):
 //  · si la descripción nombra un mes ("sueldo adrian abril"), ese mes (del año del pago, o del anterior
 //    si el mes nombrado es posterior al del pago);
-//  · si la etiqueta es de las que se pagan a mes vencido (sueldos, alquiler, servicios, contador…), el mes anterior al pago;
+//  · si la etiqueta es de las que se pagan a mes vencido (sueldos, alquiler, servicios, contador, regalías…), el mes anterior al pago;
 //  · si no, el mes del pago.
 export function sugerirMes(descripcion, fechaPago, etiqueta = '') {
   const p = String(fechaPago || '').replace(/^'/, '').split('/').map(Number)

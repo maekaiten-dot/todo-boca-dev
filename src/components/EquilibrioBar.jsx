@@ -36,7 +36,7 @@ export default function EquilibrioBar({ totalDia = 0, articulos = [], refreshKey
     const margenPct = sumarRentabilidad(items, 90).margenPct
     const sufijo = `/${h.m}/${h.a}`
     const vendidoMes = datos.ventas.filter(v => !v.anulado && String(v.fecha || '').replace(/^'/, '').endsWith(sufijo)).reduce((s, v) => s + montoFila(v), 0)
-    const eq = calcularEquilibrio({ fijos: fijos.total, margenPct, anio: h.a, mes: h.m, dia: h.d, vendidoHoy: totalDia, vendidoMes })
+    const eq = calcularEquilibrio({ fijos: fijos.total, margenPct, anio: h.a, mes: h.m, dia: h.d, vendidoHoy: totalDia, vendidoMes, deducibles: fijos.deducibles })
     return { fijos, margenPct, vendidoMes, eq, h }
   }, [datos, articulos, totalDia])
 
@@ -73,8 +73,9 @@ export default function EquilibrioBar({ totalDia = 0, articulos = [], refreshKey
           {fijos.detalle.map(d => (
             <div key={d.etiqueta} style={S.subfila}><span>{d.etiqueta} <span style={S.mes}>({nombreMesGasto(d.mes)})</span></span><span>{fmt$(d.monto)}</span></div>
           ))}
+          <div style={S.fila}><span>Regalías hermanos al llegar al equilibrio <span style={S.mes}>(16% de ventas − alquiler − sueldos de Adrián y Jorge)</span></span><b>{fmt$(eq.regalias)}</b></div>
           {fijos.sinAlquiler && <div style={S.aviso}>⚠ No hay alquiler cargado en Pagos (etiqueta "Alquiler local"): el equilibrio da más bajo de lo real.</div>}
-          <div style={S.nota}>Equilibrio del mes = gastos fijos ÷ margen. Por día = el del mes ÷ {eq.diasMes} días. De cada gasto fijo se usa el último mes cargado.</div>
+          <div style={S.nota}>Equilibrio del mes: lo que hay que vender para que el margen cubra los gastos fijos y las regalías (sin regalías serían {fmt$(eq.sinRegalias)}). Por día = el del mes ÷ {eq.diasMes} días. De cada gasto fijo y de los sueldos se usa el último mes cargado.</div>
         </div>
       )}
     </div>

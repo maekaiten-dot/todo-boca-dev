@@ -5,8 +5,11 @@
 //    sueldo que todavía no se pagó este mes cuenta con el monto del mes anterior.
 //  · Margen: de cada $100 vendidos en los últimos 90 días, cuánto queda después de la mercadería y los
 //    costos de cobro (lo calcula rentabilidad.js).
-//  · Equilibrio del mes = gastos fijos / margen. Equilibrio del día = el del mes / días del mes
-//    (el local abre todos los días).
+//  · Regalías de los hermanos (costo variable): 4% para cada uno de los 4 hermanos sobre
+//    (ventas del mes − alquiler − sueldo de Adrián − sueldo de Jorge). Con V = ventas, F = gastos fijos,
+//    m = margen, r = 16% y D = alquiler + esos dos sueldos (último mes cargado de cada uno):
+//      V·m − F − r·(V − D) = 0  →  V = (F − r·D) / (m − r)      (si V no supera D, no hay regalías: V = F / m)
+//  · Equilibrio del día = el del mes / días del mes (el local abre todos los días).
 import { sugerirEtiqueta, sugerirMes } from './etiquetasGastos.js'
 
 export const ETIQUETAS_FIJAS = [
@@ -16,6 +19,8 @@ export const ETIQUETAS_FIJAS = [
   'Alquiler local', 'Servicios local', 'Servicios depto abuela',
   'Monotributo', 'Contador',
 ]
+export const REGALIAS_PCT = 0.16   // 4% × 4 hermanos
+export const DEDUCIBLES_REGALIAS = ['Alquiler local', 'Sueldo Adrián', 'Sueldo Jorge']
 const MESES_VIGENCIA = 6   // un gasto fijo cargado hace más de 6 meses ya no cuenta
 
 const mesNum = k => { const [a, m] = String(k).split('-').map(Number); return a * 12 + m - 1 }
@@ -39,18 +44,26 @@ export function gastosFijosVigentes(pagos, mesActual) {
     const mes = Object.keys(meses).sort().pop()
     return { etiqueta, mes, monto: meses[mes] }
   }).sort((a, b) => b.monto - a.monto)
-  return { total: detalle.reduce((s, d) => s + d.monto, 0), detalle, sinAlquiler: !porEtq['Alquiler local'] }
+  const deducibles = detalle.filter(d => DEDUCIBLES_REGALIAS.includes(d.etiqueta)).reduce((s, d) => s + d.monto, 0)
+  return { total: detalle.reduce((s, d) => s + d.monto, 0), detalle, deducibles, sinAlquiler: !porEtq['Alquiler local'] }
 }
 
 // fijos: total del mes; margenPct: 0..1; anio, mes (1-12), dia: hoy; vendidoHoy y vendidoMes en pesos
-export function calcularEquilibrio({ fijos, margenPct, anio, mes, dia, vendidoHoy = 0, vendidoMes = 0 }) {
+// deducibles: alquiler + sueldos de Adrián y Jorge (lo que se resta antes de calcular las regalías)
+export function calcularEquilibrio({ fijos, margenPct, anio, mes, dia, vendidoHoy = 0, vendidoMes = 0, deducibles = 0, regaliasPct = REGALIAS_PCT }) {
   if (!(fijos > 0) || !(margenPct > 0)) return null
   const diasMes = new Date(Date.UTC(anio, mes, 0)).getUTCDate()
-  const mensual = fijos / margenPct
+  const sinRegalias = fijos / margenPct
+  let mensual = sinRegalias
+  if (regaliasPct > 0 && sinRegalias > deducibles) {
+    mensual = margenPct > regaliasPct ? (fijos - regaliasPct * deducibles) / (margenPct - regaliasPct) : Infinity
+  }
+  if (!isFinite(mensual)) return null
+  const regalias = regaliasPct * Math.max(0, mensual - deducibles)
   const diario = mensual / diasMes
   const esperadoHastaHoy = diario * dia
   return {
-    mensual, diario, diasMes,
+    mensual, diario, diasMes, regalias, sinRegalias,
     faltaHoy: Math.max(0, diario - vendidoHoy),
     pctHoy: vendidoHoy / diario,
     pctMes: vendidoMes / mensual,

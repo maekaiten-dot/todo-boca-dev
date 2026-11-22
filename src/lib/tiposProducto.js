@@ -8,12 +8,17 @@ import { parseMonto } from './montos.js'
 // "23/9/2026" → número de día
 const diaDe = f => { const p = String(f || '').replace(/^'/, '').split(' ')[0].split('/').map(Number); return p[2] ? Math.floor(Date.UTC(p[2], p[1] - 1, p[0]) / 86400000) : null }
 
+const fechaDeDia = n => { const d = new Date(n * 86400000); return `${d.getUTCDate()}/${d.getUTCMonth() + 1}/${d.getUTCFullYear()}` }
+
 export const TIPOS = ['POPULAR', 'ESTANDAR', 'PREMIUM']
 export const NOMBRE_TIPO = { POPULAR: 'Popular', ESTANDAR: 'Estándar', PREMIUM: 'Premium' }
 export const NIVELES = ['ALTA', 'MEDIA', 'BAJA']
-export const NOMBRE_NIVEL = { ALTA: 'Rotación alta', MEDIA: 'Rotación media', BAJA: 'Rotación baja', NUEVO: 'Nuevo', CAMBIO: 'Precio recién cambiado' }
+export const NOMBRE_NIVEL = { ALTA: 'Rotación alta', MEDIA: 'Rotación media', BAJA: 'Rotación baja', NUEVO: 'Nuevo', CAMBIO: 'Precio recién cambiado', SIN_STOCK: 'Sin stock' }
 export const SEMANAS_VENTANA = 26          // se mira el último medio año
 const SEMANAS_MIN = 4                      // con menos historia, el artículo es "nuevo" y no se clasifica por rotación
+// Sin ventas en las últimas 8 semanas: no puede ser rotación alta ni media aunque el promedio del
+// medio año dé alto (se vendió hace meses y después no). Sin stock además: queda aparte, sin sugerencia de precio.
+const DIAS_SIN_VENTAS = 56
 const DIAS_TRAS_CAMBIO = 28                // después de cambiar el precio, la rotación se mide solo con lo vendido a ese precio
                                            // y no se sugiere otro cambio hasta juntar 4 semanas
 
@@ -127,16 +132,18 @@ export function cambiosDePrecio(articulos, ventas, historico = []) {
   return out
 }
 
-export function clasificarArticulos({ articulos, ventas, ingresos = [], historico = [], hoy, metodosDe = m => [m] }) {
+// stockMap: { id: stock calculado } (opcional). Sin el dato, un artículo sin ventas recientes queda en rotación baja.
+export function clasificarArticulos({ articulos, ventas, ingresos = [], historico = [], hoy, metodosDe = m => [m], stockMap = null }) {
   const cambios = cambiosDePrecio(articulos, ventas, historico)
   const cortes = cortesDePrecio(articulos, ventas, hoy)
   const desde = hoy - SEMANAS_VENTANA * 7
-  const primerDia = {}, porArt = {}
+  const primerDia = {}, porArt = {}, ultimaVenta = {}
   const marcar = (id, d) => { if (id && d != null && (primerDia[id] == null || d < primerDia[id])) primerDia[id] = d }
   for (const i of ingresos) if (!i.anulado) marcar(i.articuloId, diaDe(i.fechaIngreso || i.fecha))
   for (const v of ventas) {
     if (v.anulado || !v.articulo) continue
     const d = diaDe(v.fecha); marcar(v.articulo, d)
+    if (d != null && d <= hoy && (Number(v.cantidad) || 0) > 0 && (ultimaVenta[v.articulo] == null || d > ultimaVenta[v.articulo])) ultimaVenta[v.articulo] = d
     if (d == null || d <= desde || d > hoy) continue
     const x = (porArt[v.articulo] ||= { u: 0, fact: 0, uDesdeCambio: 0, uAntesCambio: 0, pagos: { turista: 0, local: 0, mixto: 0 } })
     const cant = Number(v.cantidad) || 0
@@ -167,6 +174,9 @@ export function clasificarArticulos({ articulos, ventas, ingresos = [], historic
       margen: costoOk && precio > 0 ? (precio - costo) / precio : null,
       tipo: tipoDe(a, cortes), tipoAuto: tipoAutomatico(precio, cortes), manual: !!tipoManualDe(a),
       u: x.u, uSem, fact: x.fact, nuevo, semanas, cambioPrecio,
+      ultimaVenta: ultimaVenta[a.id] ?? null,
+      sinVentasRecientes: !nuevo && (ultimaVenta[a.id] == null || hoy - ultimaVenta[a.id] > DIAS_SIN_VENTAS),
+      stock: stockMap && Object.prototype.hasOwnProperty.call(stockMap, a.id) ? stockMap[a.id] : null,
       ganSem: costoOk ? (precio - costo) * uSem : null,
       pctTurista: tot ? x.pagos.turista / tot : null, pctLocal: tot ? x.pagos.local / tot : null,
     }
@@ -174,9 +184,10 @@ export function clasificarArticulos({ articulos, ventas, ingresos = [], historic
   // Rotación dentro de cada tipo: tercios de u/semana entre los que vendieron; sin ventas = baja
   for (const t of TIPOS) {
     const del = filas.filter(f => f.tipo === t && !f.nuevo && !f.cambioPrecio?.reciente)
-    const v = del.filter(f => f.uSem > 0).map(f => f.uSem).sort((a, b) => a - b)
+    // Los cortes se calculan solo con los que se siguen vendiendo
+    const v = del.filter(f => f.uSem > 0 && !f.sinVentasRecientes).map(f => f.uSem).sort((a, b) => a - b)
     const r1 = v[Math.floor(v.length / 3)] ?? 0, r2 = v[Math.floor(v.length * 2 / 3)] ?? 0
-    for (const f of del) f.nivel = f.uSem <= 0 ? 'BAJA' : f.uSem >= r2 ? 'ALTA' : f.uSem >= r1 ? 'MEDIA' : 'BAJA'
+    for (const f of del) f.nivel = f.uSem <= 0 || f.sinVentasRecientes ? 'BAJA' : f.uSem >= r2 ? 'ALTA' : f.uSem >= r1 ? 'MEDIA' : 'BAJA'
     const corte = { r1, r2 }
     filas.filter(f => f.tipo === t).forEach(f => { f.cortesRotacion = corte })
   }
@@ -188,7 +199,14 @@ export function clasificarArticulos({ articulos, ventas, ingresos = [], historic
       f.accion = `Precio cambiado hace ${cp.dias} ${cp.dias === 1 ? 'día' : 'días'}: esperar ${DIAS_TRAS_CAMBIO - cp.dias} más antes de volver a tocarlo`
       continue
     }
+    if (f.sinVentasRecientes && f.stock != null && f.stock <= 0) {
+      f.nivel = 'SIN_STOCK'
+      f.accion = 'Sin stock: reponer solo si se vendía bien; si no, dar de baja'
+      f.aviso = f.ultimaVenta != null ? `Última venta: ${fechaDeDia(f.ultimaVenta)}` : 'Nunca se vendió'
+      continue
+    }
     f.accion = ACCION[f.tipo][f.nivel]
+    if (f.sinVentasRecientes) { f.aviso = f.ultimaVenta != null ? `Sin ventas desde el ${fechaDeDia(f.ultimaVenta)}` : 'Nunca se vendió'; continue }
     if (f.margen != null && f.margen < 0.4 && f.nivel !== 'BAJA') f.aviso = 'Margen bajo: revisar costo o precio'
     else if (f.costo == null) f.aviso = 'Falta el costo'
     else if (f.nivel === 'ALTA' && f.pctTurista >= 0.3) f.aviso = 'Lo compran mucho turistas: aguanta mejor una suba'

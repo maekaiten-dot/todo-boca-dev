@@ -39,8 +39,8 @@ function armarFilaGrupo(nombre, modelos) {
   }
 }
 
-export default function TiposPrecio({ articulos, ventas, ingresos, historico = [], hoy, vista = 'modelo', onVista }) {
-  const { cortes, filas } = useMemo(() => clasificarArticulos({ articulos, ventas, ingresos, historico, hoy, metodosDe }), [articulos, ventas, ingresos, historico, hoy])
+export default function TiposPrecio({ articulos, ventas, ingresos, historico = [], hoy, vista = 'modelo', onVista, stockMap = null }) {
+  const { cortes, filas } = useMemo(() => clasificarArticulos({ articulos, ventas, ingresos, historico, hoy, metodosDe, stockMap }), [articulos, ventas, ingresos, historico, hoy, stockMap])
   const [sel, setSel] = useState(null)       // { tipo, nivel } o null = todos
   const [busq, setBusq] = useState('')
   const [orden, setOrden] = useState({ k: 'ganSem', dir: -1 })
@@ -61,6 +61,7 @@ export default function TiposPrecio({ articulos, ventas, ingresos, historico = [
   const celda = (t, n) => { const g = filas.filter(f => f.tipo === t && f.nivel === n); return { n: g.length, gan: g.reduce((s, f) => s + (f.ganSem || 0), 0) } }
   const nuevos = filas.filter(f => f.nivel === 'NUEVO')
   const recientes = filas.filter(f => f.nivel === 'CAMBIO')
+  const sinStock = filas.filter(f => f.nivel === 'SIN_STOCK')
 
   const visibles = useMemo(() => {
     const q = norm(busq)
@@ -96,7 +97,7 @@ export default function TiposPrecio({ articulos, ventas, ingresos, historico = [
       <div style={S.nota}>
         <b>Tipo por precio</b>: <b style={{ color: COLOR.PREMIUM }}>Premium</b> desde {$(cortes.c2)} (donde arranca el tercio más caro de la facturación: pocos artículos, los más caros) · <b style={{ color: COLOR.ESTANDAR }}>Estándar</b> de {$(cortes.c1)} a {$(cortes.c2 - 1)} · <b style={{ color: COLOR.POPULAR }}>Popular</b> hasta {$(cortes.c1 - 1)} (el corte entre los dos está en el salto de precios más marcado).
         {cortes.porVentas ? ' Se recalcula solo una vez por mes, con las ventas de las 26 semanas hasta el fin del mes pasado.' : ' Todavía sin ventas para calcular: se usan tercios por cantidad de artículos.'}
-        {' '}<b>Rotación</b>: unidades por semana en las últimas {SEMANAS_VENTANA} semanas, comparada contra los de su mismo tipo (los artículos con menos tiempo se cuentan desde que llegaron; si cambió el precio, cuenta solo lo vendido al precio actual).
+        {' '}<b>Rotación</b>: unidades por semana en las últimas {SEMANAS_VENTANA} semanas, comparada contra los de su mismo tipo (los artículos con menos tiempo se cuentan desde que llegaron; si cambió el precio, cuenta solo lo vendido al precio actual). Si no se vendió en las últimas 8 semanas, es rotación baja aunque antes se vendiera bien; y si además no tiene stock, queda fuera de la matriz.
         {' '}<b>Ganancia/semana</b> = (precio − costo) × unidades por semana, con el precio y el costo de hoy. Es lo que conviene maximizar, no las unidades.
         {' '}<b>🌎 Turistas</b>: parte de lo vendido que se pagó en dólares, reales, euros o Pix (seguro turista); <b>🏠 Locales</b>: efectivo en pesos o transferencia. La tarjeta y el QR los usan los dos y no cuentan para ninguno.
       </div>
@@ -134,6 +135,7 @@ export default function TiposPrecio({ articulos, ventas, ingresos, historico = [
         </div>
       </div>
       {nuevos.length > 0 && <div style={S.nota}>Además hay {nuevos.length} artículos nuevos (menos de 4 semanas de historia) que todavía no se clasifican por rotación.</div>}
+      {sinStock.length > 0 && <div style={S.nota}>{sinStock.length} {sinStock.length === 1 ? 'artículo no tiene' : 'artículos no tienen'} stock ni ventas en las últimas 8 semanas: no entran en la matriz (buscalos por nombre para ver la última venta).</div>}
       {recientes.length > 0 && <div style={S.nota}>{recientes.length} {recientes.length === 1 ? 'artículo cambió' : 'artículos cambiaron'} de precio hace menos de 4 semanas: no entran en la matriz hasta juntar 4 semanas de ventas al precio nuevo (así lo vendido al precio anterior no cuenta).</div>}
 
       <div style={S.filtros}>

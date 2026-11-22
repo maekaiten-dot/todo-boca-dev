@@ -10,19 +10,40 @@ const METODOS = ['Efectivo Pesos', 'Efectivo Dólares', 'Efectivo Reales', 'Efec
 const fmt$ = n => (n < 0 ? '−$' : '$') + Math.abs(Math.round(n || 0)).toLocaleString('es-AR')
 const normalizar = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
 
+const MAX_RESULTADOS = 40
+// Busca por nombre o código; con varias palabras ("pulsera raul") tienen que estar todas.
+// Orden: código exacto, nombre que empieza con lo buscado y, después, los artículos más nuevos primero
+// (los últimos de la planilla). Antes mostraba solo los primeros 8 de la planilla y un artículo recién
+// cargado no aparecía si había muchos con la misma palabra.
+export function buscarArticulos(articulos, q) {
+  const t = normalizar(q).trim()
+  if (t.length < 2) return { res: [], total: 0 }
+  const palabras = t.split(/\s+/)
+  const encontrados = []
+  articulos.forEach((a, i) => {
+    const n = normalizar(a.nombre), id = normalizar(a.id)
+    if (!palabras.every(p => n.includes(p) || id.includes(p))) return
+    encontrados.push({ a, orden: (id === t ? 0 : n.startsWith(t) ? 1 : 2) * 1e6 - i })
+  })
+  encontrados.sort((x, y) => x.orden - y.orden)
+  return { res: encontrados.slice(0, MAX_RESULTADOS).map(x => x.a), total: encontrados.length }
+}
+
 function BuscarArticulo({ articulos, onElegir, placeholder, autoFocus }) {
   const [q, setQ] = useState('')
-  const res = q.trim().length < 2 ? [] : articulos.filter(a => normalizar(a.nombre).includes(normalizar(q)) || normalizar(a.id).includes(normalizar(q))).slice(0, 8)
+  const { res, total } = useMemo(() => buscarArticulos(articulos, q), [articulos, q])
   return (
     <div style={{ position: 'relative' }}>
       <input style={S.input} autoFocus={autoFocus} value={q} onChange={e => setQ(e.target.value)} placeholder={placeholder} aria-label={placeholder} />
-      {res.length > 0 && (
+      {q.trim().length >= 2 && (
         <div style={S.lista}>
           {res.map(a => (
             <button key={a.id} style={S.opcion} onClick={() => { onElegir(a); setQ('') }}>
               <b>{a.id}</b> · {a.nombre} <span style={{ color: 'var(--muted)' }}>· {fmt$(num(a.precioUnitario))}</span>
             </button>
           ))}
+          {!res.length && <div style={S.masRes}>No hay artículos con "{q.trim()}".</div>}
+          {total > res.length && <div style={S.masRes}>Hay {total - res.length} más: escribí otra palabra para achicar la lista.</div>}
         </div>
       )}
     </div>
@@ -219,6 +240,7 @@ const S = {
   label: { fontFamily: 'Barlow Condensed, sans-serif', fontSize: 11, color:'var(--accent-text)', letterSpacing: 1, fontWeight: 700 },
   input: { width: '100%', boxSizing: 'border-box', minWidth: 0, background: 'var(--surface)', border: '1.5px solid var(--border)', borderRadius: 8, color: 'var(--text)', fontFamily: 'Barlow, sans-serif', fontSize: 15, padding: '8px 10px', outline: 'none' },
   lista: { position: 'absolute', zIndex: 5, left: 0, right: 0, top: '100%', background: 'var(--surface)', border: '1.5px solid var(--border)', borderRadius: 8, maxHeight: 260, overflowY: 'auto' },
+  masRes: { padding: '8px 10px', fontFamily: 'Barlow, sans-serif', fontSize: 13, color: 'var(--muted)' },
   opcion: { display: 'block', width: '100%', textAlign: 'left', background: 'none', border: 'none', borderBottom: '1px solid var(--border)', color: 'var(--text)', fontFamily: 'Barlow, sans-serif', fontSize: 14, padding: '8px 10px', cursor: 'pointer' },
   mini: { background: 'none', border: '1.5px solid var(--border)', borderRadius: 6, color: 'var(--text)', fontFamily: 'Barlow, sans-serif', fontSize: 12, padding: '4px 8px', cursor: 'pointer' },
   caja: { display: 'flex', flexDirection: 'column', gap: 10, padding: 12, border: '1.5px solid var(--border)', borderRadius: 10 },

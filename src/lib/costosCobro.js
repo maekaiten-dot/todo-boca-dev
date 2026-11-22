@@ -5,9 +5,12 @@
 // monotributista no se recupera, así que es un costo más. No lleva IVA.
 //
 // PAYWAY (posnet BLANCO)
-//  · Crédito: arancel 2% (Amex 2,5%; la app no sabe la marca, se usa 2%) + cobro anticipado, que
-//    estuvo activo hasta oct 2026 (% del crédito de cada mes, sacado de los resúmenes).
-//  · Débito: sin arancel.
+//  · Hasta el 22/11/2026, plazo "Inmediata" en Nave (Galicia): crédito con arancel 2% (Amex 2,5%; la
+//    app no sabe la marca, se usa 2%) + "Pago Expreso Cupones" del Galicia (el cobro anticipado, % del
+//    crédito de cada mes sacado de los resúmenes; en nov 2026 además "Sellos PEX Cap. Fed."). Débito sin arancel.
+//  · Desde el 23/11/2026, plazo "En otros plazos" en Nave: crédito 1,80% + IVA a 10 días hábiles,
+//    débito 0,80% + IVA a 1 día hábil, sin Pago Expreso. (Cambiado el domingo 22/11 a la tarde; las
+//    ventas de ese día se cuentan con el plan anterior. Verificar con los primeros comprobantes.)
 //  · "Servicio Payway": cargo fijo por mes, bonificado de nov 2026 a oct 2027.
 //  · QR de Payway: 0,80% + IVA (más IIBB), se acredita al instante en el banco (venta del 9/11/2026:
 //    $22.000 → $21.237,04, sin impuesto al cheque). Antes del posnet amarillo (mayo 2026) todo QR era de Payway.
@@ -33,14 +36,18 @@ export function leyChequeDelMes(mes) {
   return p
 }
 export const LEY_25413_BLANCO = leyChequeDelMes('9999-99')   // el % de hoy
-export const ARANCEL_CREDITO_PAYWAY = 2
-// Cobro anticipado de Payway: % del crédito de cada mes (resúmenes nov 2025 – oct 2026)
+export const ARANCEL_CREDITO_PAYWAY = 2   // arancel de crédito con el plan "Inmediata" (hasta el 22/11/2026)
+// Cobro anticipado ("Pago Expreso Cupones" del Galicia): % del crédito de cada mes (resúmenes nov 2025 –
+// oct 2026; nov 2026 sale de los comprobantes del 16, 19 y 20/11: ≈ 2,5% en Visa y Mastercard, más sellos)
 export const ANTICIPO_PAYWAY = {
   '2025-11': 9.82, '2025-12': 8.01, '2026-01': 9.22, '2026-02': 9.31, '2026-03': 8.95, '2026-04': 8.37,
   '2026-05': 9.03, '2026-06': 9.22, '2026-07': 8.83, '2026-08': 8.89, '2026-09': 4.15, '2026-10': 2.39,
+  '2026-11': 2.5,
 }
 const ANTICIPO_ANTES = 9        // meses anteriores a nov 2025 (sin resumen): el promedio de esos meses
-const ANTICIPO_DESDE = '2026-11' // desde acá, desactivado
+// Plan "En otros plazos" de Nave (sin cobro anticipado), por fecha de venta
+export const PLAN_OTROS_PLAZOS_DESDE = '2026-11-23'
+export const OTROS_PLAZOS = { credito: 1.8, debito: 0.8 }
 // Servicio Payway (cargo fijo mensual, sin IVA)
 export const SERVICIO_PAYWAY = [
   { desde: '0000-00', monto: 41999 },
@@ -64,32 +71,46 @@ export function mesDeCuando(cuando) {
   const p = s.split('/')
   return p.length >= 3 && p[2] ? `${p[2]}-${String(p[1]).padStart(2, '0')}` : ''
 }
+// "22/11/2026", "'22/11/2026 15:30", "2026-11-22" o "2026-11" → "2026-11-22" (o "2026-11" si no hay día).
+// Las tasas se eligen comparando estos textos: "2026-11" (un mes entero) queda antes de "2026-11-23".
+export function diaDeCuando(cuando) {
+  const s = String(cuando || '').replace(/^'/, '').split(' ')[0]
+  if (/^\d{4}-\d{2}(-\d{2})?$/.test(s)) return s
+  const p = s.split('/')
+  return p.length >= 3 && p[2] ? `${p[2]}-${String(p[1]).padStart(2, '0')}-${String(p[0]).padStart(2, '0')}` : ''
+}
+const enOtrosPlazos = cuando => diaDeCuando(cuando) >= PLAN_OTROS_PLAZOS_DESDE
+// Arancel de crédito del posnet blanco para una fecha (sin el cobro anticipado)
+export const arancelCreditoPayway = cuando => enOtrosPlazos(cuando) ? OTROS_PLAZOS.credito : ARANCEL_CREDITO_PAYWAY
 export function tipoDeMetodo(metodo) {
   const m = String(metodo || '').toLowerCase()
   return /\bqr\b/.test(m) ? 'qr' : /d[eé]bito/.test(m) ? 'debito' : /tarjeta|cr[eé]dito/.test(m) ? 'credito' : null
 }
 export const posnetNormal = posnet => /AMARILLO/i.test(posnet || '') ? 'AMARILLO' : 'BLANCO'
 
-// % antes de IVA para un medio, un posnet y un mes
-export function tasaCobro(tipo, posnet, mes) {
+// % antes de IVA para un medio, un posnet y una fecha de venta ("22/11/2026", "2026-11-22" o el mes "2026-11")
+export function tasaCobro(tipo, posnet, cuando) {
   if (!tipo) return 0
   if (tipo === 'qr') return posnetNormal(posnet) === 'AMARILLO' ? MP.qr : QR_PAYWAY
   if (posnetNormal(posnet) === 'AMARILLO') return tipo === 'credito' ? MP.creditoLocal * (1 - MP.parteExterior) + MP.creditoExterior * MP.parteExterior : MP.debito
+  if (enOtrosPlazos(cuando)) return OTROS_PLAZOS[tipo] ?? 0
   if (tipo === 'debito') return 0
-  const anticipo = mes >= ANTICIPO_DESDE ? 0 : (ANTICIPO_PAYWAY[mes] ?? (mes < '2025-11' ? ANTICIPO_ANTES : 0))
+  const mes = diaDeCuando(cuando).slice(0, 7)
+  const anticipo = ANTICIPO_PAYWAY[mes] ?? (mes < '2025-11' ? ANTICIPO_ANTES : 0)
   return ARANCEL_CREDITO_PAYWAY + anticipo
 }
 // Costo total como fracción (comisión con IVA + IIBB; ej. 0.0757) para multiplicar por el monto
-export function costoTotalTasa(tipo, posnet, mes) {
+export function costoTotalTasa(tipo, posnet, cuando) {
   if (!tipo) return 0
-  const base = (tasaCobro(tipo, posnet, mes) * IVA + IIBB) / 100
+  const mes = diaDeCuando(cuando).slice(0, 7)
+  const base = (tasaCobro(tipo, posnet, cuando) * IVA + IIBB) / 100
   return base + (impChequeAplica(tipo, posnet) ? (1 - base) * leyChequeDelMes(mes) / 100 : 0)
 }
 // El impuesto al cheque se paga sobre lo que deposita Payway por las tarjetas (posnet blanco). El QR de
 // Payway entra al instante y el banco no le cobra el impuesto (venta del 9/11/2026).
 export const impChequeAplica = (tipo, posnet) => !!tipo && tipo !== 'qr' && posnetNormal(posnet) === 'BLANCO'
 export function comisionDe(metodo, posnet, cuando) {
-  return costoTotalTasa(tipoDeMetodo(metodo), posnet, mesDeCuando(cuando))
+  return costoTotalTasa(tipoDeMetodo(metodo), posnet, diaDeCuando(cuando))
 }
 export function servicioPaywayDelMes(mes) {
   let m = 0

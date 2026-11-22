@@ -90,10 +90,12 @@ export function calcularIndice(ventas, { indices = null, horas = {}, mesActual }
       const tipo = tipoDeMetodo(p.metodo); if (!tipo || !(p.monto > 0)) continue
       const pos = posnetNormal(posnetDeParte(v, p.metodo))
       const k = `${pos}|${tipo}`
-      const d = (x.cobro[k] ||= { posnet: pos, tipo, monto: 0, comision: 0, iibb: 0, cheque: 0, costo: 0, tasa: tasaCobro(tipo, pos, mes) })
-      const com = p.monto * d.tasa * IVA / 100, ib = p.monto * IIBB / 100
+      const d = (x.cobro[k] ||= { posnet: pos, tipo, monto: 0, comision: 0, iibb: 0, cheque: 0, costo: 0, tasa: 0 })
+      // La tasa va por fecha de venta (el posnet blanco cambió de plan a mitad de nov 2026)
+      const com = p.monto * tasaCobro(tipo, pos, v.fecha) * IVA / 100, ib = p.monto * IIBB / 100
       const ch = impChequeAplica(tipo, pos) ? (p.monto - com - ib) * leyChequeDelMes(mes) / 100 : 0
       d.monto += p.monto; d.comision += com; d.iibb += ib; d.cheque += ch; d.costo += com + ib + ch
+      d.tasa = d.comision / d.monto / IVA * 100   // tasa promedio del mes (antes de IVA), para mostrar
       x.comision += com + ib + ch
     }
     if (costoValido(v)) { x.ventaConCosto += $; x.costo += v.costoTotal }
@@ -189,7 +191,7 @@ function DesgloseCobro({ d, label }) {
           </table>
         </div>
         <div style={S.hint}>
-          Payway: crédito 2% + cobro anticipado (activo hasta oct 2026), débito sin arancel, QR 0,80%, servicio fijo por mes (bonificado nov 2026 – oct 2027).
+          Payway: hasta el 22/11/2026 crédito 2% + cobro anticipado del Galicia ("Pago Expreso"), débito sin arancel; desde el 23/11/2026 (plan "En otros plazos" de Nave) crédito 1,80% y débito 0,80%. QR 0,80%, servicio fijo por mes (bonificado nov 2026 – oct 2027).
           Mercado Pago: crédito 4,19% argentina / 7,19% del exterior (se usa el promedio real, ≈80% del exterior), débito 2,75%, QR 0,80%.
           Comisiones con IVA. Se suman la retención de Ingresos Brutos (2,5% de lo cobrado con tarjeta o QR) y el impuesto al cheque (Ley 25.413, 1,2% de lo que Payway depositaba por las tarjetas hasta octubre 2026; desde noviembre el banco ya no lo cobra; el QR de Payway nunca lo pagó), porque no se recuperan.
         </div>

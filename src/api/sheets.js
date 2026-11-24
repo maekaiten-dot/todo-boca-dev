@@ -44,9 +44,11 @@ async function pedirToken() {
   return _cachedToken
 }
 
-async function sheetsGet(range) {
+// sinFormato: devuelve el valor guardado (5500) y no el que muestra la celda. Sirve para columnas de
+// montos que en la planilla quedaron con formato de fecha y se ven como "21/1/1915".
+async function sheetsGet(range, { sinFormato = false } = {}) {
   const token = await getAccessToken()
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(range)}`
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(range)}${sinFormato ? '?valueRenderOption=UNFORMATTED_VALUE' : ''}`
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
   if (!res.ok) throw new Error(`Sheets GET error: ${res.status}`)
   return res.json()
@@ -1612,8 +1614,14 @@ function msModificadoIngreso(modificado, id, fecha, hora) {
 }
 
 export async function getIngresos({ unificar = false } = {}) {
-  const [data] = await Promise.all([sheetsGet('INGRESOS!A2:N'), unificar ? asegurarAlias() : null])
-  const rows = data.values || []
+  // Costo unitario y total (G:H) se leen sin formato: si la columna quedó con formato de fecha, la
+  // celda muestra "21/1/1915" en vez de 5.500 (pasó en nov 2026 con el costo unitario)
+  const [data, montos] = await Promise.all([sheetsGet('INGRESOS!A2:N'), sheetsGet('INGRESOS!G2:H', { sinFormato: true }).catch(() => null), unificar ? asegurarAlias() : null])
+  const rows = (data.values || []).map((r, i) => {
+    const m = montos?.values?.[i]
+    if (!m) return r
+    const x = r.slice(); x[6] = m[0] ?? r[6]; x[7] = m[1] ?? r[7]; return x
+  })
   return rows.filter(r=>r[0]).map((r, idx) => ({
     rowNum:idx+2, idIngreso:r[0]||'', fecha:r[1]||'', hora:r[2]||'',
     articuloId: unificar ? idCanonico(r[3]||'') : r[3]||'', articuloNombre:r[4]||'', cantidad:Number(r[5])||0,
@@ -1968,8 +1976,13 @@ function mesGasto(v) {
 const columnasGasto = (tipo, etiqueta, correspondeA) => tipo === 'GASTO' ? [etiqueta || '', correspondeA ? `'${correspondeA}` : ''] : ['', '']
 
 export async function getPagos() {
-  const data = await sheetsGet('PAGOS!A2:T')
-  const rows = data.values || []
+  // Cantidad, costo unitario y total (G:I) sin formato, por si alguna columna quedó con formato de fecha
+  const [data, montos] = await Promise.all([sheetsGet('PAGOS!A2:T'), sheetsGet('PAGOS!G2:I', { sinFormato: true }).catch(() => null)])
+  const rows = (data.values || []).map((r, i) => {
+    const m = montos?.values?.[i]
+    if (!m) return r
+    const x = r.slice(); x[6] = m[0] ?? r[6]; x[7] = m[1] ?? r[7]; x[8] = m[2] ?? r[8]; return x
+  })
   return rows.filter(r=>r[0]).map((r, idx) => ({
     rowNum:idx+2, idPago:r[0]||'', tipo:r[1]||'',
     fechaIngreso:r[2]||'', fechaPago:r[3]||'',

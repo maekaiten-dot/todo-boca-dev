@@ -10,7 +10,8 @@ import AvisoPrecios, { totalCambios, resumenCambios } from './components/AvisoPr
 import { BotonModoPartido, BarraModoPartido } from './components/ModoPartido.jsx'
 import { escucharCola, procesarCola } from './lib/colaVentas.js'
 import { calcularMasVendidos } from './lib/masVendidos.js'
-import { prepararGuardadoVentas, getModoPartido, setModoPartido, setModoPartidoLog, getHistoricoVentas, getPromos, getAlias, getArticulos, getUsuarios, registrarLog, calcularStockTodos, leerArticulosVistos, guardarArticulosVistos, getTutoriales, leerTutorialesVistos, guardarTutorialesVistos, getConfig } from './api/sheets.js'
+import { prepararGuardadoVentas, getModoPartido, setModoPartido, setModoPartidoLog, getHistoricoVentas, getPromos, getAlias, getArticulos, getUsuarios, registrarLog, calcularStockTodos, leerArticulosVistos, guardarArticulosVistos, getTutoriales, leerTutorialesVistos, guardarTutorialesVistos, getConfig, getPagos, leerPagosVistos, guardarPagosVistos, leerPagosPropios, limpiarPagosPropios, firmaPago } from './api/sheets.js'
+import { datoVisto, calcularCambiosArticulos, vistoDespues, unirCambios, detalleLogCambios, calcularCambiosPagos } from './lib/novedades.js'
 import { tocaRevisar, CLAVES_REPOSICION, REPOSICION_DEFAULT, puedeVerReposicion } from './lib/reposicion.js'
 // Las solapas que no son Vender ni Hoy se bajan aparte (la app abre más rápido). Unos segundos
 // después de abrir se precargan en segundo plano, así al tocarlas ya están.
@@ -230,7 +231,16 @@ export default function App() {
   const [tutosNuevos, setTutosNuevos] = useState([])
   const [versionTutos, setVersionTutos] = useState(0)
   const tutosRef = useRef([])
-  const avisoCambios = (cambiosPrecio || tutosNuevos.length) ? { ...(cambiosPrecio || {}), tutoriales: tutosNuevos } : null
+  // Admin: pagos que cargó el otro Admin y este dispositivo todavía no vio (van en el mismo aviso)
+  const [cambiosPagos, setCambiosPagos] = useState([])
+  const pagosRef = useRef([])
+  const avisoCambios = (cambiosPrecio || tutosNuevos.length || cambiosPagos.length) ? { ...(cambiosPrecio || {}), tutoriales: tutosNuevos, pagos: cambiosPagos } : null
+  // Tablet (LOCAL.avisoPorEmpleada): cada empleada tiene su aviso hasta que toca su nombre
+  const [artPorPersona, setArtPorPersona] = useState({})   // nombre → cambios en artículos
+  const [tutPorPersona, setTutPorPersona] = useState({})   // nombre → tutoriales nuevos
+  const [avisoTablet, setAvisoTablet] = useState({ abierto: false, para: null })
+  const usuariosRef = useRef([])
+  usuariosRef.current = usuarios
   const [avisoReposicion, setAvisoReposicion] = useState(false)
   const [verAvisoPrecios, setVerAvisoPrecios] = useState(false) // Admin: abrió el detalle desde el aviso chico
   const perfilRef = useRef(perfilGuardado)
@@ -294,26 +304,49 @@ export default function App() {
 
   useEffect(() => { cargarArticulos(); cargarUsuarios() }, [])
 
-  // Compara los artículos activos con los que ya vio este dispositivo
-  const datoVisto = a => ({ p: a.precioUnitario, n: a.nombre })
+  // ── Aviso de novedades ──
+  // En la tablet (perfiles Caja) del local con LOCAL.avisoPorEmpleada, lo visto se guarda por empleada
+  // (USUARIOS con TIPO Caja, sin "Tablet"): el aviso sigue hasta que cada una toca su nombre, aunque
+  // otra ya lo haya leído. En los demás casos, por dispositivo (como antes).
+  const esPerfilAdmin = () => ['admin', 'supervisor'].includes(String(perfilRef.current?.tipo || '').toLowerCase())
+  // (USUARIOS Caja sin "Tablet") + los que se agregan en LOCAL.avisoTabletTambien (ej. Adrián)
+  const empleadasAviso = () => {
+    const caja = usuariosRef.current
+      .filter(u => String(u.tipo || 'Caja').toLowerCase() === 'caja' && u.nombre && u.nombre.toLowerCase() !== 'tablet')
+      .map(u => u.nombre)
+    if (!caja.length) return []
+    const extra = (LOCAL.avisoTabletTambien || [])
+      .map(n => usuariosRef.current.find(u => u.nombre?.toLowerCase() === n.toLowerCase())?.nombre || n)
+      .filter(n => !caja.some(c => c.toLowerCase() === n.toLowerCase()))
+    return [...caja, ...extra]
+  }
+  const porEmpleada = () => !!LOCAL.avisoPorEmpleada && !!perfilRef.current && !esPerfilAdmin()
+  // La primera vez, cada empleada arranca con lo que había visto la tablet (así no se pierde lo pendiente);
+  // una empleada que se suma después arranca sin avisos viejos
+  const primeraVezPorEmpleada = clave => { try { if (localStorage.getItem(clave)) return false; localStorage.setItem(clave, '1'); return true } catch { return false } }
+
+  // Compara los artículos activos con los que ya vio cada uno
   function detectarCambiosPrecio(arts) {
     const actuales = Object.fromEntries(arts.map(a => [a.id, datoVisto(a)]))
+    if (porEmpleada()) {
+      const personas = empleadasAviso()
+      if (!personas.length) return   // todavía no se leyeron los usuarios: se revisa cuando lleguen
+      const inicial = primeraVezPorEmpleada('tb_aviso_empleadas_art')
+      const general = leerArticulosVistos()
+      const res = {}
+      for (const persona of personas) {
+        let v = leerArticulosVistos(persona)
+        if (!v) { v = (inicial && general) || { activos: actuales, inactivos: {} }; guardarArticulosVistos(v, persona) }
+        const c = calcularCambiosArticulos(arts, v, getAlias())
+        if (totalCambios(c)) res[persona] = c
+        else if (arts.some(a => v.activos[a.id]?.n !== a.nombre)) guardarArticulosVistos({ ...v, activos: actuales }, persona)
+      }
+      setArtPorPersona(res)
+      return
+    }
     const v = leerArticulosVistos()
     if (!v) { guardarArticulosVistos({ activos: actuales, inactivos: {} }); return }
-    const idsActivos = new Set(arts.map(a => a.id))
-    // Un código que este dispositivo nunca vio: si es más nuevo que el último que conoce (los TB son
-    // correlativos) es un producto nuevo; si es más viejo, es uno que estaba inactivo y volvió a activarse
-    const numId = id => Number(String(id).replace(/\D/g, '')) || 0
-    const maxVisto = Math.max(0, ...Object.keys(v.activos).map(numId), ...Object.keys(v.inactivos).map(numId))
-    const esNuevo = a => !v.inactivos[a.id] && numId(a.id) > maxVisto
-    const cambios = {
-      precios: arts.filter(a => v.activos[a.id] && a.precioUnitario > 0 && v.activos[a.id].p !== a.precioUnitario)
-        .map(a => ({ id: a.id, nombre: a.nombre, foto: a.foto, antes: v.activos[a.id].p, ahora: a.precioUnitario })),
-      nuevos: arts.filter(a => !v.activos[a.id] && esNuevo(a)).map(a => ({ id: a.id, nombre: a.nombre, foto: a.foto, precio: a.precioUnitario })),
-      reactivados: arts.filter(a => !v.activos[a.id] && !esNuevo(a)).map(a => ({ id: a.id, nombre: a.nombre, foto: a.foto, precio: a.precioUnitario })),
-      // Un artículo unificado en otro no es una baja: se sigue vendiendo con el otro código
-      bajas: Object.entries(v.activos).filter(([id]) => !idsActivos.has(id) && !getAlias()[id]).map(([id, d]) => ({ id, nombre: d.n, precio: d.p })),
-    }
+    const cambios = calcularCambiosArticulos(arts, v, getAlias())
     if (!totalCambios(cambios)) {
       // Sin cambios: solo se actualizan los nombres guardados si alguno cambió
       if (arts.some(a => v.activos[a.id]?.n !== a.nombre)) guardarArticulosVistos({ ...v, activos: actuales })
@@ -323,18 +356,54 @@ export default function App() {
     setCambiosPrecio(cambios)
   }
 
-  // Compara los tutoriales activos con los que ya vio este dispositivo
+  // Compara los tutoriales activos con los que ya vio cada uno
   function detectarTutoriales(tutos) {
     const ids = tutos.map(t => t.id)
     if (ids.join('|') !== tutosRef.current.map(t => t.id).join('|')) setVersionTutos(v => v + 1)
     tutosRef.current = tutos
+    const resumen = t => ({ id: t.id, titulo: t.titulo, descripcion: t.descripcion, subidoPor: t.subidoPor, fecha: t.fecha })
+    if (porEmpleada()) {
+      const personas = empleadasAviso()
+      if (!personas.length) return
+      const inicial = primeraVezPorEmpleada('tb_aviso_empleadas_tut')
+      const general = leerTutorialesVistos()
+      const res = {}
+      for (const persona of personas) {
+        let vistos = leerTutorialesVistos(persona)
+        if (!vistos) { vistos = (inicial && general) || ids; guardarTutorialesVistos(vistos, persona) }
+        const set = new Set(vistos), nuevos = tutos.filter(t => !set.has(t.id)).map(resumen)
+        if (nuevos.length) res[persona] = nuevos
+      }
+      setTutPorPersona(res)
+      return
+    }
     const vistos = leerTutorialesVistos()
     if (!vistos) { guardarTutorialesVistos(ids); return }
     const vistosSet = new Set(vistos)
-    setTutosNuevos(tutos.filter(t => !vistosSet.has(t.id)).map(t => ({ id: t.id, titulo: t.titulo, descripcion: t.descripcion, subidoPor: t.subidoPor, fecha: t.fecha })))
+    setTutosNuevos(tutos.filter(t => !vistosSet.has(t.id)).map(resumen))
   }
   async function revisarTutoriales() {
     try { detectarTutoriales(await getTutoriales()) } catch (e) { console.warn('No se pudieron leer los tutoriales', e) }
+  }
+
+  // Admin: pagos que cargó el otro Admin (lo que se guarda desde este dispositivo no avisa)
+  const hayPagos = () => esPerfilAdmin() && tabsMasDelLocal(true).some(t => t.id === 'pagos')
+  async function revisarPagos() {
+    if (!hayPagos()) return
+    try {
+      const pagos = await getPagos()
+      pagosRef.current = pagos
+      const vistos = leerPagosVistos()
+      if (!vistos) { guardarPagosVistos(Object.fromEntries(pagos.map(p => [p.idPago, firmaPago(p)]))); return }
+      const { items, absorbidos } = calcularCambiosPagos(pagos, vistos, leerPagosPropios())
+      if (absorbidos.length) {
+        const porId = Object.fromEntries(pagos.map(p => [p.idPago, p]))
+        absorbidos.forEach(id => { vistos[id] = firmaPago(porId[id]) })
+        guardarPagosVistos(vistos)
+        limpiarPagosPropios(absorbidos)
+      }
+      setCambiosPagos(items)
+    } catch (e) { console.warn('No se pudieron leer los pagos', e) }
   }
 
   function entendidoPrecios() {
@@ -344,24 +413,53 @@ export default function App() {
       setTutosNuevos([])
       registrarLog({ accion: 'TUTORIALES_NUEVOS_VISTOS', detalle: tutosVistos.map(t => `${t.id} ${t.titulo}`).join(' · ').slice(0, 400), empleado: perfilRef.current?.nombre || '', resultado: 'OK' })
     }
+    if (cambiosPagos.length) {
+      guardarPagosVistos({ ...(leerPagosVistos() || {}), ...Object.fromEntries(pagosRef.current.map(p => [p.idPago, firmaPago(p)])) })
+      registrarLog({ accion: 'PAGOS_DEL_OTRO_ADMIN_VISTOS', detalle: detalleLogCambios({ pagos: cambiosPagos }), empleado: perfilRef.current?.nombre || '', resultado: 'OK' })
+      setCambiosPagos([])
+    }
     setVerAvisoPrecios(false)
     if (!cambiosPrecio) return
-    const c = cambiosPrecio || {}
-    const v = leerArticulosVistos() || { activos: {}, inactivos: {} }
-    const activos = Object.fromEntries(articulosRef.current.map(a => [a.id, datoVisto(a)]))
-    const inactivos = { ...v.inactivos }
-    ;(c.bajas || []).forEach(b => { inactivos[b.id] = { p: b.precio, n: b.nombre } })
-    Object.keys(activos).forEach(id => { delete inactivos[id] })
-    guardarArticulosVistos({ activos, inactivos })
+    const c = cambiosPrecio
+    guardarArticulosVistos(vistoDespues(articulosRef.current, leerArticulosVistos(), c))
     setCambiosPrecio(null)
-    setVerAvisoPrecios(false)
-    const detalle = [
-      ...(c.precios || []).map(x => `${x.id} $${x.antes} → $${x.ahora}`),
-      ...(c.nuevos || []).map(x => `${x.id} NUEVO`),
-      ...(c.reactivados || []).map(x => `${x.id} ACTIVO`),
-      ...(c.bajas || []).map(x => `${x.id} INACTIVO`),
-    ].join(' · ').slice(0, 400)
-    registrarLog({ accion: 'CAMBIOS_ARTICULOS_VISTOS', detalle, empleado: perfilRef.current?.nombre || '', resultado: 'OK' })
+    registrarLog({ accion: 'CAMBIOS_ARTICULOS_VISTOS', detalle: detalleLogCambios(c), empleado: perfilRef.current?.nombre || '', resultado: 'OK' })
+  }
+
+  // Tablet: una empleada toca su nombre → queda leído solo para ella
+  function leidoPor(persona) {
+    const c = artPorPersona[persona], tutos = tutPorPersona[persona] || []
+    if (c) {
+      guardarArticulosVistos(vistoDespues(articulosRef.current, leerArticulosVistos(persona), c), persona)
+      registrarLog({ accion: 'CAMBIOS_ARTICULOS_VISTOS', detalle: detalleLogCambios(c), empleado: persona, resultado: 'OK' })
+    }
+    if (tutos.length) {
+      guardarTutorialesVistos([...(leerTutorialesVistos(persona) || []), ...tutosRef.current.map(t => t.id)], persona)
+      registrarLog({ accion: 'TUTORIALES_NUEVOS_VISTOS', detalle: tutos.map(t => `${t.id} ${t.titulo}`).join(' · ').slice(0, 400), empleado: persona, resultado: 'OK' })
+    }
+    setArtPorPersona(x => { const y = { ...x }; delete y[persona]; return y })
+    setTutPorPersona(x => { const y = { ...x }; delete y[persona]; return y })
+    setAvisoTablet({ abierto: false, para: null })
+  }
+  const avisoDe = persona => ({ ...(artPorPersona[persona] || {}), tutoriales: tutPorPersona[persona] || [] })
+  const pendientesTablet = [...new Set([...Object.keys(artPorPersona), ...Object.keys(tutPorPersona)])]
+    .filter(n => totalCambios(avisoDe(n)) > 0)
+  const avisoTabletTodos = unirCambios(pendientesTablet.map(avisoDe))
+  // Se abre solo cuando aparece algo nuevo (o al abrir la app con avisos pendientes)
+  const firmaTablet = pendientesTablet.map(n => `${n}:${detalleLogCambios(avisoDe(n))}`).join('\n')
+  const firmaTabletRef = useRef('')
+  useEffect(() => {
+    // Solo si hay algo que antes no estaba (cuando una empleada lo lee, la lista se achica y no se reabre)
+    const antes = new Set(firmaTabletRef.current.split('\n'))
+    if (firmaTablet && firmaTablet.split('\n').some(l => !antes.has(l))) setAvisoTablet({ abierto: true, para: null })
+    if (!firmaTablet) setAvisoTablet({ abierto: false, para: null })
+    firmaTabletRef.current = firmaTablet
+  }, [firmaTablet])
+  // Cuando ficha la entrada una empleada con avisos pendientes, se le abre su aviso
+  function alFichar(nombre, tipo) {
+    if (!/entr/i.test(String(tipo || ''))) return
+    const persona = pendientesTablet.find(n => n.toLowerCase() === String(nombre || '').toLowerCase())
+    if (persona) setTimeout(() => setAvisoTablet({ abierto: true, para: persona }), 2800)
   }
 
   // Relectura silenciosa de artículos (sin "Cargando..." ni registro en el LOG)
@@ -373,6 +471,7 @@ export default function App() {
       detectarCambiosPrecio(arts)
     } catch (e) { console.warn('No se pudieron releer los artículos', e) }
     revisarTutoriales()
+    revisarPagos()
     cargarPromos()
   }
   useEffect(() => {
@@ -395,7 +494,18 @@ export default function App() {
     return () => { clearInterval(id); clearTimeout(pre); document.removeEventListener('visibilitychange', recalc) }
   }, [])
   // Al elegir perfil (o cambiarlo) se revisa enseguida
-  useEffect(() => { if (perfilGuardado && articulosRef.current.length) detectarCambiosPrecio(articulosRef.current) }, [perfilGuardado])
+  useEffect(() => {
+    if (perfilGuardado && articulosRef.current.length) detectarCambiosPrecio(articulosRef.current)
+    if (perfilGuardado && tutosRef.current.length) detectarTutoriales(tutosRef.current)
+    if (perfilGuardado) revisarPagos()
+  }, [perfilGuardado])
+  // Los avisos por empleada necesitan la lista de usuarios: se revisan cuando llega
+  useEffect(() => {
+    usuariosRef.current = usuarios
+    if (!usuarios.length || !porEmpleada()) return
+    if (articulosRef.current.length) detectarCambiosPrecio(articulosRef.current)
+    if (tutosRef.current.length) detectarTutoriales(tutosRef.current)
+  }, [usuarios])
   useEffect(() => {
     if (perfilGuardado) registrarLog({ accion:'SESION_INICIADA', detalle:`App abierta · ${perfilGuardado.nombre} (${perfilGuardado.tipo})`, empleado:perfilGuardado.nombre, resultado:'OK' })
   }, [])
@@ -409,6 +519,7 @@ export default function App() {
       setArticulos(arts)
       detectarCambiosPrecio(arts)
       revisarTutoriales()
+      revisarPagos()
       recalcularStock(arts)
       // Deja lista la planilla para que la primera venta no espere (columnas y datos de la hoja)
       prepararGuardadoVentas().catch(e => console.warn('No se pudo preparar el guardado de ventas', e))
@@ -493,6 +604,8 @@ export default function App() {
   // Supervisor (solo donde el local lo habilita): ve todo lo del Admin, pero sin modificar
   const esSupervisor = !!LOCAL.supervisor && perfilGuardado?.tipo?.toLowerCase() === 'supervisor'
   const veAdmin = esAdmin || esSupervisor
+  // Tablet con aviso por empleada (ver detectarCambiosPrecio)
+  const avisoPorEmpleada = !!LOCAL.avisoPorEmpleada && !veAdmin && empleadasAviso().length > 0
   const esAdrian = perfilGuardado?.nombre?.toLowerCase() === 'adrián' || perfilGuardado?.nombre?.toLowerCase() === 'adrian'
   const tipoKey = veAdmin ? 'Admin' : 'Caja'
   const tabsBase = tabsDelLocal(tipoKey)
@@ -537,14 +650,25 @@ export default function App() {
   return (
     <>
       <style>{CSS_GLOBAL}</style>
-      <AvisoPrecios cambios={!veAdmin || verAvisoPrecios ? avisoCambios : null} onEntendido={entendidoPrecios}
-        onVerTutoriales={() => { entendidoPrecios(); handleTabChange('tutos') }} />
+      {avisoPorEmpleada ? (
+        <AvisoPrecios cambios={avisoTablet.abierto ? (avisoTablet.para ? avisoDe(avisoTablet.para) : avisoTabletTodos) : null}
+          personas={avisoTablet.para ? [avisoTablet.para] : pendientesTablet} onLeido={leidoPor}
+          onCerrar={() => setAvisoTablet({ abierto: false, para: null })} onVerTutoriales={() => handleTabChange('tutos')} />
+      ) : (
+        <AvisoPrecios cambios={!veAdmin || verAvisoPrecios ? avisoCambios : null} onEntendido={entendidoPrecios}
+          onVerTutoriales={() => { entendidoPrecios(); handleTabChange('tutos') }} />
+      )}
       <div style={S.app}>
         <div style={S.header}>
           <div style={S.logo} onClick={handleLogoTap} role="button">
             <span style={{ ...S.logoTodo, color:'var(--header-text)' }}>{LOCAL.logo[0]}</span><span style={{ ...S.logoBoca, color:'var(--accent)' }}>{LOCAL.logo[1]}</span>
           </div>
           <div style={S.headerRight}>
+            {avisoPorEmpleada && pendientesTablet.length > 0 && !avisoTablet.abierto && (
+              <button style={S.avisoPreciosPill} onClick={() => setAvisoTablet({ abierto: true, para: null })} title="Ver las novedades que faltan leer">
+                📢 Falta leer: {pendientesTablet.length > 1 ? `${pendientesTablet.slice(0, -1).join(', ')} y ${pendientesTablet[pendientesTablet.length - 1]}` : pendientesTablet[0]}
+              </button>
+            )}
             {veAdmin && totalCambios(avisoCambios) > 0 && (
               <button style={S.avisoPreciosPill} onClick={() => setVerAvisoPrecios(true)} title="Ver qué cambió en los artículos">
                 📢 {resumenCambios(avisoCambios)}
@@ -554,7 +678,7 @@ export default function App() {
               <button style={S.avisoPreciosPill} onClick={() => handleTabChange('repo')} title="Toca revisar qué hay que reponer" aria-label="Revisar reposición">{typeof window !== 'undefined' && window.innerWidth < 600 ? '🚚' : '🚚 Revisar reposición'}</button>
             )}
             {esAdmin && LOCAL.modoPartido && <BotonModoPartido activo={modo.activo} cambiando={cambiandoModo} onCambiar={cambiarModo} />}
-            {LOCAL.fichar && <FicharTablet />}
+            {LOCAL.fichar && <FicharTablet onFichada={alFichar} />}
             <div style={S.perfilPill}><span style={S.perfilLabel}>{empleadoActual}</span></div>
             {loadingArticulos && <span style={S.loadingPill}>Cargando...</span>}
           </div>

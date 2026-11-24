@@ -45,6 +45,11 @@ const LOCALES = {
     modoPartido: true,
     bajaEnGastos: true,     // botón para registrar bajas (consumo del personal, roturas) en Gastos
     fichar: true,
+    // Aviso de novedades en la tablet por empleada (USUARIOS Caja, sin "Tablet"): queda hasta que
+    // cada una toca su nombre, aunque otra ya lo haya leído
+    avisoPorEmpleada: true,
+    // Además de las empleadas, también confirman el aviso en la tablet (nombres de USUARIOS)
+    avisoTabletTambien: ['Adrián'],
     // Barra inferior con letra e íconos más grandes
     barraGrande: false,
     // Rol Supervisor (TIPO "Supervisor" en USUARIOS): ve lo mismo que un Admin pero no puede
@@ -76,6 +81,7 @@ const LOCALES = {
     bajaEnGastos: false,
     // Las fichadas son de la Esquina: por ahora no se muestran acá
     fichar: false,
+    avisoPorEmpleada: false,
     barraGrande: true,
     supervisor: true,
     planillaMP: null,

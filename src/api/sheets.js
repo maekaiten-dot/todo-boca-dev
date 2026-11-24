@@ -1502,27 +1502,41 @@ export async function generarIdArticulo() {
 //   { v: 2, activos: { TB00001: { p: 35000, n: 'Camiseta…' } }, inactivos: { … } }
 // Cuando un artículo se crea, se edita o se activa/desactiva desde la app en este mismo dispositivo,
 // se marca como visto: así a quien hizo el cambio no le aparece el aviso de su propio cambio.
+// En la tablet cada empleada tiene lo suyo (persona = su nombre): así el aviso no se pierde cuando una
+// lo lee y la otra todavía no entró. Sin persona, es lo que vio el dispositivo.
 export const CLAVE_PRECIOS_VISTOS = 'tb_precios_vistos'
-export function leerArticulosVistos() {
+const clavePersona = (base, persona) => persona ? `${base}::${persona}` : base
+// Todas las claves de una base que hay en este dispositivo (la general y las de cada persona)
+function clavesDe(base) {
+  const out = []
+  try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k === base || k?.startsWith(base + '::')) out.push(k) } } catch {}
+  return out
+}
+export function leerArticulosVistos(persona = '') {
   try {
-    const v = JSON.parse(localStorage.getItem(CLAVE_PRECIOS_VISTOS))
+    const v = JSON.parse(localStorage.getItem(clavePersona(CLAVE_PRECIOS_VISTOS, persona)))
     if (!v) return null
     if (v.v === 2) return v
     // Formato viejo { id: precio } (solo activos)
     return { v: 2, activos: Object.fromEntries(Object.entries(v).map(([id, p]) => [id, { p, n: '' }])), inactivos: {} }
   } catch { return null }
 }
-export function guardarArticulosVistos(v) { try { localStorage.setItem(CLAVE_PRECIOS_VISTOS, JSON.stringify({ v: 2, activos: v.activos || {}, inactivos: v.inactivos || {} })) } catch {} }
+export function guardarArticulosVistos(v, persona = '') { try { localStorage.setItem(clavePersona(CLAVE_PRECIOS_VISTOS, persona), JSON.stringify({ v: 2, activos: v.activos || {}, inactivos: v.inactivos || {} })) } catch {} }
 const DISP_ACTIVA = d => { const x = String(d ?? '').toUpperCase().trim(); return !x || x === 'ACTIVO' || x === 'SI' || x === 'TRUE' || x === '1' }
+// Se marca en todas las claves del dispositivo (la general y la de cada empleada)
 function marcarArticuloVisto(art, activo = DISP_ACTIVA(art.disponibilidad)) {
-  const v = leerArticulosVistos()
-  if (!v || !art?.id) return
-  const p = parseMonto(art.precioUnitario || '0')
-  const anterior = v.activos[art.id] || v.inactivos[art.id] || {}
-  const dato = { p: art.precioUnitario != null ? p : anterior.p || 0, n: art.nombre || anterior.n || '' }
-  delete v.activos[art.id]; delete v.inactivos[art.id]
-  ;(activo ? v.activos : v.inactivos)[art.id] = dato
-  guardarArticulosVistos(v)
+  if (!art?.id) return
+  for (const k of clavesDe(CLAVE_PRECIOS_VISTOS)) {
+    const persona = k.includes('::') ? k.split('::')[1] : ''
+    const v = leerArticulosVistos(persona)
+    if (!v) continue
+    const p = parseMonto(art.precioUnitario || '0')
+    const anterior = v.activos[art.id] || v.inactivos[art.id] || {}
+    const dato = { p: art.precioUnitario != null ? p : anterior.p || 0, n: art.nombre || anterior.n || '' }
+    delete v.activos[art.id]; delete v.inactivos[art.id]
+    ;(activo ? v.activos : v.inactivos)[art.id] = dato
+    guardarArticulosVistos(v, persona)
+  }
 }
 
 export async function agregarArticulo(art, empleado = '') {
@@ -1971,6 +1985,26 @@ export async function getPagos() {
   }))
 }
 
+// ── Pagos ya vistos por este dispositivo (aviso a los Admin de los pagos que cargó el otro) ──
+// { idPago: firma } con la firma de lo que importa (costo, pagado, estado, anulado). Lo que se guarda
+// desde este dispositivo se anota como "propio" y no avisa a quien lo cargó.
+export const CLAVE_PAGOS_VISTOS = 'tb_pagos_vistos'
+const CLAVE_PAGOS_PROPIOS = 'tb_pagos_propios'
+export const firmaPago = p => `${Math.round(p.costoTotal || 0)}|${Math.round(p.montoPagado || 0)}|${p.pagado ? 1 : 0}|${p.anulado ? 1 : 0}`
+export function leerPagosVistos() { try { const v = JSON.parse(localStorage.getItem(CLAVE_PAGOS_VISTOS)); return v && typeof v === 'object' ? v : null } catch { return null } }
+export function guardarPagosVistos(v) { try { localStorage.setItem(CLAVE_PAGOS_VISTOS, JSON.stringify(v)) } catch {} }
+export function leerPagosPropios() { try { return JSON.parse(localStorage.getItem(CLAVE_PAGOS_PROPIOS)) || {} } catch { return {} } }
+export function limpiarPagosPropios(ids) { try { const v = leerPagosPropios(); ids.forEach(id => delete v[id]); localStorage.setItem(CLAVE_PAGOS_PROPIOS, JSON.stringify(v)) } catch {} }
+function marcarPagosPropios(ids) {
+  try {
+    const v = leerPagosPropios(), ahora = Date.now()
+    ids.filter(Boolean).forEach(id => { v[id] = ahora })
+    // Los que quedaron de hace más de 2 días ya no hacen falta
+    Object.keys(v).forEach(id => { if (ahora - v[id] > 2 * 86400000) delete v[id] })
+    localStorage.setItem(CLAVE_PAGOS_PROPIOS, JSON.stringify(v))
+  } catch {}
+}
+
 // ── Compras a proveedores ──────────────────────────────────────────────────────
 // PAGOS · Q: COMPRA, R: COMPROBANTE · INGRESOS · M: COMPRA, N: COMPROBANTE.
 // Todos los renglones (productos) de una misma compra llevan el mismo código, ej. C261022-01.
@@ -2070,6 +2104,7 @@ export async function registrarPago({ etiqueta = '', correspondeA = '', tipo, fe
     await sheetsAppend('INGRESOS!A1', [rowIngreso])
   }
   await registrarLog({ accion:'PAGO_REGISTRADO', detalle:`${tipo} · ${articuloNombre||descripcion} · $${montoPagado}`, idReferencia:idPago, empleado, resultado:'OK' })
+  marcarPagosPropios([idPago])
   return idPago
 }
 
@@ -2087,6 +2122,7 @@ async function filaIngresoDePago(idPago) {
 //    proveedor, compra) o se crea si no existía;
 //  - sin fecha de ingreso o pasado a GASTO → el ingreso, si existía, se anula.
 export async function actualizarPago(rowNum, campos, empleado = '') {
+  marcarPagosPropios([campos.idPago])
   const cant = Number(campos.cantidad)||0, cu = parsePrecio(campos.costoUnitario), mp = parsePrecio(campos.montoPagado)
   const costoTotal = cant*cu
   await asegurarModificadoPagos()
@@ -2131,6 +2167,7 @@ export async function actualizarPago(rowNum, campos, empleado = '') {
 
 // Anula un pago y también su ingreso, para que deje de sumar al stock
 export async function anularPago(rowNum, idPago, empleado = '') {
+  marcarPagosPropios([idPago])
   await asegurarModificadoPagos()
   const mod = ahoraModificado()
   await sheetsUpdate(`PAGOS!O${rowNum}:P${rowNum}`, [['TRUE', mod]])
@@ -2341,8 +2378,8 @@ export async function getTutoriales() {
 // Tutoriales que ya vio este dispositivo (para el aviso de tutoriales nuevos). El que sube un
 // tutorial desde la app lo marca como visto en su dispositivo: a quien lo subió no le avisa.
 export const CLAVE_TUTORIALES_VISTOS = 'tb_tutoriales_vistos'
-export function leerTutorialesVistos() { try { const v = JSON.parse(localStorage.getItem(CLAVE_TUTORIALES_VISTOS)); return Array.isArray(v) ? v : null } catch { return null } }
-export function guardarTutorialesVistos(ids) { try { localStorage.setItem(CLAVE_TUTORIALES_VISTOS, JSON.stringify([...new Set(ids)])) } catch {} }
+export function leerTutorialesVistos(persona = '') { try { const v = JSON.parse(localStorage.getItem(clavePersona(CLAVE_TUTORIALES_VISTOS, persona))); return Array.isArray(v) ? v : null } catch { return null } }
+export function guardarTutorialesVistos(ids, persona = '') { try { localStorage.setItem(clavePersona(CLAVE_TUTORIALES_VISTOS, persona), JSON.stringify([...new Set(ids)])) } catch {} }
 
 export async function agregarTutorial({ titulo, descripcion = '', link, subidoPor = '' }) {
   await asegurarHojaTutoriales()
@@ -2353,8 +2390,11 @@ export async function agregarTutorial({ titulo, descripcion = '', link, subidoPo
   while (ids.has(`T${String(seq).padStart(3, '0')}`)) seq++
   const id = `T${String(seq).padStart(3, '0')}`
   await sheetsAppend(`${HOJA_TUTORIALES}!A1`, [[id, `'${dt.fecha}`, `'${dt.hora}`, titulo, descripcion, link, subidoPor, 'TRUE']])
-  const vistos = leerTutorialesVistos()
-  if (vistos) guardarTutorialesVistos([...vistos, id])
+  for (const k of clavesDe(CLAVE_TUTORIALES_VISTOS)) {
+    const persona = k.includes('::') ? k.split('::')[1] : ''
+    const vistos = leerTutorialesVistos(persona)
+    if (vistos) guardarTutorialesVistos([...vistos, id], persona)
+  }
   await registrarLog({ accion: 'TUTORIAL_AGREGADO', detalle: titulo, idReferencia: id, empleado: subidoPor, resultado: 'OK' })
   return id
 }
@@ -2527,6 +2567,7 @@ export async function registrarPagosLote({ renglones, fechaIngreso, fechaPago, p
   }
   const total = filas.reduce((s, f) => s + f[8], 0)
   await registrarLog({ accion: 'FACTURA_ESCANEADA', detalle: `${compra} · ${proveedor} · ${descripcion} · ${filas.length} renglón(es) · $${Math.round(total).toLocaleString('es-AR')}`, idReferencia: ids[0], empleado, resultado: 'OK' })
+  marcarPagosPropios(ids)
   return ids
 }
 

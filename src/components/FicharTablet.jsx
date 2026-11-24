@@ -4,7 +4,8 @@ import { useRef, useState } from 'react'
 import BarcodeScanner from './BarcodeScanner.jsx'
 import { leerLlave, registrarFichada, CLAVE_TERMINAL } from '../api/fichadas.js'
 
-export default function FicharTablet() {
+// onFichada(nombre, tipo): avisa a la app quién fichó (para abrirle el aviso de novedades que no leyó)
+export default function FicharTablet({ onFichada }) {
   const [abierto, setAbierto] = useState(false)
   const [aviso, setAviso] = useState('')
   const ultimoQr = useRef({ qr: '', info: null })
@@ -23,6 +24,7 @@ export default function FicharTablet() {
     let info
     if (r.ok && r.duplicada) info = { ok: true, nombre: r.nombre, detalle: `Ya estaba registrada · ${r.tipo} ${r.hora}` }
     else if (r.ok) info = { ok: true, nombre: r.nombre, detalle: `${r.tipo} · ${r.hora}` }
+    if (r.ok && !r.duplicada) { try { onFichada?.(r.nombre, r.tipo) } catch {} }
     else info = { ok: false, nombre: r.nombre || 'No registrada', detalle: r.error || 'Error desconocido', duracionMs: 3500 }
     ultimoQr.current = { qr, info }
     return info

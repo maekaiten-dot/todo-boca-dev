@@ -11,7 +11,7 @@ export const GRUPOS_GASTO = [
     'Horas extra y partidos', 'Impuesto 931 empleadores', 'Obra social y sindicato',
   ] },
   { grupo: 'Local', etiquetas: [
-    'Alquiler local', 'Servicios local', 'Servicios depto abuela', 'Mantenimiento y arreglos',
+    'Alquiler local', 'Servicios local', 'Internet local', 'Servicios depto abuela', 'Mantenimiento y arreglos',
     'Muebles y equipamiento', 'Insumos y limpieza', 'Comida y bebida', 'Publicidad y carteles',
   ] },
   { grupo: 'Impuestos y administración', etiquetas: ['Monotributo', 'Contador', 'Comisiones e impuestos', 'Tarjeta (reintegro a Adrián)'] },
@@ -31,7 +31,10 @@ const CLAVES = [
   [['feriado'], 'Horas extra y partidos'], [['partido'], 'Horas extra y partidos'], [['hora', 'extra'], 'Horas extra y partidos'],
   [['931'], 'Impuesto 931 empleadores'], [['osecac'], 'Obra social y sindicato'], [['sindicato'], 'Obra social y sindicato'], [['federacion'], 'Obra social y sindicato'], [['obra social'], 'Obra social y sindicato'],
   [['alquiler'], 'Alquiler local'], [['abuela'], 'Servicios depto abuela'],
-  [['luz'], 'Servicios local'], [['edesur'], 'Servicios local'], [['internet'], 'Servicios local'], [['agua'], 'Servicios local'], [['aysa'], 'Servicios local'], [['metrogas'], 'Servicios local'], [['abl'], 'Servicios local'],
+  // Internet va aparte de luz/agua/gas: se paga todos los meses y, junto con los otros servicios, el
+  // punto de equilibrio tomaría solo el último mes cargado de "Servicios local"
+  [['internet'], 'Internet local'], [['wifi'], 'Internet local'], [['fibertel'], 'Internet local'], [['telecentro'], 'Internet local'], [['movistar'], 'Internet local'], [['personal flow'], 'Internet local'], [['flow'], 'Internet local'],
+  [['luz'], 'Servicios local'], [['edesur'], 'Servicios local'], [['agua'], 'Servicios local'], [['aysa'], 'Servicios local'], [['metrogas'], 'Servicios local'], [['abl'], 'Servicios local'],
   [['monotributo'], 'Monotributo'], [['contador'], 'Contador'], [['regalia'], 'Regalías hermanos'],
   [['flete'], 'Flete'], [['envio'], 'Flete'], [['comision'], 'Comisiones e impuestos'], [['ganancias'], 'Comisiones e impuestos'],
   [['panader'], 'Comida y bebida'], [['pizza'], 'Comida y bebida'], [['galletit'], 'Comida y bebida'], [['pastelit'], 'Comida y bebida'], [['azucar'], 'Comida y bebida'], [['cafe'], 'Comida y bebida'],

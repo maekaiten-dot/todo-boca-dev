@@ -16,7 +16,7 @@ export const ETIQUETAS_FIJAS = [
   'Sueldo Stefi', 'Sueldo Brenda', 'Sueldo Adrián', 'Sueldo Jorge',
   'Bono presentismo Stefi', 'Bono presentismo Brenda', 'Bono fin de semana Stefi', 'Bono fin de semana Brenda',
   'Impuesto 931 empleadores', 'Obra social y sindicato',
-  'Alquiler local', 'Servicios local', 'Servicios depto abuela',
+  'Alquiler local', 'Servicios local', 'Internet local', 'Servicios depto abuela',
   'Monotributo', 'Contador',
 ]
 export const REGALIAS_PCT = 0.16   // 4% × 4 hermanos

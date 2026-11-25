@@ -46,12 +46,21 @@ async function pedirToken() {
 
 // sinFormato: devuelve el valor guardado (5500) y no el que muestra la celda. Sirve para columnas de
 // montos que en la planilla quedaron con formato de fecha y se ven como "21/1/1915".
+// Error 429: Google limita cuántas lecturas por minuto puede hacer la app (todas las tablets y
+// celulares juntos usan la misma cuenta). En vez de fallar, espera y reintenta (1,5 s, 3 s, 6 s, 12 s).
+const ESPERAS_429 = [1500, 3000, 6000, 12000]
 async function sheetsGet(range, { sinFormato = false } = {}) {
-  const token = await getAccessToken()
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(range)}${sinFormato ? '?valueRenderOption=UNFORMATTED_VALUE' : ''}`
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
-  if (!res.ok) throw new Error(`Sheets GET error: ${res.status}`)
-  return res.json()
+  for (let intento = 0; ; intento++) {
+    const token = await getAccessToken()
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+    if (res.ok) return res.json()
+    if ((res.status === 429 || res.status >= 500) && intento < ESPERAS_429.length) {
+      await new Promise(r => setTimeout(r, ESPERAS_429[intento] * (0.8 + Math.random() * 0.4)))
+      continue
+    }
+    throw new Error(`Sheets GET error: ${res.status}`)
+  }
 }
 
 async function sheetsAppend(range, values) {
@@ -1975,9 +1984,10 @@ function mesGasto(v) {
 }
 const columnasGasto = (tipo, etiqueta, correspondeA) => tipo === 'GASTO' ? [etiqueta || '', correspondeA ? `'${correspondeA}` : ''] : ['', '']
 
-export async function getPagos() {
+// rapido: una sola lectura (para el aviso de pagos, que solo mira costo total, pagado y anulado)
+export async function getPagos({ rapido = false } = {}) {
   // Cantidad, costo unitario y total (G:I) sin formato, por si alguna columna quedó con formato de fecha
-  const [data, montos] = await Promise.all([sheetsGet('PAGOS!A2:T'), sheetsGet('PAGOS!G2:I', { sinFormato: true }).catch(() => null)])
+  const [data, montos] = await Promise.all([sheetsGet('PAGOS!A2:T'), rapido ? null : sheetsGet('PAGOS!G2:I', { sinFormato: true }).catch(() => null)])
   const rows = (data.values || []).map((r, i) => {
     const m = montos?.values?.[i]
     if (!m) return r

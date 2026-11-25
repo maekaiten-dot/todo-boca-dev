@@ -388,10 +388,14 @@ export default function App() {
 
   // Admin: pagos que cargó el otro Admin (lo que se guarda desde este dispositivo no avisa)
   const hayPagos = () => esPerfilAdmin() && tabsMasDelLocal(true).some(t => t.id === 'pagos')
-  async function revisarPagos() {
+  // Cada 5 minutos como mucho (no en cada relectura de artículos): Google limita las lecturas por minuto
+  const ultimaRevisionPagos = useRef(0)
+  async function revisarPagos({ forzar = false } = {}) {
     if (!hayPagos()) return
+    if (!forzar && Date.now() - ultimaRevisionPagos.current < 5 * 60 * 1000) return
+    ultimaRevisionPagos.current = Date.now()
     try {
-      const pagos = await getPagos()
+      const pagos = await getPagos({ rapido: true })
       pagosRef.current = pagos
       const vistos = leerPagosVistos()
       if (!vistos) { guardarPagosVistos(Object.fromEntries(pagos.map(p => [p.idPago, firmaPago(p)]))); return }

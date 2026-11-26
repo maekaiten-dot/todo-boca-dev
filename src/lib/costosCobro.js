@@ -5,12 +5,12 @@
 // monotributista no se recupera, así que es un costo más. No lleva IVA.
 //
 // PAYWAY (posnet BLANCO)
-//  · Hasta el 22/11/2026, plazo "Inmediata" en Nave (Galicia): crédito con arancel 2% (Amex 2,5%; la
-//    app no sabe la marca, se usa 2%) + "Pago Expreso Cupones" del Galicia (el cobro anticipado, % del
-//    crédito de cada mes sacado de los resúmenes; en nov 2026 además "Sellos PEX Cap. Fed."). Débito sin arancel.
-//  · Desde el 23/11/2026, plazo "En otros plazos" en Nave: crédito 1,80% + IVA a 10 días hábiles,
-//    débito 0,80% + IVA a 1 día hábil, sin Pago Expreso. (Cambiado el domingo 22/11 a la tarde; las
-//    ventas de ese día se cuentan con el plan anterior. Verificar con los primeros comprobantes.)
+//  · Hasta las ventas del 21/11/2026: crédito con arancel 2% (Amex 2,5%; la app no sabe la marca, se
+//    usa 2%) + "Pago Expreso Cupones" del Galicia (cobro anticipado, % del crédito de cada mes sacado de
+//    los resúmenes; en nov 2026 además "Sellos PEX Cap. Fed."). Débito sin arancel.
+//  · Desde las ventas del 22/11/2026: Pago Expreso dado de baja en el Galicia (confirmado con las
+//    liquidaciones del 24 al 26/11). Crédito solo con el arancel de 2%, a 10 días hábiles (tarjeta
+//    argentina) o ~18 (extranjera); débito sin cargo, igual que antes.
 //  · "Servicio Payway": cargo fijo por mes, bonificado de nov 2026 a oct 2027.
 //  · QR de Payway: 0,80% + IVA (más IIBB), se acredita al instante en el banco (venta del 9/11/2026:
 //    $22.000 → $21.237,04, sin impuesto al cheque). Antes del posnet amarillo (mayo 2026) todo QR era de Payway.
@@ -36,7 +36,7 @@ export function leyChequeDelMes(mes) {
   return p
 }
 export const LEY_25413_BLANCO = leyChequeDelMes('9999-99')   // el % de hoy
-export const ARANCEL_CREDITO_PAYWAY = 2   // arancel de crédito con el plan "Inmediata" (hasta el 22/11/2026)
+export const ARANCEL_CREDITO_PAYWAY = 2   // arancel de crédito del posnet blanco (Amex 2,5%)
 // Cobro anticipado ("Pago Expreso Cupones" del Galicia): % del crédito de cada mes (resúmenes nov 2025 –
 // oct 2026; nov 2026 sale de los comprobantes del 16, 19 y 20/11: ≈ 2,5% en Visa y Mastercard, más sellos)
 export const ANTICIPO_PAYWAY = {
@@ -45,9 +45,9 @@ export const ANTICIPO_PAYWAY = {
   '2026-11': 2.5,
 }
 const ANTICIPO_ANTES = 9        // meses anteriores a nov 2025 (sin resumen): el promedio de esos meses
-// Plan "En otros plazos" de Nave (sin cobro anticipado), por fecha de venta
-export const PLAN_OTROS_PLAZOS_DESDE = '2026-11-23'
-export const OTROS_PLAZOS = { credito: 1.8, debito: 0.8 }
+// Sin cobro anticipado (Pago Expreso dado de baja), por fecha de venta
+export const PLAN_OTROS_PLAZOS_DESDE = '2026-11-22'
+export const OTROS_PLAZOS = { credito: 2, debito: 0 }
 // Servicio Payway (cargo fijo mensual, sin IVA)
 export const SERVICIO_PAYWAY = [
   { desde: '0000-00', monto: 41999 },

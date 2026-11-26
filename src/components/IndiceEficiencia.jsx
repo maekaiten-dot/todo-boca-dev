@@ -191,7 +191,7 @@ function DesgloseCobro({ d, label }) {
           </table>
         </div>
         <div style={S.hint}>
-          Payway: hasta el 22/11/2026 crédito 2% + cobro anticipado del Galicia ("Pago Expreso"), débito sin arancel; desde el 23/11/2026 (plan "En otros plazos" de Nave) crédito 1,80% y débito 0,80%. QR 0,80%, servicio fijo por mes (bonificado nov 2026 – oct 2027).
+          Payway: crédito 2% (+ cobro anticipado "Pago Expreso" del Galicia hasta las ventas del 21/11/2026), débito sin arancel. QR 0,80%, servicio fijo por mes (bonificado nov 2026 – oct 2027).
           Mercado Pago: crédito 4,19% argentina / 7,19% del exterior (se usa el promedio real, ≈80% del exterior), débito 2,75%, QR 0,80%.
           Comisiones con IVA. Se suman la retención de Ingresos Brutos (2,5% de lo cobrado con tarjeta o QR) y el impuesto al cheque (Ley 25.413, 1,2% de lo que Payway depositaba por las tarjetas hasta octubre 2026; desde noviembre el banco ya no lo cobra; el QR de Payway nunca lo pagó), porque no se recuperan.
         </div>

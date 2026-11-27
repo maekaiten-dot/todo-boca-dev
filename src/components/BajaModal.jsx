@@ -4,7 +4,7 @@
 // Conteo y stock → Baja (hoja MOVIMIENTOS STOCK).
 import { useState } from 'react'
 import BarcodeScanner from './BarcodeScanner.jsx'
-import { registrarBaja, MOTIVOS_BAJA, idCanonico } from '../api/sheets.js'
+import { registrarBaja, MOTIVOS_BAJA, idCanonico, coincideCodigoProv } from '../api/sheets.js'
 
 const fmt$ = n => '$' + Math.round(n || 0).toLocaleString('es-AR')
 const normalizar = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
@@ -22,7 +22,7 @@ export default function BajaModal({ articulos = [], usuarios = [], perfilNombre 
   const [error, setError] = useState('')
 
   const resultados = (busqueda.trim()
-    ? articulos.filter(a => normalizar(a.nombre).includes(normalizar(busqueda)) || normalizar(a.id).includes(normalizar(busqueda)) || (idCanonico(busqueda) === a.id && idCanonico(busqueda) !== busqueda.trim()))
+    ? articulos.filter(a => normalizar(a.nombre).includes(normalizar(busqueda)) || normalizar(a.id).includes(normalizar(busqueda)) || coincideCodigoProv(a.id, busqueda) || (idCanonico(busqueda) === a.id && idCanonico(busqueda) !== busqueda.trim()))
     : [...articulos]).sort((x, y) => String(x.nombre).localeCompare(String(y.nombre), 'es'))
   const n = Number(cant)
   const ok = empleado && art && Number.isInteger(n) && n > 0 && motivo && !(motivo === 'Otro' && !detalle.trim()) && !guardando

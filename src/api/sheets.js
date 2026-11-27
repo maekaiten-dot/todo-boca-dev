@@ -261,6 +261,8 @@ export const getAlias = () => _alias
 export function idCanonico(id) {
   let x = String(id ?? '').trim(), n = 0
   if (!_alias[x] && _alias[x.toUpperCase()]) x = x.toUpperCase()
+  // Código de un proveedor (ej. el código de barras de su etiqueta) → nuestro artículo
+  if (!_alias[x] && x && !/^TB\d+$/i.test(x)) { const a = _codProvPorCodigo[normCod(x)]; if (a && a !== x) x = a }
   while (_alias[x] && n++ < 10) x = _alias[x].a
   return x
 }
@@ -1979,6 +1981,15 @@ async function asegurarColumnasGasto() {
 // por corrección separadas por " | ", y en APP_LOG como PAGO_CORREGIDO)
 export const MOTIVOS_CORRECCION_PAGO = ['Monto mal cargado', 'Artículo o cantidad equivocada', 'Fecha equivocada', 'Etiqueta o mes equivocado', 'Descripción', 'Otro']
 let _columnaEdicionesOk = false
+let _columnaCodProvOk = false
+async function asegurarColumnaCodigoProveedor() {
+  if (_columnaCodProvOk) return
+  try {
+    const v = ((await sheetsGet('PAGOS!V1')).values || [])[0] || []
+    if (!v[0]) await sheetsUpdate('PAGOS!V1', [['CODIGO PROVEEDOR']])
+    _columnaCodProvOk = true
+  } catch (e) { console.warn('No se pudo crear la columna CODIGO PROVEEDOR de PAGOS', e) }
+}
 async function asegurarColumnaEdicionesPagos() {
   if (_columnaEdicionesOk) return
   try {
@@ -2009,7 +2020,7 @@ const columnasGasto = (tipo, etiqueta, correspondeA) => tipo === 'GASTO' ? [etiq
 // rapido: una sola lectura (para el aviso de pagos, que solo mira costo total, pagado y anulado)
 export async function getPagos({ rapido = false } = {}) {
   // Cantidad, costo unitario y total (G:I) sin formato, por si alguna columna quedó con formato de fecha
-  const [data, montos] = await Promise.all([sheetsGet('PAGOS!A2:U'), rapido ? null : sheetsGet('PAGOS!G2:I', { sinFormato: true }).catch(() => null)])
+  const [data, montos] = await Promise.all([sheetsGet('PAGOS!A2:V'), rapido ? null : sheetsGet('PAGOS!G2:I', { sinFormato: true }).catch(() => null)])
   const rows = (data.values || []).map((r, i) => {
     const m = montos?.values?.[i]
     if (!m) return r
@@ -2026,7 +2037,7 @@ export async function getPagos({ rapido = false } = {}) {
     pagado:r[12]==='TRUE'||r[12]===true, empleado:r[13]||'', anulado:r[14]==='TRUE'||r[14]===true,
     modificado: String(r[15] || '').replace(/^'/, ''), modificadoMs: msModificadoPago(r[15], r[0]),
     compra: String(r[16] || '').trim(), comprobante: String(r[17] || '').replace(/^'/, '').trim(),
-    etiqueta: String(r[18] || '').trim(), correspondeA: mesGasto(r[19]), ediciones: String(r[20] || '').trim(),
+    etiqueta: String(r[18] || '').trim(), correspondeA: mesGasto(r[19]), ediciones: String(r[20] || '').trim(), codigoProveedor: String(r[21] || '').replace(/^'/, '').trim(),
   }))
 }
 
@@ -2121,7 +2132,7 @@ export async function actualizarComprobanteCompra(renglones, comprobante) {
   await sheetsBatchUpdate(data)
 }
 
-export async function registrarPago({ etiqueta = '', correspondeA = '', tipo, fechaIngreso, fechaPago, articuloId, articuloNombre, cantidad, costoUnitario, descripcion, proveedor, montoPagado, pagado, empleado, compra = '', comprobante = '' }) {
+export async function registrarPago({ codigoProveedor = '', etiqueta = '', correspondeA = '', tipo, fechaIngreso, fechaPago, articuloId, articuloNombre, cantidad, costoUnitario, descripcion, proveedor, montoPagado, pagado, empleado, compra = '', comprobante = '' }) {
   const dt = getArgentinaDate()
   const data = await sheetsGet('PAGOS!A2:A')
   const rows = data.values || []
@@ -2141,6 +2152,12 @@ export async function registrarPago({ etiqueta = '', correspondeA = '', tipo, fe
     await asegurarColumnasGasto()
     while (row.length < 18) row.push('')
     row.push(...columnasGasto(tipo, etiqueta, correspondeA))
+  }
+  // Código que usa el proveedor para este producto (columna V)
+  if (codigoProveedor) {
+    await asegurarColumnaCodigoProveedor()
+    while (row.length < 21) row.push('')
+    row.push(`'${String(codigoProveedor).trim()}`)
   }
   await sheetsAppend('PAGOS!A1', [row])
   if (tipo==='MERCADERÍA'&&fechaIngreso&&articuloId) {
@@ -2695,6 +2712,85 @@ async function asegurarHojaMemoria() {
   _hojaMemoriaLista = true
 }
 
+// ── Códigos de proveedor ───────────────────────────────────────────────────
+// El código que usa cada proveedor para un producto, asociado a nuestro artículo (TB…). Se guardan en
+// MEMORIA FACTURAS (la misma memoria que usa Escanear factura): PROVEEDOR, CODIGO, DESCRIPCION, ARTICULO.
+// Con eso, en todos los buscadores se puede escribir o escanear indistintamente nuestro código o el del
+// proveedor, y al leer una factura se reconoce el producto. Lo último cargado gana.
+let _codProv = []                 // [{ proveedor, codigo, articuloId, descripcion }]
+let _codProvPorCodigo = {}        // CODIGO normalizado → ID ARTICULO
+let _codProvTexto = {}            // ID ARTICULO → "COD1 COD2…" (para buscar)
+let _codProvPromesa = null
+function normCod(c) { return String(c || '').toUpperCase().replace(/[^A-Z0-9]/g, '') }
+function armarCodigosProveedor(lista) {
+  const ult = new Map()   // proveedor+código → entrada (la última)
+  for (const e of lista) { const c = normCod(e.codigo); if (!c) continue; ult.set(`${normNombre(e.proveedor)}|${c}`, { ...e, codigo: String(e.codigo).replace(/^'/, '').trim() }) }
+  _codProv = [...ult.values()].filter(e => e.articuloId)
+  _codProvPorCodigo = {}; _codProvTexto = {}
+  for (const e of _codProv) {
+    const c = normCod(e.codigo)
+    _codProvPorCodigo[c] = e.articuloId
+    const id = idCanonico(e.articuloId)
+    _codProvTexto[id] = `${_codProvTexto[id] || ''} ${c}`
+  }
+}
+// Se llama al cargar los artículos (una lectura). forzar: vuelve a leer la hoja.
+export function cargarCodigosProveedor(forzar = false) {
+  if (!_codProvPromesa || forzar) {
+    _codProvPromesa = filasMemoria().then(f => { armarCodigosProveedor(f); return _codProv })
+      .catch(e => { console.warn('No se pudieron leer los códigos de proveedor', e); _codProvPromesa = null; return [] })
+  }
+  return _codProvPromesa
+}
+// Códigos de proveedor de un artículo: [{ proveedor, codigo, descripcion }]
+export const textoCodigosProv = id => _codProvTexto[idCanonico(id)] || ''
+export const proveedoresConCodigo = () => [...new Set(_codProv.map(e => String(e.proveedor).trim()).filter(Boolean))].sort((x, y) => x.localeCompare(y, 'es'))
+export const codigosDeArticulo = id => _codProv.filter(e => idCanonico(e.articuloId) === id)
+// ¿Lo buscado (3+ caracteres) está en algún código de proveedor de este artículo?
+export function coincideCodigoProv(id, q) {
+  const t = normCod(q)
+  return t.length >= 3 && !!_codProvTexto[id]?.includes(t)
+}
+// El código que este proveedor usa para este artículo ('' si no hay)
+export function codigoDelProveedor(id, proveedor) {
+  const n = normNombre(proveedor)
+  const l = _codProv.filter(e => idCanonico(e.articuloId) === id && normNombre(e.proveedor) === n)
+  return l.length ? l[l.length - 1].codigo : ''
+}
+// Asocia el código de un proveedor a un artículo (si ya estaba igual, no hace nada)
+export async function agregarCodigoProveedor({ proveedor, codigo, articuloId, descripcion = '', quien = '' }) {
+  const c = String(codigo || '').trim()
+  if (!c || !articuloId || !String(proveedor || '').trim()) return false
+  await cargarCodigosProveedor()
+  const ya = _codProv.find(e => normCod(e.codigo) === normCod(c) && normNombre(e.proveedor) === normNombre(proveedor))
+  if (ya && idCanonico(ya.articuloId) === idCanonico(articuloId)) return false
+  await guardarMemoriaFacturas([{ proveedor: String(proveedor).trim(), codigo: c, descripcion, articuloId }], quien)
+  armarCodigosProveedor([..._codProv, { proveedor: String(proveedor).trim(), codigo: c, descripcion, articuloId }])
+  await registrarLog({ accion: 'CODIGO_PROVEEDOR_AGREGADO', detalle: `${proveedor} · ${c} → ${articuloId}${ya ? ` (antes ${ya.articuloId})` : ''}`, idReferencia: articuloId, empleado: quien, resultado: 'OK' })
+  return true
+}
+// Código del proveedor de un renglón de PAGOS ya cargado (columna V)
+export async function guardarCodigoProveedorPago(rowNum, codigo) {
+  await asegurarColumnaCodigoProveedor()
+  await sheetsUpdate(`PAGOS!V${rowNum}`, [[codigo ? `'${String(codigo).trim()}` : '']])
+}
+// Quita la asociación (deja vacío el artículo en esas filas de MEMORIA FACTURAS)
+export async function quitarCodigoProveedor({ proveedor, codigo, quien = '' }) {
+  const filas = await filasMemoria(true)
+  const cambios = filas.filter(f => f.articuloId && normCod(f.codigo) === normCod(codigo) && normNombre(f.proveedor) === normNombre(proveedor))
+    .map(f => ({ range: `${HOJA_MEMORIA}!D${f.fila}`, values: [['']] }))
+  await sheetsBatchUpdate(cambios)
+  await cargarCodigosProveedor(true)
+  await registrarLog({ accion: 'CODIGO_PROVEEDOR_QUITADO', detalle: `${proveedor} · ${codigo}`, empleado: quien, resultado: 'OK' })
+}
+async function filasMemoria(conVacios = false) {
+  let data
+  try { data = await sheetsGet(`${HOJA_MEMORIA}!A2:F`) }
+  catch (e) { if (String(e.message).includes('400')) return []; throw e }
+  return (data.values || []).map((r, i) => ({ fila: i + 2, proveedor: r[0] || '', codigo: String(r[1] || '').replace(/^'/, ''), descripcion: r[2] || '', articuloId: r[3] || '' }))
+    .filter(f => f.proveedor && (conVacios || f.articuloId))
+}
+
 export async function getMemoriaFacturas() {
   let data
   try { data = await sheetsGet(`${HOJA_MEMORIA}!A2:F`) }
@@ -2707,6 +2803,8 @@ export async function guardarMemoriaFacturas(entradas, quien = '') {
   await asegurarHojaMemoria()
   const dt = getArgentinaDate()
   await sheetsAppend(`${HOJA_MEMORIA}!A1`, entradas.map(e => [e.proveedor, e.codigo ? `'${e.codigo}` : '', e.descripcion || '', e.articuloId, `'${dt.fecha} ${dt.hora}`, quien]))
+  // Los códigos nuevos quedan disponibles enseguida en los buscadores
+  if (entradas.some(e => e.codigo)) armarCodigosProveedor([..._codProv, ...entradas.filter(e => e.codigo)])
 }
 
 // Carga todos los renglones de una factura como pagos de MERCADERÍA de una sola vez (una sola
@@ -2729,6 +2827,11 @@ export async function registrarPagosLote({ renglones, fechaIngreso, fechaPago, p
     const cant = Number(r.cantidad) || 0, cu = Math.round((Number(r.costoUnitario) || 0) * 100) / 100
     return [ids[k], 'MERCADERÍA', fechaIngreso ? `'${fechaIngreso}` : '', r.pagado || r.montoPagado > 0 ? (fechaPago ? `'${fechaPago}` : '') : '', r.articuloId, r.articuloNombre, cant, cu, Math.round(cant * cu * 100) / 100, descripcion, proveedor || '', Math.round((Number(r.montoPagado) || 0) * 100) / 100, r.pagado ? 'TRUE' : 'FALSE', empleado || '', 'FALSE', mod, ...extra]
   })
+  // Código del proveedor de cada renglón (columna V)
+  if (renglones.some(r => r.codigoProveedor)) {
+    await asegurarColumnaCodigoProveedor()
+    filas.forEach((f, k) => { const c = String(renglones[k].codigoProveedor || '').trim(); if (c) { while (f.length < 21) f.push(''); f.push(`'${c}`) } })
+  }
   await sheetsAppend('PAGOS!A1', filas)
   if (fechaIngreso) {
     await sheetsAppend('INGRESOS!A1', filas.map(f => [`I${f[0].slice(1)}`, `'${fechaIngreso}`, `'${dt.hora}`, f[4], f[5], f[6], f[7], f[8], proveedor || '', empleado || '', false, mod, ...extra]))

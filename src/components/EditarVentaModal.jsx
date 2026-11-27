@@ -4,7 +4,7 @@
 // queda constancia de quién, por qué y qué cambió. Es el único lugar para corregir una venta cerrada.
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { parseMonto as num } from '../lib/montos.js'
-import { editarVenta, anularVentaConMotivo, MOTIVOS_EDICION, POSNETS, POSNET_AMBOS, posnetDeVenta, usaPosnet, metodosDe, SEP_METODOS } from '../api/sheets.js'
+import { editarVenta, anularVentaConMotivo, MOTIVOS_EDICION, POSNETS, POSNET_AMBOS, posnetDeVenta, usaPosnet, metodosDe, SEP_METODOS, coincideCodigoProv } from '../api/sheets.js'
 
 const METODOS = ['Efectivo Pesos', 'Efectivo Dólares', 'Efectivo Reales', 'Efectivo Euros', 'Tarjeta de Crédito', 'Tarjeta de Débito', 'QR', 'Transferencia', 'Pix']
 const fmt$ = n => (n < 0 ? '−$' : '$') + Math.abs(Math.round(n || 0)).toLocaleString('es-AR')
@@ -22,7 +22,7 @@ export function buscarArticulos(articulos, q) {
   const encontrados = []
   articulos.forEach((a, i) => {
     const n = normalizar(a.nombre), id = normalizar(a.id)
-    if (!palabras.every(p => n.includes(p) || id.includes(p))) return
+    if (!palabras.every(p => n.includes(p) || id.includes(p)) && !coincideCodigoProv(a.id, q)) return
     encontrados.push({ a, orden: (id === t ? 0 : n.startsWith(t) ? 1 : 2) * 1e6 - i })
   })
   encontrados.sort((x, y) => x.orden - y.orden)

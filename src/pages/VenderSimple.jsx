@@ -4,7 +4,7 @@
 // escribir en el buscador, 4 medios de pago y un aviso grande de "venta guardada" con sonido.
 // Guarda con la misma registrarVenta() que la Esquina, así las ventas quedan igual en la planilla.
 import { useState, useEffect, useMemo } from 'react'
-import { registrarVenta, anularVenta, registrarLog } from '../api/sheets.js'
+import { registrarVenta, anularVenta, registrarLog, coincideCodigoProv } from '../api/sheets.js'
 import { LOCAL } from '../config/local.js'
 
 // Mismos valores que METODOS_PAGO de NuevaVenta
@@ -107,7 +107,7 @@ export default function VenderSimple({ articulos = [], loadingArticulos, usuario
     const q = busqueda.trim().toLowerCase()
     return articulos
       .filter(a => a.precioUnitario > 0)
-      .filter(a => q ? (a.nombre.toLowerCase().includes(q) || String(a.id).toLowerCase().includes(q)) : (cat === TODAS || a.categoria === cat))
+      .filter(a => q ? (a.nombre.toLowerCase().includes(q) || String(a.id).toLowerCase().includes(q) || coincideCodigoProv(a.id, q)) : (cat === TODAS || a.categoria === cat))
       .slice(0, 300)
   }, [articulos, cat, busqueda])
 

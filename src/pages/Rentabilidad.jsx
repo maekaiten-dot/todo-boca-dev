@@ -1,7 +1,7 @@
 // src/pages/Rentabilidad.jsx
 // Margen real y GMROI por artículo o por grupo (solo Admin).
 import { useEffect, useMemo, useState } from 'react'
-import { getHistoricoVentas, getIngresos } from '../api/sheets.js'
+import { getHistoricoVentas, getIngresos, coincideCodigoProv } from '../api/sheets.js'
 import { calcularRentabilidad, agruparRentabilidad, sumarRentabilidad, clasificarGmroi } from '../lib/rentabilidad.js'
 
 const $ = n => (n < 0 ? '−$' : '$') + Math.abs(Math.round(n || 0)).toLocaleString('es-AR')
@@ -36,7 +36,7 @@ export default function Rentabilidad({ articulos = [], stockMap = {} }) {
   const filas = useMemo(() => {
     const base = vista === 'grupo' ? agruparRentabilidad(items, dias) : items
     const q = buscar.trim().toLowerCase()
-    const f = q ? base.filter(x => x.nombre.toLowerCase().includes(q) || String(x.id).toLowerCase().includes(q)) : base
+    const f = q ? base.filter(x => x.nombre.toLowerCase().includes(q) || String(x.id).toLowerCase().includes(q) || coincideCodigoProv(x.id, q)) : base
     const val = x => x[orden] ?? -Infinity
     return [...f].sort((a, b) => val(b) - val(a))
   }, [items, vista, buscar, orden, dias])

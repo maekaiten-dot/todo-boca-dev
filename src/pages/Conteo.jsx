@@ -4,7 +4,7 @@
 // El conteo es "a ciegas": la app no muestra cuánto espera. Si no coincide, pide contar de nuevo.
 import { useState, useEffect, useMemo } from 'react'
 import BarcodeScanner from '../components/BarcodeScanner.jsx'
-import {
+import { coincideCodigoProv,
   getEstadoStock, registrarConteo, registrarBaja, anularMovimientoStock,
   armarListaConteoDelDia, MOTIVOS_BAJA, FRECUENCIA_CONTEO, ARTICULOS_POR_DIA,
   getAvisosArticulos, registrarAvisoArticulo, resolverAvisoArticulo, TIPOS_AVISO,
@@ -229,7 +229,7 @@ export default function Conteo({ articulos = [], usuarios = [], perfilNombre = '
   const filtrar = lista => {
     if (!busqueda.trim()) return lista
     const q = normalizar(busqueda)
-    return lista.filter(a => normalizar(a.nombre).includes(q) || normalizar(a.id).includes(q))
+    return lista.filter(a => normalizar(a.nombre).includes(q) || normalizar(a.id).includes(q) || coincideCodigoProv(a.id, busqueda))
   }
 
   const renderItems = (lista, paginar = false) => {
@@ -287,7 +287,7 @@ export default function Conteo({ articulos = [], usuarios = [], perfilNombre = '
 
   // Sin búsqueda se ven todos los artículos (por nombre); escribiendo se filtran
   const bajaResultados = (bajaBusqueda.trim()
-    ? articulos.filter(a => normalizar(a.nombre).includes(normalizar(bajaBusqueda)) || normalizar(a.id).includes(normalizar(bajaBusqueda)) || (idCanonico(bajaBusqueda) === a.id && idCanonico(bajaBusqueda) !== bajaBusqueda.trim()))
+    ? articulos.filter(a => normalizar(a.nombre).includes(normalizar(bajaBusqueda)) || normalizar(a.id).includes(normalizar(bajaBusqueda)) || coincideCodigoProv(a.id, bajaBusqueda) || (idCanonico(bajaBusqueda) === a.id && idCanonico(bajaBusqueda) !== bajaBusqueda.trim()))
     : [...articulos]).sort((x, y) => String(x.nombre).localeCompare(String(y.nombre), 'es'))
 
   function escanearBaja(codigo) {

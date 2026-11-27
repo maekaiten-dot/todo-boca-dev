@@ -1,6 +1,6 @@
 // src/pages/LogVentas.jsx
 import { useState, useMemo, useEffect } from 'react'
-import { getHistoricoVentas, getVentasDesde, registrarLog, metodosDe } from '../api/sheets.js'
+import { getHistoricoVentas, getVentasDesde, registrarLog, metodosDe, coincideCodigoProv, idCanonico } from '../api/sheets.js'
 import DetalleVentaModal from '../components/DetalleVentaModal.jsx'
 
 const m$ = n => (n < 0 ? '−$' : '$') + Math.abs(Math.round(n || 0)).toLocaleString('es-AR')  // monto con signo (los cambios tienen renglones en negativo)
@@ -72,7 +72,7 @@ export default function LogVentas({ esAdmin = false, soloLectura = false, articu
         v.idVenta?.toLowerCase().includes(busqueda.toLowerCase()) ||
         v.metodoPago?.toLowerCase().includes(busqueda.toLowerCase()) ||
         v.empleado?.toLowerCase().includes(busqueda.toLowerCase()) ||
-        v.items.some(i => i.nombre?.toLowerCase().includes(busqueda.toLowerCase()))
+        v.items.some(i => i.nombre?.toLowerCase().includes(busqueda.toLowerCase()) || String(i.articulo || '').toLowerCase() === busqueda.trim().toLowerCase() || coincideCodigoProv(idCanonico(i.articulo), busqueda))
       )
     : todasVentas, [todasVentas, busqueda])
 

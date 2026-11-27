@@ -5,7 +5,7 @@
 // artículo nuevo → 4) se elige pagado / pendiente / pago parcial y se cargan todos los pagos juntos.
 import { useState, useRef, useMemo } from 'react'
 import { parseMonto as parseArs } from '../lib/montos.js'
-import { getMemoriaFacturas, guardarMemoriaFacturas, registrarPagosLote, editarArticulo } from '../api/sheets.js'
+import { getMemoriaFacturas, guardarMemoriaFacturas, registrarPagosLote, editarArticulo, coincideCodigoProv } from '../api/sheets.js'
 import { buscarArticulo, revisarTotal, normalizar, similitud, PROVEEDORES, leerQrArca, fechaDe, detectarProveedor } from '../lib/facturas.js'
 import ModalArticulo from './ModalArticulo.jsx'
 import BarcodeScanner from './BarcodeScanner.jsx'
@@ -127,7 +127,7 @@ export default function EscanearFactura({ articulos = [], proveedores = [], empl
       const incl = vista.rs.filter(r => r.incluir)
       const lineas = incl.map(r => {
         const art = artDe(r.articuloId), cu = costoDe(r)
-        return { articuloId: r.articuloId, articuloNombre: art?.nombre || r.descripcion, cantidad: r.cantidad, costoUnitario: cu, total: r.cantidad * cu }
+        return { articuloId: r.articuloId, articuloNombre: art?.nombre || r.descripcion, cantidad: r.cantidad, costoUnitario: cu, total: r.cantidad * cu, codigoProveedor: r.codigo || '' }
       })
       const total = lineas.reduce((s, l) => s + l.total, 0)
       const montoParcial = Math.min(total, num(pago.monto) || 0)
@@ -166,7 +166,7 @@ export default function EscanearFactura({ articulos = [], proveedores = [], empl
     const r = renglones[eligiendo]
     if (busqueda.trim()) {
       const q = normalizar(busqueda)
-      return arts.filter(a => normalizar(a.nombre).includes(q) || normalizar(a.id).includes(q)).slice(0, 12).map(art => ({ art }))
+      return arts.filter(a => normalizar(a.nombre).includes(q) || normalizar(a.id).includes(q) || coincideCodigoProv(a.id, busqueda)).slice(0, 12).map(art => ({ art }))
     }
     return (r?.sugerencias || []).length ? r.sugerencias : arts.map(art => ({ art, score: similitud(r?.descripcion, art.nombre) })).sort((a, b) => b.score - a.score).slice(0, 6)
   }, [eligiendo, busqueda, renglones, arts])

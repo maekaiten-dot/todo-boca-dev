@@ -1,6 +1,6 @@
 // src/components/ProductSearch.jsx
 import { useState, useEffect, useRef } from 'react'
-import { idCanonico } from '../api/sheets.js'
+import { idCanonico, coincideCodigoProv } from '../api/sheets.js'
 
 export default function ProductSearch({ articulos, onAdd, loading }) {
   const [query, setQuery] = useState('')
@@ -17,6 +17,7 @@ export default function ProductSearch({ articulos, onAdd, loading }) {
       .filter(a =>
         a.nombre.toLowerCase().includes(q) ||
         a.id.toLowerCase().includes(q) ||
+        coincideCodigoProv(a.id, query) ||
         (canon !== query.trim() && a.id === canon)
       )
       .slice(0, 8)

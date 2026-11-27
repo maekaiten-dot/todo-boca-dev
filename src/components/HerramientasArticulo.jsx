@@ -2,7 +2,7 @@
 // Dentro de "Editar artículo" (solo Admin): unificar dos códigos que son el mismo producto, deshacer
 // una unificación, o separar un código en dos productos. Nada del historial se borra ni se reescribe.
 import { useState } from 'react'
-import { unificarArticulo, deshacerUnificacion, idCanonico, generarIdArticulo, agregarArticulo, editarArticulo } from '../api/sheets.js'
+import { unificarArticulo, deshacerUnificacion, idCanonico, coincideCodigoProv, generarIdArticulo, agregarArticulo, editarArticulo } from '../api/sheets.js'
 
 const normalizar = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
 const num = id => Number(String(id).replace(/\D/g, '')) || 0
@@ -44,7 +44,7 @@ export default function HerramientasArticulo({ editando, form, articulos = [], s
 
   const candidatos = busqueda.trim().length < 2 ? [] : articulos
     .filter(a => a.id !== editando.id && !a.unificadoEn && idCanonico(a.id) === a.id)
-    .filter(a => normalizar(a.nombre).includes(normalizar(busqueda)) || normalizar(a.id).includes(normalizar(busqueda)))
+    .filter(a => normalizar(a.nombre).includes(normalizar(busqueda)) || normalizar(a.id).includes(normalizar(busqueda)) || coincideCodigoProv(a.id, busqueda))
     .slice(0, 8)
 
   function elegirOtro(a) {

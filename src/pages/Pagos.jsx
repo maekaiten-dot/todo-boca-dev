@@ -1,7 +1,7 @@
 // src/pages/Pagos.jsx
 import { useState, useEffect } from 'react'
 import { parseMonto } from '../lib/montos.js'
-import { anotarCorreccionPago, getPagos, registrarPago, actualizarPago, anularPago, getArticulosAdmin, idCanonico, generarIdCompra, claveCompra, editarArticulo, TIPO_A_COBRAR, anularACobrar, cuentaCon, compensarCuenta } from '../api/sheets.js'
+import { anotarCorreccionPago, getPagos, registrarPago, actualizarPago, anularPago, getArticulosAdmin, idCanonico, coincideCodigoProv, codigoDelProveedor, agregarCodigoProveedor, guardarCodigoProveedorPago, generarIdCompra, claveCompra, editarArticulo, TIPO_A_COBRAR, anularACobrar, cuentaCon, compensarCuenta } from '../api/sheets.js'
 import CobrarModal, { DEUDOR_POR_DEFECTO } from '../components/CobrarModal.jsx'
 import MotivoCorreccion, { faltaMotivo } from '../components/MotivoCorreccion.jsx'
 import CompraModal, { armarCompras, textoRenglones } from '../components/CompraModal.jsx'
@@ -44,7 +44,7 @@ const FORM_VACIO = {
   fechaIngreso: '', fechaPago: '',
   articuloId: '', articuloNombre: '', articuloFoto: '',
   cantidad: '1', costoUnitario: '0',
-  descripcion: '', proveedor: '',
+  descripcion: '', proveedor: '', codigoProveedor: '',
   montoPagado: '0', pagado: false,
   empleado: '',
   compraSel: 'NUEVA', comprobante: '',
@@ -142,7 +142,7 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
       ...(p.tipo === 'GASTO' && !(p.costoTotal > 0)
         ? { cantidad: '1', costoUnitario: String(p.montoPagado || '') }
         : { cantidad: String(p.cantidad), costoUnitario: String(p.costoUnitario) }),
-      descripcion: p.descripcion, proveedor: p.proveedor,
+      descripcion: p.descripcion, proveedor: p.proveedor, codigoProveedor: p.codigoProveedor || '',
       montoPagado: String(p.montoPagado), pagado: p.pagado,
       empleado: p.empleado || empleado,
       compraSel: p.compra || '', comprobante: p.comprobante || '',
@@ -192,12 +192,18 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
         if (precioNuevoOk) { nuevo.precioUnitario = String(precioNuevoNum); cambiosArt.push(`precio $${precioNuevoNum.toLocaleString('es-AR')}`) }
         await editarArticulo(artSel.rowNum, nuevo, form.empleado || empleado)
       }
+      // Código que usa el proveedor para este producto: se guarda en el renglón (columna V) y queda
+      // asociado al artículo para buscarlo o escanearlo después. Vacío: el que ya se conocía.
+      const codTipeado = esMerc ? String(form.codigoProveedor || '').trim() : ''
+      const codigoProveedor = esMerc ? codTipeado || codigoDelProveedor(form.articuloId, form.proveedor) : ''
+      if (codTipeado && form.proveedor.trim()) await agregarCodigoProveedor({ proveedor: form.proveedor, codigo: codTipeado, articuloId: form.articuloId, descripcion: form.articuloNombre, quien: editor })
       const notaArt = cambiosArt.length ? ` · artículo actualizado (${cambiosArt.join(', ')})` : ''
       if (editando) {
         const notaIngreso = await actualizarPago(editando.rowNum, {
           ...form, pagado: pagadoFinal, ...datosGasto, compra, comprobante, compraAnterior: editando.compra || '', comprobanteAnterior: editando.comprobante || '',
           idPago: editando.idPago, anulado: editando.anulado,
         }, editor)
+        if ((editando.codigoProveedor || '') !== codigoProveedor) await guardarCodigoProveedorPago(editando.rowNum, codigoProveedor)
         if (pideMotivo) {
           const f$ = n => '$' + Math.round(n || 0).toLocaleString('es-AR')
           const importeAntes = editando.costoTotal > 0 ? editando.costoTotal : editando.montoPagado
@@ -212,7 +218,7 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
         }
         showToast(`Pago actualizado${notaIngreso || ''}${notaArt}`, 'success', notaIngreso || notaArt ? 6000 : 3000)
       } else {
-        await registrarPago({ ...form, pagado: pagadoFinal, ...datosGasto, compra, comprobante })
+        await registrarPago({ ...form, codigoProveedor, pagado: pagadoFinal, ...datosGasto, compra, comprobante })
         showToast(`${otro ? `Guardado en ${compra}: cargá el siguiente producto` : `Pago registrado${compra ? ` · compra ${compra}` : ''}`}${notaArt}`, 'success', notaArt ? 6000 : 3000)
       }
       if (otro && !editando) {
@@ -312,7 +318,8 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
       const q = normalizr(busqueda)
       return normalizr(p.articuloNombre).includes(q) || normalizr(p.descripcion).includes(q) ||
         normalizr(p.proveedor).includes(q) || normalizr(p.idPago).includes(q) ||
-        normalizr(p.compra || '').includes(q) || normalizr(p.comprobante || '').includes(q)
+        normalizr(p.compra || '').includes(q) || normalizr(p.comprobante || '').includes(q) ||
+        normalizr(p.codigoProveedor || '').includes(q) || coincideCodigoProv(idCanonico(p.articuloId), busqueda)
     })
     .sort(comparar)
 
@@ -365,7 +372,7 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
     ? artBusqueda.trim()
       ? articulos.filter(a => {
           const q = normalizr(artBusqueda)
-          return normalizr(a.nombre).includes(q) || normalizr(a.id).includes(q)
+          return normalizr(a.nombre).includes(q) || normalizr(a.id).includes(q) || coincideCodigoProv(a.id, artBusqueda)
         })
       : ultimosUsados
     : []
@@ -868,6 +875,23 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
                 <label style={S.label}>PROVEEDOR</label>
                 <input style={S.input} value={form.proveedor} onChange={e => setForm(f => ({...f, proveedor: e.target.value}))} placeholder="Nombre del proveedor..." />
               </div>
+
+              {/* Código que usa el proveedor para este producto (queda asociado a nuestro código) */}
+              {form.tipo === 'MERCADERÍA' && (() => {
+                const conocido = form.articuloId ? codigoDelProveedor(form.articuloId, form.proveedor) : ''
+                return (
+                  <div style={S.fieldGroup}>
+                    <label style={S.label}>CÓDIGO DEL PROVEEDOR <span style={{fontWeight:400}}>(opcional)</span></label>
+                    <input style={S.input} value={form.codigoProveedor} onChange={e => setForm(f => ({...f, codigoProveedor: e.target.value}))}
+                      placeholder={conocido ? `Ya asociado: ${conocido}` : 'El código del producto en la factura o etiqueta del proveedor'} aria-label="Código del proveedor" />
+                    <div style={{fontFamily:'Barlow, sans-serif', fontSize:12, color:'var(--muted)'}}>
+                      {form.codigoProveedor.trim() && !form.proveedor.trim()
+                        ? 'Poné el proveedor para que el código quede asociado al artículo.'
+                        : `Queda asociado a ${form.articuloId || 'el artículo'}: se puede buscar o escanear con cualquiera de los dos códigos.`}
+                    </div>
+                  </div>
+                )
+              })()}
 
               {/* Compra (solo MERCADERÍA): agrupa los productos que vinieron juntos */}
               {form.tipo === 'MERCADERÍA' && (

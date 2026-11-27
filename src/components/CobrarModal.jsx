@@ -5,7 +5,7 @@
 //  · modo "editar": corregir un renglón (si es mercadería, también se corrige su baja de stock).
 import { useMemo, useState } from 'react'
 import { parseMonto } from '../lib/montos.js'
-import { registrarACobrar, registrarCobro, actualizarACobrar, anotarCorreccionPago } from '../api/sheets.js'
+import { registrarACobrar, registrarCobro, actualizarACobrar, anotarCorreccionPago, coincideCodigoProv } from '../api/sheets.js'
 import MotivoCorreccion, { faltaMotivo } from './MotivoCorreccion.jsx'
 import { GRUPOS_GASTO } from '../lib/etiquetasGastos.js'
 
@@ -39,7 +39,7 @@ export default function CobrarModal({ modo = 'nuevo', renglon = null, articulos 
     const t = norm(q).trim()
     if (t.length < 2) return []
     const pal = t.split(/\s+/)
-    return articulos.filter(a => pal.every(p => norm(a.nombre).includes(p) || norm(a.id).includes(p))).slice(0, 30)
+    return articulos.filter(a => pal.every(p => norm(a.nombre).includes(p) || norm(a.id).includes(p)) || coincideCodigoProv(a.id, q)).slice(0, 30)
   }, [q, articulos])
 
   const elegir = a => { setArt(a); setQ(''); setPrecio(String(Math.round(parseMonto(a.costoUnitario) || 0))) }

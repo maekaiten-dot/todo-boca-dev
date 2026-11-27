@@ -5,6 +5,7 @@ import { useState, useEffect, useRef, useMemo } from 'react'
 import { parseMonto as numArs } from '../lib/montos.js'
 import { generarIdArticulo, agregarArticulo, editarArticulo, getHistoricoVentas } from '../api/sheets.js'
 import HerramientasArticulo from './HerramientasArticulo.jsx'
+import CodigosProveedor from './CodigosProveedor.jsx'
 import { TIPOS, NOMBRE_TIPO, cortesDePrecio, tipoAutomatico } from '../lib/tiposProducto.js'
 
 const CLOUDINARY_CLOUD = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
@@ -265,6 +266,10 @@ export default function ModalArticulo({ inicial, editando = null, empleado = '',
                   />
                 </div>
   
+                {editando && (
+                  <CodigosProveedor articuloId={editando.id} empleado={empleado} ocupado={ocupado || saving} setOcupado={setOcupado} />
+                )}
+
                 {editando && (
                   <HerramientasArticulo editando={editando} form={form} articulos={articulos} stockMap={stockMap} empleado={empleado}
                     ocupado={ocupado || saving} setOcupado={setOcupado} onListo={msg => onGuardado?.(form, msg)} />

@@ -4,7 +4,7 @@ import { parseMonto as numArs } from '../lib/montos.js'
 import ModalArticulo from '../components/ModalArticulo.jsx'
 import DesgloseStock from '../components/DesgloseStock.jsx'
 import { GRUPOS_INICIALES } from '../lib/gruposIniciales.js'
-import { cargarGruposIniciales, getArticulosAdmin, generarIdArticulo, agregarArticulo, editarArticulo, calcularStockTodos, esCostoEstimado } from '../api/sheets.js'
+import { cargarGruposIniciales, getArticulosAdmin, generarIdArticulo, agregarArticulo, editarArticulo, calcularStockTodos, esCostoEstimado, coincideCodigoProv } from '../api/sheets.js'
 
 const CLOUDINARY_CLOUD = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
 const CLOUDINARY_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET
@@ -192,7 +192,7 @@ export default function Articulos({ empleado = '', esAdmin = false, soloLectura 
     .filter(a => {
       if (!busqueda.trim()) return true
       const q = normalizr(busqueda)
-      return normalizr(a.nombre).includes(q) || normalizr(a.id).includes(q) || normalizr(a.grupo || '').includes(q)
+      return normalizr(a.nombre).includes(q) || normalizr(a.id).includes(q) || normalizr(a.grupo || '').includes(q) || coincideCodigoProv(a.id, busqueda)
     }))
 
   if (loading) return (

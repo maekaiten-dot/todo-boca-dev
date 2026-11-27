@@ -10,7 +10,7 @@ import AvisoPrecios, { totalCambios, resumenCambios } from './components/AvisoPr
 import { BotonModoPartido, BarraModoPartido } from './components/ModoPartido.jsx'
 import { escucharCola, procesarCola } from './lib/colaVentas.js'
 import { calcularMasVendidos } from './lib/masVendidos.js'
-import { prepararGuardadoVentas, getModoPartido, setModoPartido, setModoPartidoLog, getHistoricoVentas, getPromos, getAlias, getArticulos, getUsuarios, registrarLog, calcularStockTodos, leerArticulosVistos, guardarArticulosVistos, getTutoriales, leerTutorialesVistos, guardarTutorialesVistos, getConfig, getPagos, leerPagosVistos, guardarPagosVistos, leerPagosPropios, limpiarPagosPropios, firmaPago } from './api/sheets.js'
+import { prepararGuardadoVentas, getModoPartido, setModoPartido, setModoPartidoLog, getHistoricoVentas, getPromos, getAlias, getArticulos, cargarCodigosProveedor, getUsuarios, registrarLog, calcularStockTodos, leerArticulosVistos, guardarArticulosVistos, getTutoriales, leerTutorialesVistos, guardarTutorialesVistos, getConfig, getPagos, leerPagosVistos, guardarPagosVistos, leerPagosPropios, limpiarPagosPropios, firmaPago } from './api/sheets.js'
 import { datoVisto, calcularCambiosArticulos, vistoDespues, unirCambios, detalleLogCambios, calcularCambiosPagos } from './lib/novedades.js'
 import { tocaRevisar, CLAVES_REPOSICION, REPOSICION_DEFAULT, puedeVerReposicion } from './lib/reposicion.js'
 // Las solapas que no son Vender ni Hoy se bajan aparte (la app abre más rápido). Unos segundos
@@ -518,7 +518,7 @@ export default function App() {
     cargarPromos()
     setLoadingArticulos(true)
     try {
-      const arts = await getArticulos()
+      const [arts] = await Promise.all([getArticulos(), cargarCodigosProveedor()])
       articulosRef.current = arts
       setArticulos(arts)
       detectarCambiosPrecio(arts)

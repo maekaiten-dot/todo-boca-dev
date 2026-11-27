@@ -1,6 +1,6 @@
 // src/pages/Ingresos.jsx
 import { useState, useEffect } from 'react'
-import { getIngresos, getArticulosAdmin, fechaHoraAMsAR } from '../api/sheets.js'
+import { getIngresos, getArticulosAdmin, fechaHoraAMsAR, coincideCodigoProv } from '../api/sheets.js'
 
 export default function Ingresos() {
   const [ingresos, setIngresos] = useState([])
@@ -69,6 +69,7 @@ export default function Ingresos() {
     const q = normalizr(busqueda)
     return normalizr(i.articuloNombre).includes(q) ||
       normalizr(i.articuloId).includes(q) ||
+      coincideCodigoProv(i.articuloId, busqueda) ||
       normalizr(i.proveedor).includes(q) ||
       normalizr(i.idIngreso).includes(q) ||
       normalizr(i.compra || '').includes(q) ||

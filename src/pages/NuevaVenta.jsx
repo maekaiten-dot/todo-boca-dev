@@ -1,7 +1,7 @@
 // src/pages/NuevaVenta.jsx
 import { useState, useEffect } from 'react'
 import { calcularPromosConfig, fijaPausada, promoVigente as promoConfigVigente, etiquetaPromo } from '../lib/promos.js'
-import { idCanonico, registrarVenta, registrarLog, REMERAS_XXXL, calcularPromoXXXL, getPromoXXXLEstado, POSNET_METODOS, posnetDeMetodo, posnetDeVenta, metodosDe, socioPermitido, calcularRedondeoSocio, usaPosnet as metodoUsaPosnet, SEP_METODOS } from '../api/sheets.js'
+import { idCanonico, coincideCodigoProv, registrarVenta, registrarLog, REMERAS_XXXL, calcularPromoXXXL, getPromoXXXLEstado, POSNET_METODOS, posnetDeMetodo, posnetDeVenta, metodosDe, socioPermitido, calcularRedondeoSocio, usaPosnet as metodoUsaPosnet, SEP_METODOS } from '../api/sheets.js'
 import BarcodeScanner from '../components/BarcodeScanner.jsx'
 import { encolarVenta } from '../lib/colaVentas.js'
 
@@ -313,7 +313,7 @@ export default function NuevaVenta({ promos = [], articulos, loadingArticulos, o
     if (!busqueda.trim()) return true
     const q = normalizr(busqueda)
     // El código viejo de un artículo unificado encuentra el que quedó
-    return normalizr(a.nombre).includes(q) || normalizr(a.id).includes(q) || (busqueda.trim().length >= 5 && idCanonico(busqueda) === a.id && idCanonico(busqueda) !== busqueda.trim())
+    return normalizr(a.nombre).includes(q) || normalizr(a.id).includes(q) || coincideCodigoProv(a.id, busqueda) || (busqueda.trim().length >= 5 && idCanonico(busqueda) === a.id && idCanonico(busqueda) !== busqueda.trim())
   })
 
   const hayRemeraXXXL = carrito.some(i => REMERAS_XXXL.has(i.id))

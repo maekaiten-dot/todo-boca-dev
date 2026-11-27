@@ -3,7 +3,7 @@
 // reposición sugerida según el stock calculado. Solo para Admin (lo controla App.jsx).
 import { useState, useEffect, useMemo } from 'react'
 import { parseMonto as parseArs } from '../lib/montos.js'
-import { getHistoricoVentas, getIngresos, getHistoricoPrecios } from '../api/sheets.js'
+import { getHistoricoVentas, getIngresos, getHistoricoPrecios, textoCodigosProv } from '../api/sheets.js'
 import TiposPrecio from '../components/TiposPrecio.jsx'
 
 const VENTANAS = [30, 60, 90, 365]
@@ -261,8 +261,8 @@ export default function Rotacion({ articulos = [], stockMap = {} }) {
   }, [porGrupo, stockMap, agr])
   // Texto donde se busca: en un grupo, el nombre del grupo y el de todos sus modelos
   const textoBusqueda = r => r.esGrupo
-    ? [r.nombre, ...(agr.grupos[r.id]?.modelos || []).flatMap(id => [id, nombresArt[id] || ''])].join(' ')
-    : `${r.nombre} ${r.id}`
+    ? [r.nombre, ...(agr.grupos[r.id]?.modelos || []).flatMap(id => [id, nombresArt[id] || '', textoCodigosProv(id)])].join(' ')
+    : `${r.nombre} ${r.id} ${textoCodigosProv(r.id)}`
 
   // "Nuevo en el top": está en el top de la ventana pero no en el top del año
   const topAnio = useMemo(() => new Set(

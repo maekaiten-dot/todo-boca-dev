@@ -1,7 +1,9 @@
 // src/pages/Pagos.jsx
 import { useState, useEffect } from 'react'
 import { parseMonto } from '../lib/montos.js'
-import { getPagos, registrarPago, actualizarPago, anularPago, getArticulosAdmin, idCanonico, generarIdCompra, claveCompra, editarArticulo } from '../api/sheets.js'
+import { anotarCorreccionPago, getPagos, registrarPago, actualizarPago, anularPago, getArticulosAdmin, idCanonico, generarIdCompra, claveCompra, editarArticulo, TIPO_A_COBRAR, anularACobrar, cuentaCon, compensarCuenta } from '../api/sheets.js'
+import CobrarModal, { DEUDOR_POR_DEFECTO } from '../components/CobrarModal.jsx'
+import MotivoCorreccion, { faltaMotivo } from '../components/MotivoCorreccion.jsx'
 import CompraModal, { armarCompras, textoRenglones } from '../components/CompraModal.jsx'
 import PagosPorMes from '../components/PagosPorMes.jsx'
 import DeudasPorMes, { saldoPago } from '../components/DeudasPorMes.jsx'
@@ -12,6 +14,8 @@ import EscanearFactura from '../components/EscanearFactura.jsx'
 // ── Helpers de estado ─────────────────────────────────────────────────────────
 function getEstado(p) {
   if (p.anulado) return 'ANULADO'
+  // Lo que le deben al local (Mitad de cuadra / Mamá)
+  if (p.tipo === TIPO_A_COBRAR) return saldoPago(p) > 0 ? 'A_COBRAR' : 'COBRADO'
   // Gasto con importe cargado y todavía no pagado (o pagado en parte)
   if (p.tipo === 'GASTO') return saldoPago(p) > 0 ? 'GASTO_PENDIENTE' : 'GASTO'
   if (p.tipo === 'MERCADERÍA') {
@@ -30,6 +34,8 @@ const ESTADO_CONFIG = {
   PENDIENTE_MERCADERIA:  { color:'#3b82f6', bg:'rgba(59,130,246,0.12)',  label:'Pagado, mercadería pendiente' },
   GASTO:                 { color:'#a78bfa', bg:'rgba(167,139,250,0.12)', label:'Gasto independiente' },
   GASTO_PENDIENTE:       { color:'#f472b6', bg:'rgba(244,114,182,0.12)', label:'Gasto sin pagar' },
+  A_COBRAR:              { color:'#2dd4bf', bg:'rgba(45,212,191,0.12)',  label:'A cobrar (nos deben)' },
+  COBRADO:               { color:'#5eaaa0', bg:'rgba(94,170,160,0.10)',  label:'Cobrado' },
   ANULADO:               { color:'#ef4444', bg:'rgba(239,68,68,0.12)',   label:'Anulado' },
 }
 
@@ -87,6 +93,10 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
   const [articulosMostrar, setArticulosMostrar] = useState(false)
   const [vista, setVista] = useState('renglones') // renglones | compras
   const [compraAbierta, setCompraAbierta] = useState(null) // clave de la compra
+  const [cobrar, setCobrar] = useState(null)          // { modo: 'nuevo' } o { modo: 'cobro', renglon }
+  const [confirmCompensar, setConfirmCompensar] = useState(null) // nombre
+  const [compensando, setCompensando] = useState(false)
+  const [motivoCorr, setMotivoCorr] = useState({ motivo: '', detalle: '' })   // al corregir un gasto
 
   useEffect(() => { cargar() }, [])
   useEffect(() => { setForm(f => ({...f, empleado})) }, [empleado])
@@ -123,6 +133,7 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
 
   function abrirEditar(p) {
     setEditando(p)
+    setMotivoCorr({ motivo: '', detalle: '' })
     setForm({
       tipo: p.tipo, fechaIngreso: p.fechaIngreso, fechaPago: p.fechaPago,
       articuloId: p.articuloId, articuloNombre: p.articuloNombre,
@@ -156,9 +167,14 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
     if (form.tipo === 'MERCADERÍA' && !form.articuloId) { showToast('Seleccioná un artículo', 'error'); return }
     if (form.tipo === 'GASTO' && !form.descripcion.trim()) { showToast('Ingresá una descripción', 'error'); return }
     if (form.tipo === 'GASTO' && !form.etiqueta) { showToast('Elegí una etiqueta para el gasto', 'error'); return }
+    // Corregir un gasto pide por qué (queda en EDICIONES y en el historial, con quién lo corrigió)
+    const pideMotivo = !!editando && (editando.tipo === 'GASTO' || form.tipo === 'GASTO')
+    if (pideMotivo && faltaMotivo(motivoCorr)) { showToast(faltaMotivo(motivoCorr), 'error'); return }
     setSaving(true)
     try {
       const esMerc = form.tipo === 'MERCADERÍA'
+      // Quién hace el cambio (el perfil que está usando la app), no quién cargó el renglón
+      const editor = empleadoFijo || empleado || form.empleado
       // Un gasto puede ir asociado a una compra ya cargada (flete, envío): suma al total de esa compra
       const compra = !esMerc ? (form.compraSel && form.compraSel !== 'NUEVA' ? form.compraSel : '') : form.compraSel === 'NUEVA' ? await generarIdCompra() : form.compraSel
       if (!esMerc && !(parseMonto(form.costoUnitario) > 0)) { showToast('Poné el importe del gasto', 'error'); setSaving(false); return }
@@ -181,7 +197,19 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
         const notaIngreso = await actualizarPago(editando.rowNum, {
           ...form, pagado: pagadoFinal, ...datosGasto, compra, comprobante, compraAnterior: editando.compra || '', comprobanteAnterior: editando.comprobante || '',
           idPago: editando.idPago, anulado: editando.anulado,
-        }, form.empleado)
+        }, editor)
+        if (pideMotivo) {
+          const f$ = n => '$' + Math.round(n || 0).toLocaleString('es-AR')
+          const importeAntes = editando.costoTotal > 0 ? editando.costoTotal : editando.montoPagado
+          const cambios = [
+            Math.round(importeAntes) !== Math.round(montoTotalForm) ? `importe ${f$(importeAntes)} → ${f$(montoTotalForm)}` : '',
+            Math.round(editando.montoPagado || 0) !== Math.round(parseMonto(form.montoPagado)) ? `pagado ${f$(editando.montoPagado)} → ${f$(parseMonto(form.montoPagado))}` : '',
+            (editando.etiqueta || '') !== (form.etiqueta || '') ? `etiqueta ${editando.etiqueta || '—'} → ${form.etiqueta}` : '',
+            (editando.descripcion || '') !== (form.descripcion || '') ? 'descripción' : '',
+            editando.tipo !== form.tipo ? `tipo ${editando.tipo} → ${form.tipo}` : '',
+          ].filter(Boolean).join(', ')
+          await anotarCorreccionPago(editando, { ...motivoCorr, editor, cambios })
+        }
         showToast(`Pago actualizado${notaIngreso || ''}${notaArt}`, 'success', notaIngreso || notaArt ? 6000 : 3000)
       } else {
         await registrarPago({ ...form, pagado: pagadoFinal, ...datosGasto, compra, comprobante })
@@ -202,7 +230,9 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
   async function confirmarAnulacion() {
     setAnulando(true)
     try {
-      const nota = await anularPago(confirmAnular.rowNum, confirmAnular.idPago, empleado)
+      const nota = confirmAnular.tipo === TIPO_A_COBRAR
+        ? await anularACobrar(confirmAnular, empleado)
+        : await anularPago(confirmAnular.rowNum, confirmAnular.idPago, empleado)
       showToast(`Pago anulado${nota || ''}`, 'success', nota ? 6000 : 3000)
       setConfirmAnular(null)
       await cargar()
@@ -354,8 +384,20 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
   const margen = (precio, costo) => precio > 0 && costo > 0 ? `${Math.round((precio - costo) / precio * 100)}%` : '–'
 
   // Totales resumen
-  const totalPagado = pagos.filter(p => !p.anulado && p.pagado).reduce((s, p) => s + p.montoPagado, 0)
-  const totalPendiente = pagos.filter(p => !p.anulado).reduce((s, p) => s + saldoPago(p), 0)
+  const totalPagado = pagos.filter(p => !p.anulado && p.pagado && p.tipo !== TIPO_A_COBRAR).reduce((s, p) => s + p.montoPagado, 0)
+  const totalPendiente = pagos.filter(p => !p.anulado && p.tipo !== TIPO_A_COBRAR).reduce((s, p) => s + saldoPago(p), 0)
+  // Cuentas con quienes deben algo (A COBRAR): lo que nos deben contra lo que les debemos
+  const deudores = [...new Set([DEUDOR_POR_DEFECTO, ...pagos.filter(p => p.tipo === TIPO_A_COBRAR && !p.anulado).map(p => p.proveedor).filter(Boolean)])]
+  const cuentas = deudores.map(n => ({ nombre: n, ...cuentaCon(pagos, n) })).filter(c => c.totalNosDebe > 0)
+  async function hacerCompensacion() {
+    setCompensando(true)
+    try {
+      const m = await compensarCuenta(pagos, confirmCompensar, empleadoFijo || empleado)
+      showToast(`Compensado ${'$' + Math.round(m).toLocaleString('es-AR')} con ${confirmCompensar}`, 'success', 5000)
+      setConfirmCompensar(null)
+      await cargar()
+    } catch { showToast('No se pudo compensar', 'error') } finally { setCompensando(false) }
+  }
 
   if (loading) return <div style={S.center}><div style={S.loadingText}>Cargando pagos...</div></div>
   if (error) return (
@@ -378,6 +420,7 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
         <div style={{display:'flex', gap:8}}>
           <button style={S.refreshBtn} onClick={cargar}>↻</button>
           <button style={{...S.newBtn, background:'none', border:'1.5px solid var(--accent)', color:'var(--accent-text)'}} onClick={() => setEscaneando(true)}>📷 Escanear factura</button>
+          <button style={{...S.newBtn, background:'none', border:'1.5px solid #2dd4bf', color:'#2dd4bf'}} onClick={() => setCobrar({ modo: 'nuevo' })} title="Mercadería o gastos que nos debe Mitad de cuadra (Mamá) u otro">+ A cobrar</button>
           <button style={S.newBtn} onClick={abrirNuevo}>+ Nuevo</button>
         </div>
       </div>
@@ -408,6 +451,19 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
         </div>
       </div>
       <DeudasPorMes pagos={pagos} />
+      {cuentas.map(c => {
+        const neto = c.totalNosDebe - c.totalLeDebemos, comp = Math.min(c.totalNosDebe, c.totalLeDebemos)
+        const f$ = n => '$' + Math.round(n).toLocaleString('es-AR')
+        return (
+          <div key={c.nombre} style={S.cuenta} aria-label={`Cuenta con ${c.nombre}`}>
+            <span style={S.cuentaTitulo}>CUENTA CON {c.nombre.toUpperCase()}</span>
+            <span>Nos debe <b style={{ color: '#2dd4bf' }}>{f$(c.totalNosDebe)}</b> <span style={S.cuentaSub}>({c.nosDebe.length})</span></span>
+            <span>Le debemos <b style={{ color: '#f59e0b' }}>{f$(c.totalLeDebemos)}</b> <span style={S.cuentaSub}>({c.leDebemos.length})</span></span>
+            <span>Neto: <b style={{ color: neto >= 0 ? '#2dd4bf' : '#f59e0b' }}>{neto >= 0 ? `nos debe ${f$(neto)}` : `le debemos ${f$(-neto)}`}</b></span>
+            {comp > 0 && <button style={S.compensarBtn} onClick={() => setConfirmCompensar(c.nombre)}>Compensar {f$(comp)}</button>}
+          </div>
+        )
+      })}
 
       {/* Referencias de colores */}
       <div style={S.referencias}>
@@ -430,14 +486,15 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
           {busqueda && <button style={S.clearBtn} onClick={() => setBusqueda('')}>✕</button>}
         </div>
         <div style={S.filtroTabs}>
-          {['TODOS', 'COMPLETO', 'PENDIENTE_PAGO', 'PENDIENTE_MERCADERIA', 'GASTO', 'GASTO_PENDIENTE'].map(f => (
+          {['TODOS', 'COMPLETO', 'PENDIENTE_PAGO', 'PENDIENTE_MERCADERIA', 'GASTO', 'GASTO_PENDIENTE', 'A_COBRAR'].map(f => (
             <button key={f} style={{...S.filtroTab, ...(filtroEstado===f ? S.filtroTabActive : {})}} onClick={() => setFiltroEstado(f)}
               title={f === 'TODOS' ? 'Todos' : ESTADO_CONFIG[f]?.label} aria-label={f === 'TODOS' ? 'Todos' : ESTADO_CONFIG[f]?.label}>
               {f === 'TODOS' ? 'Todos' :
                f === 'COMPLETO' ? '🟢' :
                f === 'PENDIENTE_PAGO' ? '🟡' :
                f === 'PENDIENTE_MERCADERIA' ? '🔵' :
-               f === 'GASTO_PENDIENTE' ? <span style={{ display: 'inline-block', width: 16, height: 16, borderRadius: '50%', background: ESTADO_CONFIG.GASTO_PENDIENTE.color, verticalAlign: 'middle' }} /> : '⚪'}
+               f === 'GASTO_PENDIENTE' ? <span style={{ display: 'inline-block', width: 16, height: 16, borderRadius: '50%', background: ESTADO_CONFIG.GASTO_PENDIENTE.color, verticalAlign: 'middle' }} /> :
+               f === 'A_COBRAR' ? <span style={{ fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, color: ESTADO_CONFIG.A_COBRAR.color }}>A cobrar</span> : '⚪'}
             </button>
           ))}
         </div>
@@ -522,13 +579,13 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
                     </td>
                     <td style={S.td}>
                       <span style={{...S.badge, background: cfg.bg, color: cfg.color}}>
-                        {p.tipo === 'MERCADERÍA' ? 'MERC.' : 'GASTO'}
+                        {p.tipo === 'MERCADERÍA' ? 'MERC.' : p.tipo === TIPO_A_COBRAR ? 'COBRAR' : 'GASTO'}
                       </span>
                     </td>
                     <td style={{...S.td, ...S.tdNombre}}>
                       <div style={{display:'flex', alignItems:'center', gap:8}}>
                         {art?.foto && <img src={art.foto} alt="" style={S.miniThumb} onError={e => e.currentTarget.style.display='none'} />}
-                        <span>{p.articuloNombre || p.descripcion}{p.tipo === 'GASTO' && p.etiqueta && <span style={{ display: 'block', fontSize: 11, color: 'var(--muted)' }}>{p.etiqueta}{p.correspondeA ? ` · ${nombreMesGasto(p.correspondeA)}` : ''}</span>}</span>
+                        <span>{p.articuloNombre || p.descripcion}{p.ediciones && <span style={{ marginLeft: 6, fontSize: 12, color: 'var(--accent-text)', cursor: 'help' }} title={p.ediciones.split(' | ').join('\n')} aria-label={`Corregido: ${p.ediciones}`}>✎{p.ediciones.split(' | ').length}</span>}{p.tipo === 'GASTO' && p.etiqueta && <span style={{ display: 'block', fontSize: 11, color: 'var(--muted)' }}>{p.etiqueta}{p.correspondeA ? ` · ${nombreMesGasto(p.correspondeA)}` : ''}</span>}</span>
                       </div>
                     </td>
                     <td style={S.td}>{p.fechaIngreso || <span style={{color:'var(--muted)'}}>—</span>}</td>
@@ -543,7 +600,8 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
                     </td>
                     <td style={S.td}>
                       <div style={{display:'flex', gap:6}}>
-                        {!p.anulado && <button style={S.editBtn} onClick={() => abrirEditar(p)}>✏️</button>}
+                        {!p.anulado && p.tipo === TIPO_A_COBRAR && saldoPago(p) > 0 && <button style={S.pagarBtn} onClick={() => setCobrar({ modo: 'cobro', renglon: p })} title="Registrar lo que devolvió">Cobrar</button>}
+                        {!p.anulado && <button style={S.editBtn} onClick={() => p.tipo === TIPO_A_COBRAR ? setCobrar({ modo: 'editar', renglon: p }) : abrirEditar(p)}>✏️</button>}
                         {!p.anulado && <button style={S.anularBtn} onClick={() => setConfirmAnular(p)}>Anular</button>}
                       </div>
                     </td>
@@ -555,6 +613,30 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
         )}
       </div>}
 
+      {cobrar && (
+        <CobrarModal modo={cobrar.modo} renglon={cobrar.renglon} articulos={articulos} deudores={deudores}
+          empleado={empleadoFijo || empleado} onCerrar={() => setCobrar(null)}
+          onGuardado={async msg => { setCobrar(null); showToast(msg, 'success', 5000); await cargar() }} />
+      )}
+      {confirmCompensar && (() => {
+        const c = cuentaCon(pagos, confirmCompensar), m = Math.min(c.totalNosDebe, c.totalLeDebemos)
+        return (
+          <div style={S.overlay} onClick={() => !compensando && setConfirmCompensar(null)}>
+            <div style={{ ...S.modal, maxWidth: 480 }} onClick={e => e.stopPropagation()} role="alertdialog" aria-label="Compensar cuenta">
+              <div style={S.modalHeader}><div style={S.modalTitle}>COMPENSAR CON {confirmCompensar.toUpperCase()}</div></div>
+              <div style={{ padding: '0 4px 8px', fontFamily: 'Barlow, sans-serif', fontSize: 15, color: 'var(--text)', lineHeight: 1.5 }}>
+                Se descuentan <b>${Math.round(m).toLocaleString('es-AR')}</b> de los dos lados, empezando por lo más viejo:
+                lo que le debemos ({c.leDebemos.length} renglones) queda pagado por ese monto, y lo que nos debe ({c.nosDebe.length}) queda cobrado.
+                {c.totalLeDebemos !== c.totalNosDebe && <> Después queda {c.totalNosDebe > c.totalLeDebemos ? 'debiéndonos' : 'debiéndole'} <b>${Math.round(Math.abs(c.totalNosDebe - c.totalLeDebemos)).toLocaleString('es-AR')}</b>.</>}
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button style={{ ...S.compensarBtn, flex: 1, background: 'none', color: 'var(--muted)', borderColor: 'var(--border)' }} onClick={() => setConfirmCompensar(null)} disabled={compensando}>Cancelar</button>
+                <button style={{ ...S.compensarBtn, flex: 2, background: '#2dd4bf', color: '#00122e' }} onClick={hacerCompensacion} disabled={compensando}>{compensando ? 'Compensando…' : 'COMPENSAR'}</button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
       {compraAbierta && compraDe(compraAbierta) && (
         <CompraModal compra={compraDe(compraAbierta)} empleado={empleadoFijo || empleado}
           onCerrar={() => setCompraAbierta(null)}
@@ -832,6 +914,11 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
 
             </div>
 
+            {editando && (editando.tipo === 'GASTO' || form.tipo === 'GASTO') && (
+              <div style={{ padding: '0 24px' }}>
+                <MotivoCorreccion valor={motivoCorr} onChange={setMotivoCorr} editor={empleadoFijo || empleado} anteriores={editando.ediciones} />
+              </div>
+            )}
             <div style={S.modalFooter}>
               <button style={S.cancelBtn} onClick={() => setModalAbierto(false)} disabled={saving}>Cancelar</button>
               {!editando && form.tipo === 'MERCADERÍA' && (
@@ -876,6 +963,10 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
 }
 
 const S = {
+  cuenta: { margin: '0 20px 10px', padding: '10px 14px', background: 'var(--surface)', border: '1.5px solid #2dd4bf', borderRadius: 12, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px 18px', fontFamily: 'Barlow, sans-serif', fontSize: 15, color: 'var(--text)', flexShrink: 0 },
+  cuentaTitulo: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 14, letterSpacing: 1, color: '#2dd4bf' },
+  cuentaSub: { fontSize: 12, color: 'var(--muted)' },
+  compensarBtn: { marginLeft: 'auto', padding: '7px 14px', background: 'rgba(45,212,191,0.15)', border: '1.5px solid #2dd4bf', borderRadius: 8, color: '#2dd4bf', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 15, cursor: 'pointer' },
   page: { display:'flex', flexDirection:'column', height:'100%', overflowY:'auto', position:'relative' },
   center: { display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', height:'100%', gap:12 },
   loadingText: { fontFamily:'Barlow Condensed, sans-serif', fontSize:22, color:'var(--muted)' },

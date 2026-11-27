@@ -267,7 +267,8 @@ export default function Conteo({ articulos = [], usuarios = [], perfilNombre = '
   const activos30 = difs.filter(m => !m.anulado)
   const valorFaltante = activos30.filter(m => m.tipo === 'CONTEO' && m.diferencia < 0).reduce((s, m) => s + m.valorDiferencia, 0)
   const valorSobrante = activos30.filter(m => m.tipo === 'CONTEO' && m.diferencia > 0).reduce((s, m) => s + m.valorDiferencia, 0)
-  const valorBajas = activos30.filter(m => m.tipo === 'BAJA').reduce((s, m) => s + m.valorDiferencia, 0)
+  // Lo que se pasa a Mitad de cuadra no es pérdida: se le cobra (Pagos → A cobrar)
+  const valorBajas = activos30.filter(m => m.tipo === 'BAJA' && !/mitad de cuadra/i.test(m.motivo)).reduce((s, m) => s + m.valorDiferencia, 0)
   const alDia = articulos.filter(a => {
     const e = estado[a.id]; if (!e?.contado) return false
     return (Date.now() - e.ultimoConteoMs) / 86400000 <= FRECUENCIA_CONTEO[clases[a.id] || 'C']

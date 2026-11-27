@@ -16,7 +16,7 @@ export const saldoPago = p => p.pagado ? 0 : Math.max(0, (p.costoTotal || 0) - (
 export function deudasPorMes(pagos) {
   const m = {}
   for (const p of pagos) {
-    if (p.anulado) continue
+    if (p.anulado || p.tipo === 'A COBRAR') continue   // lo que nos deben no es deuda del local
     const falta = saldoPago(p)
     if (!(falta > 0)) continue
     const esGasto = p.tipo === 'GASTO'

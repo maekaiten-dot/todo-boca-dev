@@ -1975,6 +1975,28 @@ async function asegurarColumnasGasto() {
     _columnasGastoOk = true
   } catch (e) { console.warn('No se pudieron crear las columnas de etiqueta de gastos', e) }
 }
+// Correcciones de gastos y de "a cobrar": por qué y quién (columna U "EDICIONES" de PAGOS, una línea
+// por corrección separadas por " | ", y en APP_LOG como PAGO_CORREGIDO)
+export const MOTIVOS_CORRECCION_PAGO = ['Monto mal cargado', 'Artículo o cantidad equivocada', 'Fecha equivocada', 'Etiqueta o mes equivocado', 'Descripción', 'Otro']
+let _columnaEdicionesOk = false
+async function asegurarColumnaEdicionesPagos() {
+  if (_columnaEdicionesOk) return
+  try {
+    const v = ((await sheetsGet('PAGOS!U1')).values || [])[0] || []
+    if (!v[0]) await sheetsUpdate('PAGOS!U1', [['EDICIONES']])
+    _columnaEdicionesOk = true
+  } catch (e) { console.warn('No se pudo crear la columna EDICIONES de PAGOS', e) }
+}
+export async function anotarCorreccionPago(p, { motivo, detalle = '', editor = '', cambios = '' }) {
+  if (!motivo || (motivo === 'Otro' && !String(detalle).trim())) throw new Error('FALTA_MOTIVO')
+  await asegurarColumnaEdicionesPagos()
+  const dt = getArgentinaDate()
+  const linea = `${dt.fecha} ${dt.hora.slice(0, 5)} · ${editor || '?'} · ${motivo}${String(detalle).trim() ? `: ${String(detalle).trim()}` : ''}`
+  const todas = [p.ediciones, linea].filter(Boolean).join(' | ')
+  await sheetsUpdate(`PAGOS!U${p.rowNum}`, [[todas]])
+  await registrarLog({ accion: 'PAGO_CORREGIDO', detalle: `${p.idPago} · ${motivo}${String(detalle).trim() ? ` (${String(detalle).trim()})` : ''}${cambios ? ` · ${cambios}` : ''}`.slice(0, 480), idReferencia: p.idPago, empleado: editor, resultado: 'OK' })
+}
+
 // "'2026-10", "2026-10" o la fecha en que Sheets lo haya convertido ("1/10/2026") → "2026-10"
 function mesGasto(v) {
   const s = String(v || '').replace(/^'/, '').trim()
@@ -1987,7 +2009,7 @@ const columnasGasto = (tipo, etiqueta, correspondeA) => tipo === 'GASTO' ? [etiq
 // rapido: una sola lectura (para el aviso de pagos, que solo mira costo total, pagado y anulado)
 export async function getPagos({ rapido = false } = {}) {
   // Cantidad, costo unitario y total (G:I) sin formato, por si alguna columna quedó con formato de fecha
-  const [data, montos] = await Promise.all([sheetsGet('PAGOS!A2:T'), rapido ? null : sheetsGet('PAGOS!G2:I', { sinFormato: true }).catch(() => null)])
+  const [data, montos] = await Promise.all([sheetsGet('PAGOS!A2:U'), rapido ? null : sheetsGet('PAGOS!G2:I', { sinFormato: true }).catch(() => null)])
   const rows = (data.values || []).map((r, i) => {
     const m = montos?.values?.[i]
     if (!m) return r
@@ -2004,7 +2026,7 @@ export async function getPagos({ rapido = false } = {}) {
     pagado:r[12]==='TRUE'||r[12]===true, empleado:r[13]||'', anulado:r[14]==='TRUE'||r[14]===true,
     modificado: String(r[15] || '').replace(/^'/, ''), modificadoMs: msModificadoPago(r[15], r[0]),
     compra: String(r[16] || '').trim(), comprobante: String(r[17] || '').replace(/^'/, '').trim(),
-    etiqueta: String(r[18] || '').trim(), correspondeA: mesGasto(r[19]),
+    etiqueta: String(r[18] || '').trim(), correspondeA: mesGasto(r[19]), ediciones: String(r[20] || '').trim(),
   }))
 }
 
@@ -2205,6 +2227,129 @@ export async function anularPago(rowNum, idPago, empleado = '') {
   } catch (e) { console.error('No se pudo anular el ingreso del pago', e); detalle = ' · ERROR al anular su ingreso' }
   await registrarLog({ accion:'PAGO_ANULADO', detalle:`Pago ${idPago} anulado${detalle}`, idReferencia:idPago, empleado, resultado:'OK' })
   return detalle
+}
+
+// ── A cobrar: lo que le deben al local (ej. Mitad de cuadra / Mamá) ──────────
+// Va en PAGOS con TIPO "A COBRAR": PROVEEDOR = quién debe, COSTO TOTAL = lo que debe, MONTO PAGADO = lo
+// que ya se cobró (en plata o compensando con lo que el local le debe), PAGADO = saldado.
+//  · Mercadería que se le pasa: sale del stock de la Esquina con una baja "Pasado a Mitad de cuadra"
+//    (en NOTAS de MOVIMIENTOS STOCK queda el ID del renglón, para anularla junto con él).
+//  · Gastos pagados por el local en su nombre: un renglón con descripción, etiqueta e importe.
+export const TIPO_A_COBRAR = 'A COBRAR'
+export const MOTIVO_TRASPASO = 'Pasado a Mitad de cuadra'
+const normNombre = t => String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim()
+const saldoDe = p => p.pagado ? 0 : Math.max(0, (p.costoTotal || 0) - (p.montoPagado || 0))
+const fechaOrden = p => { const f = String(p.fechaIngreso || p.fechaPago || '').replace(/^'/, '').split(' ')[0].split('/').map(Number); return f[2] ? f[2] * 10000 + f[1] * 100 + f[0] : 99999999 }
+const hoyAR = () => new Date().toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' })
+
+export async function registrarACobrar({ deudor, fecha, articulo = null, cantidad = 1, costoUnitario = 0, descripcion = '', etiqueta = '', monto = 0, empleado = '' }) {
+  const esMerc = !!articulo
+  const idPago = await registrarPago({
+    tipo: TIPO_A_COBRAR, fechaIngreso: fecha || hoyAR(), fechaPago: '',
+    articuloId: articulo?.id || '', articuloNombre: articulo?.nombre || '',
+    cantidad: esMerc ? cantidad : 1, costoUnitario: esMerc ? costoUnitario : monto,
+    descripcion: descripcion || (esMerc ? 'Mercadería pasada a Mitad de cuadra' : ''), proveedor: deudor,
+    montoPagado: 0, pagado: false, empleado, etiqueta: esMerc ? '' : etiqueta, correspondeA: '',
+  })
+  if (esMerc) await registrarBaja({ articulo, cantidad, motivo: MOTIVO_TRASPASO, detalle: idPago, empleado })
+  return idPago
+}
+
+// Anula un renglón A COBRAR y, si era mercadería, la baja de stock (vuelve al stock de la Esquina)
+export async function anularACobrar(p, empleado = '') {
+  await anularPago(p.rowNum, p.idPago, empleado)
+  if (!p.articuloId) return ''
+  try {
+    const mov = (await getMovimientosRows()).find(m => m.tipo === 'BAJA' && !m.anulado && m.notas === p.idPago)
+    if (mov) { await anularMovimientoStock(mov.id, empleado); return ' · la mercadería vuelve al stock' }
+  } catch (e) { console.error('No se pudo anular la baja de stock', e); return ' · ERROR al devolver la mercadería al stock' }
+  return ''
+}
+
+// Edita un renglón A COBRAR. Si es mercadería, también corrige su baja de stock (artículo, cantidad y
+// costo), igual que al editar un pago se corrige su ingreso. Lo ya cobrado se mantiene.
+export async function actualizarACobrar(p, { articulo = null, cantidad, costoUnitario, descripcion, etiqueta, monto, fecha }, empleado = '') {
+  const esMerc = !!p.articuloId
+  const cant = esMerc ? Math.max(1, Math.round(Number(cantidad) || 0)) : 1
+  const cu = esMerc ? Number(costoUnitario) || 0 : Number(monto) || 0
+  const total = cant * cu
+  const art = esMerc ? (articulo || { id: p.articuloId, nombre: p.articuloNombre }) : null
+  const saldado = (p.montoPagado || 0) >= total - 0.5
+  await actualizarPago(p.rowNum, {
+    idPago: p.idPago, tipo: TIPO_A_COBRAR, fechaIngreso: fecha || p.fechaIngreso, fechaPago: saldado ? (p.fechaPago || hoyAR()) : '',
+    articuloId: art?.id || '', articuloNombre: art?.nombre || '', cantidad: cant, costoUnitario: cu,
+    descripcion: descripcion ?? p.descripcion, proveedor: p.proveedor, montoPagado: p.montoPagado || 0, pagado: saldado,
+    empleado: p.empleado || empleado, anulado: false,
+    ...(esMerc ? {} : { etiqueta: etiqueta ?? p.etiqueta ?? '', correspondeA: p.correspondeA || '' }),
+  }, empleado)
+  if (!esMerc) return ''
+  // La baja de stock de este renglón (NOTAS = ID del renglón)
+  const filas = (await sheetsGet(`${HOJA_MOV}!A2:O`)).values || []
+  const k = filas.findIndex(r => String(r[3]).toUpperCase() === 'BAJA' && r[14] === p.idPago && !(r[13] === 'TRUE' || r[13] === true))
+  const costo = Number(articulo?.costoUnitario != null ? parsePrecio(articulo.costoUnitario) : parsePrecio(filas[k]?.[9])) || 0
+  if (k < 0) {
+    // No tenía baja (no debería pasar): se crea
+    await registrarBaja({ articulo: { ...art, costoUnitario: costo }, cantidad: cant, motivo: MOTIVO_TRASPASO, detalle: p.idPago, empleado })
+    return ' · baja de stock creada'
+  }
+  const antes = `${filas[k][4]}×${filas[k][6]}`, ahora = `${art.id}×${cant}`
+  if (antes === ahora) return ''
+  const fila = k + 2
+  await sheetsBatchUpdate([{ range: `${HOJA_MOV}!E${fila}:K${fila}`, values: [[art.id, art.nombre, cant, '', -cant, costo, -Math.round(cant * costo)]] }])
+  await registrarLog({ accion: 'STOCK_BAJA_CORREGIDA', detalle: `${filas[k][0]} · ${antes} → ${ahora} · ${MOTIVO_TRASPASO} (${p.idPago})`, idReferencia: filas[k][0], empleado, resultado: 'OK' })
+  return ` · stock corregido (${antes} → ${ahora})`
+}
+
+// Cobro en plata (efectivo o transferencia) de un renglón A COBRAR
+export async function registrarCobro(p, monto, forma = '', empleado = '') {
+  const cobrado = (p.montoPagado || 0) + (Number(monto) || 0)
+  const saldado = cobrado >= (p.costoTotal || 0) - 0.5
+  await sheetsBatchUpdate(filasSaldo(p, cobrado, saldado, hoyAR()))
+  marcarPagosPropios([p.idPago])
+  await registrarLog({ accion: 'COBRO_REGISTRADO', detalle: `${p.idPago} · ${p.proveedor} · cobrado $${Math.round(monto)}${forma ? ` (${forma})` : ''}${saldado ? ' · saldado' : ''}`, idReferencia: p.idPago, empleado, resultado: 'OK' })
+}
+
+function filasSaldo(p, montoPagado, pagado, fecha) {
+  return [
+    { range: `PAGOS!D${p.rowNum}`, values: [[pagado ? `'${fecha}` : (p.fechaPago ? `'${String(p.fechaPago).replace(/^'/, '')}` : '')]] },
+    { range: `PAGOS!L${p.rowNum}:M${p.rowNum}`, values: [[Math.round(montoPagado * 100) / 100, pagado ? 'TRUE' : 'FALSE']] },
+    { range: `PAGOS!P${p.rowNum}`, values: [[ahoraModificado()]] },
+  ]
+}
+
+// Cuenta corriente con alguien que es a la vez proveedor y deudor (Mamá): lo que el local le debe
+// (renglones con saldo, mercadería o gastos) y lo que le deben a el local (A COBRAR con saldo).
+export function cuentaCon(pagos, nombre) {
+  const n = normNombre(nombre)
+  const deEl = p => !p.anulado && normNombre(p.proveedor) === n && saldoDe(p) > 0
+  const leDebemos = pagos.filter(p => deEl(p) && p.tipo !== TIPO_A_COBRAR).sort((a, b) => fechaOrden(a) - fechaOrden(b))
+  const nosDebe = pagos.filter(p => deEl(p) && p.tipo === TIPO_A_COBRAR).sort((a, b) => fechaOrden(a) - fechaOrden(b))
+  const suma = l => l.reduce((t, p) => t + saldoDe(p), 0)
+  return { leDebemos, nosDebe, totalLeDebemos: suma(leDebemos), totalNosDebe: suma(nosDebe) }
+}
+
+// Compensa lo que se deben: el menor de los dos totales se descuenta de los renglones más viejos de
+// cada lado (quedan pagados o pagados en parte). Un solo pedido a la planilla.
+export async function compensarCuenta(pagos, nombre, empleado = '') {
+  const c = cuentaCon(pagos, nombre)
+  const monto = Math.min(c.totalLeDebemos, c.totalNosDebe)
+  if (!(monto > 0)) return 0
+  const hoy = hoyAR(), cambios = [], ids = []
+  for (const lado of [c.leDebemos, c.nosDebe]) {
+    let resta = monto
+    for (const p of lado) {
+      if (resta <= 0.5) break
+      const aplica = Math.min(resta, saldoDe(p))
+      const nuevo = (p.montoPagado || 0) + aplica
+      cambios.push(...filasSaldo(p, nuevo, nuevo >= (p.costoTotal || 0) - 0.5, hoy))
+      ids.push(`${p.idPago} $${Math.round(aplica)}`)
+      resta -= aplica
+    }
+  }
+  await sheetsBatchUpdate(cambios)
+  marcarPagosPropios(ids.map(x => x.split(' ')[0]))
+  await registrarLog({ accion: 'CUENTA_COMPENSADA', detalle: `${nombre} · $${Math.round(monto)} · ${ids.join(' · ')}`.slice(0, 480), empleado, resultado: 'OK' })
+  return monto
 }
 
 // ── Gastos Fijos ─────────────────────────────────────────────────────────────

@@ -99,7 +99,7 @@ export default function AvisoPrecios({ cambios, onEntendido, onVerTutoriales, pe
               <div style={{ ...S.foto, fontSize: 26 }}>{p.tipo === 'GASTO' ? '🧾' : '📦'}</div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={S.nombre}>{p.titulo}</div>
-                <div style={{ ...S.codigo, fontSize: 13, color: 'var(--text)' }}>{[p.tipo === 'GASTO' ? (p.etiqueta || 'Gasto') : 'Mercadería', p.detalle, p.correspondeA ? `corresponde a ${nombreMes(p.correspondeA)}` : ''].filter(Boolean).join(' · ')}</div>
+                <div style={{ ...S.codigo, fontSize: 13, color: 'var(--text)' }}>{[p.tipo === 'GASTO' ? (p.etiqueta || 'Gasto') : p.tipo === 'A COBRAR' ? 'A cobrar (nos debe)' : 'Mercadería', p.detalle, p.correspondeA ? `corresponde a ${nombreMes(p.correspondeA)}` : ''].filter(Boolean).join(' · ')}</div>
                 <div style={S.codigo}>{p.nuevo ? 'Cargado' : 'Modificado'}{p.quien ? ` · ${p.quien}` : ''}{p.fechaPago ? ` · pago ${String(p.fechaPago).replace(/^'/, '')}` : ''}</div>
               </div>
               <div style={{ textAlign: 'right', flexShrink: 0 }}>

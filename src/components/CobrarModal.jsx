@@ -5,7 +5,8 @@
 //  · modo "editar": corregir un renglón (si es mercadería, también se corrige su baja de stock).
 import { useMemo, useState } from 'react'
 import { parseMonto } from '../lib/montos.js'
-import { registrarACobrar, registrarCobro, actualizarACobrar, anotarCorreccionPago, coincideCodigoProv } from '../api/sheets.js'
+import { registrarACobrar, registrarCobro, actualizarACobrar, anotarCorreccionPago, coincideCodigoProv, generarIdCompra } from '../api/sheets.js'
+import FotoArticulo from './FotoArticulo.jsx'
 import MotivoCorreccion, { faltaMotivo } from './MotivoCorreccion.jsx'
 import { GRUPOS_GASTO } from '../lib/etiquetasGastos.js'
 
@@ -34,6 +35,9 @@ export default function CobrarModal({ modo = 'nuevo', renglon = null, articulos 
   const [guardando, setGuardando] = useState(false)
   const [motivoCorr, setMotivoCorr] = useState({ motivo: '', detalle: '' })
   const [error, setError] = useState('')
+  // Varios productos en la misma tanda ("Guardar y sumar otro", como en Pagos): quedan en una misma compra
+  const [tanda, setTanda] = useState([])     // [{ idPago, art, cant, precio }]
+  const [compra, setCompra] = useState('')
 
   const resultados = useMemo(() => {
     const t = norm(q).trim()
@@ -45,9 +49,14 @@ export default function CobrarModal({ modo = 'nuevo', renglon = null, articulos 
   const elegir = a => { setArt(a); setQ(''); setPrecio(String(Math.round(parseMonto(a.costoUnitario) || 0))) }
   const cant = Math.max(0, Math.round(Number(cantidad) || 0))
   const total = modo === 'cobro' ? 0 : tipo === 'MERCADERÍA' ? cant * parseMonto(precio) : parseMonto(importe)
+  const totalTanda = tanda.reduce((s, x) => s + x.cant * x.precio, 0)
+  const resumenTanda = () => `${deudor.trim()} debe ${fmt$(totalTanda)} · ${tanda.length} producto${tanda.length > 1 ? 's' : ''}${compra ? ` (${compra})` : ''} · ${tanda.reduce((s, x) => s + x.cant, 0)} u. salieron del stock`
+  const cerrar = () => tanda.length ? onGuardado(resumenTanda()) : onCerrar()
 
-  async function guardar() {
+  async function guardar(sumarOtro = false) {
     setError('')
+    // Tanda ya guardada y sin otro producto elegido: solo cerrar
+    if (!ed && tipo === 'MERCADERÍA' && tanda.length && !art && !sumarOtro) return onGuardado(resumenTanda())
     if (modo === 'cobro') {
       const m = parseMonto(monto)
       if (!(m > 0)) return setError('Poné cuánto te devolvió')
@@ -80,6 +89,17 @@ export default function CobrarModal({ modo = 'nuevo', renglon = null, articulos 
       } catch (e) { console.error('No se pudo corregir el renglón a cobrar', e); setError('No se pudo guardar. Probá de nuevo.'); setGuardando(false) }
       return
     }
+    if (tipo === 'MERCADERÍA' && (sumarOtro || tanda.length)) {
+      try {
+        const c = compra || await generarIdCompra()
+        const id = await registrarACobrar({ deudor: deudor.trim(), fecha: aDDMMAAAA(fecha), articulo: art, cantidad: cant, costoUnitario: parseMonto(precio), empleado, compra: c })
+        const nueva = [...tanda, { idPago: id, art, cant, precio: parseMonto(precio) }]
+        setCompra(c); setTanda(nueva)
+        if (sumarOtro) { setArt(null); setQ(''); setCantidad('1'); setPrecio(''); setGuardando(false) }
+        else onGuardado(`${deudor.trim()} debe ${fmt$(nueva.reduce((s, x) => s + x.cant * x.precio, 0))} · ${nueva.length} productos (${c}) · ${nueva.reduce((s, x) => s + x.cant, 0)} u. salieron del stock`)
+      } catch { setError('No se pudo guardar. Probá de nuevo.'); setGuardando(false) }
+      return
+    }
     try {
       const id = await registrarACobrar(tipo === 'MERCADERÍA'
         ? { deudor: deudor.trim(), fecha: aDDMMAAAA(fecha), articulo: art, cantidad: cant, costoUnitario: parseMonto(precio), empleado }
@@ -89,7 +109,7 @@ export default function CobrarModal({ modo = 'nuevo', renglon = null, articulos 
   }
 
   return (
-    <div style={S.overlay} onClick={() => !guardando && onCerrar()}>
+    <div style={S.overlay} onClick={() => !guardando && cerrar()}>
       <div style={S.modal} onClick={e => e.stopPropagation()} role="dialog" aria-label={modo === 'cobro' ? 'Registrar cobro' : ed ? 'Corregir a cobrar' : 'Nuevo a cobrar'}>
         <div style={S.titulo}>{modo === 'cobro' ? '💵 REGISTRAR COBRO' : ed ? `✏️ CORREGIR ${ed.idPago}` : '🧾 NUEVO A COBRAR'}</div>
 
@@ -106,11 +126,11 @@ export default function CobrarModal({ modo = 'nuevo', renglon = null, articulos 
         ) : (
           <>
             <label style={S.lbl}>QUIÉN LO DEBE</label>
-            <input style={S.input} value={deudor} onChange={e => setDeudor(e.target.value)} list="deudores-a-cobrar" aria-label="Quién lo debe" disabled={!!ed} />
+            <input style={S.input} value={deudor} onChange={e => setDeudor(e.target.value)} list="deudores-a-cobrar" aria-label="Quién lo debe" disabled={!!ed || tanda.length > 0} />
             <datalist id="deudores-a-cobrar">{deudores.map(d => <option key={d} value={d} />)}</datalist>
             <label style={S.lbl}>FECHA</label>
-            <input style={S.input} type="date" value={fecha} onChange={e => setFecha(e.target.value)} aria-label="Fecha" />
-            {!ed && <div style={{ ...S.fila, marginTop: 12 }}>
+            <input style={S.input} type="date" value={fecha} onChange={e => setFecha(e.target.value)} aria-label="Fecha" disabled={tanda.length > 0} />
+            {!ed && !tanda.length && <div style={{ ...S.fila, marginTop: 12 }}>
               {[['MERCADERÍA', '📦 Mercadería que se le pasa'], ['GASTO', '💸 Gasto pagado por el local']].map(([t, l]) => (
                 <button key={t} style={{ ...S.chip, flex: 1, ...(tipo === t ? S.chipOn : {}) }} onClick={() => setTipo(t)} aria-pressed={tipo === t}>{l}</button>
               ))}
@@ -119,14 +139,27 @@ export default function CobrarModal({ modo = 'nuevo', renglon = null, articulos 
 
             {tipo === 'MERCADERÍA' ? (
               <>
-                <label style={S.lbl}>ARTÍCULO</label>
+                {tanda.length > 0 && (
+                  <div style={S.tanda} aria-label="Productos ya cargados">
+                    <div style={S.tandaTit}>YA CARGADOS{compra ? ` · ${compra}` : ''}</div>
+                    {tanda.map(x => (
+                      <div key={x.idPago} style={S.tandaFila}>
+                        <FotoArticulo src={x.art.foto} tam={36} />
+                        <span style={{ flex: 1, minWidth: 0 }}>{x.cant} × {x.art.nombre} <span style={{ color: 'var(--muted)' }}>· {x.art.id}</span></span>
+                        <b>{fmt$(x.cant * x.precio)}</b>
+                      </div>
+                    ))}
+                    <div style={S.nota}>Ya están guardados. Para cambiar uno, corregilo desde la lista con ✏️.</div>
+                  </div>
+                )}
+                <label style={S.lbl}>{tanda.length ? 'OTRO ARTÍCULO' : 'ARTÍCULO'}</label>
                 {art ? (
-                  <div style={S.elegido}><span><b>{art.id}</b> · {art.nombre}</span><button style={S.cambiar} onClick={() => setArt(null)}>Cambiar</button></div>
+                  <div style={S.elegido}><FotoArticulo src={art.foto} /><span style={{ flex: 1 }}><b>{art.id}</b> · {art.nombre}</span><button style={S.cambiar} onClick={() => setArt(null)}>Cambiar</button></div>
                 ) : (
                   <>
                     <input style={S.input} value={q} onChange={e => setQ(e.target.value)} placeholder="Buscá por nombre o código…" aria-label="Buscar artículo" autoFocus />
                     {resultados.length > 0 && <div style={S.lista}>{resultados.map(a => (
-                      <button key={a.id} style={S.opcion} onClick={() => elegir(a)}><b>{a.id}</b> · {a.nombre} <span style={{ color: 'var(--muted)' }}>· costo {fmt$(parseMonto(a.costoUnitario))}</span></button>
+                      <button key={a.id} style={S.opcion} onClick={() => elegir(a)}><FotoArticulo src={a.foto} /><span><b>{a.id}</b> · {a.nombre} <span style={{ color: 'var(--muted)' }}>· costo {fmt$(parseMonto(a.costoUnitario))}</span></span></button>
                     ))}</div>}
                   </>
                 )}
@@ -156,16 +189,19 @@ export default function CobrarModal({ modo = 'nuevo', renglon = null, articulos 
                 <input style={S.input} inputMode="numeric" value={importe} onChange={e => setImporte(e.target.value)} aria-label="Importe" />
               </>
             )}
-            <div style={S.total}>Debe: <b style={{ color: '#2dd4bf' }}>{fmt$(total)}</b></div>
+            <div style={S.total}>{tanda.length ? <>Este: {fmt$(total)} · en total debe: <b style={{ color: '#2dd4bf' }}>{fmt$(totalTanda + (art ? total : 0))}</b></> : <>Debe: <b style={{ color: '#2dd4bf' }}>{fmt$(total)}</b></>}</div>
             {ed && <MotivoCorreccion valor={motivoCorr} onChange={setMotivoCorr} editor={empleado} anteriores={ed.ediciones} />}
           </>
         )}
 
         {error && <div style={S.error}>{error}</div>}
         <div style={{ ...S.fila, marginTop: 14 }}>
-          <button style={S.cancelar} onClick={onCerrar} disabled={guardando}>Cancelar</button>
-          <button style={S.guardar} onClick={guardar} disabled={guardando}>{guardando ? 'Guardando…' : 'GUARDAR'}</button>
+          <button style={S.cancelar} onClick={cerrar} disabled={guardando}>{tanda.length ? 'Listo' : 'Cancelar'}</button>
+          <button style={S.guardar} onClick={() => guardar()} disabled={guardando}>{guardando ? 'Guardando…' : tanda.length && !art ? 'TERMINAR' : 'GUARDAR'}</button>
         </div>
+        {modo === 'nuevo' && tipo === 'MERCADERÍA' && (
+          <button style={S.sumarOtro} onClick={() => guardar(true)} disabled={guardando || !art}>➕ Guardar y sumar otro producto</button>
+        )}
       </div>
     </div>
   )
@@ -181,12 +217,16 @@ const S = {
   fila: { display: 'flex', gap: 8 },
   chip: { padding: '8px 12px', background: 'none', border: '1.5px solid var(--border)', borderRadius: 8, color: 'var(--text)', fontFamily: 'Barlow, sans-serif', fontSize: 14, cursor: 'pointer' },
   chipOn: { border: '1.5px solid #2dd4bf', background: 'rgba(45,212,191,0.15)', color: '#2dd4bf', fontWeight: 700 },
-  lista: { maxHeight: 220, overflowY: 'auto', border: '1.5px solid var(--border)', borderRadius: 8, marginTop: 4 },
-  opcion: { display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px', background: 'none', border: 'none', borderBottom: '1px solid var(--border)', color: 'var(--text)', fontFamily: 'Barlow, sans-serif', fontSize: 14, cursor: 'pointer' },
-  elegido: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: '10px 12px', border: '1.5px solid #2dd4bf', borderRadius: 8, fontFamily: 'Barlow, sans-serif', fontSize: 15, color: 'var(--text)' },
+  lista: { maxHeight: 300, overflowY: 'auto', border: '1.5px solid var(--border)', borderRadius: 8, marginTop: 4 },
+  opcion: { display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', padding: '8px 10px', background: 'none', border: 'none', borderBottom: '1px solid var(--border)', color: 'var(--text)', fontFamily: 'Barlow, sans-serif', fontSize: 14, cursor: 'pointer' },
+  elegido: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '8px 12px', border: '1.5px solid #2dd4bf', borderRadius: 8, fontFamily: 'Barlow, sans-serif', fontSize: 15, color: 'var(--text)' },
   cambiar: { background: 'none', border: 'none', color: 'var(--muted)', textDecoration: 'underline', cursor: 'pointer', fontSize: 13 },
   nota: { fontFamily: 'Barlow, sans-serif', fontSize: 12, color: 'var(--muted)', marginTop: 8 },
   total: { fontFamily: 'Barlow Condensed, sans-serif', fontSize: 20, color: 'var(--text)', marginTop: 12, textAlign: 'right' },
+  tanda: { border: '1.5px solid var(--border)', borderRadius: 8, padding: 10, marginTop: 12, display: 'flex', flexDirection: 'column', gap: 6 },
+  tandaTit: { fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 13, letterSpacing: 0.5, color: '#2dd4bf' },
+  tandaFila: { display: 'flex', alignItems: 'center', gap: 8, fontFamily: 'Barlow, sans-serif', fontSize: 14, color: 'var(--text)' },
+  sumarOtro: { width: '100%', marginTop: 8, padding: 11, background: 'none', border: '1.5px dashed #2dd4bf', borderRadius: 10, color: '#2dd4bf', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 16, cursor: 'pointer' },
   error: { marginTop: 10, color: '#ef4444', fontFamily: 'Barlow, sans-serif', fontSize: 14 },
   cancelar: { flex: 1, padding: 12, background: 'none', border: '1.5px solid var(--border)', borderRadius: 10, color: 'var(--muted)', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 16, cursor: 'pointer' },
   guardar: { flex: 2, padding: 12, background: '#2dd4bf', border: 'none', borderRadius: 10, color: '#00122e', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 18, cursor: 'pointer' },

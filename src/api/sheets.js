@@ -2259,14 +2259,15 @@ const saldoDe = p => p.pagado ? 0 : Math.max(0, (p.costoTotal || 0) - (p.montoPa
 const fechaOrden = p => { const f = String(p.fechaIngreso || p.fechaPago || '').replace(/^'/, '').split(' ')[0].split('/').map(Number); return f[2] ? f[2] * 10000 + f[1] * 100 + f[0] : 99999999 }
 const hoyAR = () => new Date().toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' })
 
-export async function registrarACobrar({ deudor, fecha, articulo = null, cantidad = 1, costoUnitario = 0, descripcion = '', etiqueta = '', monto = 0, empleado = '' }) {
+// compra: id que agrupa varios productos pasados juntos (como una compra en Pagos)
+export async function registrarACobrar({ deudor, fecha, articulo = null, cantidad = 1, costoUnitario = 0, descripcion = '', etiqueta = '', monto = 0, empleado = '', compra = '' }) {
   const esMerc = !!articulo
   const idPago = await registrarPago({
     tipo: TIPO_A_COBRAR, fechaIngreso: fecha || hoyAR(), fechaPago: '',
     articuloId: articulo?.id || '', articuloNombre: articulo?.nombre || '',
     cantidad: esMerc ? cantidad : 1, costoUnitario: esMerc ? costoUnitario : monto,
     descripcion: descripcion || (esMerc ? 'Mercadería pasada a Mitad de cuadra' : ''), proveedor: deudor,
-    montoPagado: 0, pagado: false, empleado, etiqueta: esMerc ? '' : etiqueta, correspondeA: '',
+    montoPagado: 0, pagado: false, empleado, etiqueta: esMerc ? '' : etiqueta, correspondeA: '', compra,
   })
   if (esMerc) await registrarBaja({ articulo, cantidad, motivo: MOTIVO_TRASPASO, detalle: idPago, empleado })
   return idPago

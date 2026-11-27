@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import { parseMonto } from '../lib/montos.js'
 import { anotarCorreccionPago, getPagos, registrarPago, actualizarPago, anularPago, getArticulosAdmin, idCanonico, coincideCodigoProv, codigoDelProveedor, agregarCodigoProveedor, guardarCodigoProveedorPago, generarIdCompra, claveCompra, editarArticulo, TIPO_A_COBRAR, anularACobrar, cuentaCon, compensarCuenta } from '../api/sheets.js'
+import FotoArticulo from '../components/FotoArticulo.jsx'
 import CobrarModal, { DEUDOR_POR_DEFECTO } from '../components/CobrarModal.jsx'
 import MotivoCorreccion, { faltaMotivo } from '../components/MotivoCorreccion.jsx'
 import CompraModal, { armarCompras, textoRenglones } from '../components/CompraModal.jsx'
@@ -324,7 +325,7 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
     .sort(comparar)
 
   // Compras (renglones de mercadería agrupados por número de compra, o proveedor + fecha si son viejos)
-  const compras = armarCompras(pagos, claveCompra)
+  const compras = armarCompras(pagos.filter(p => p.tipo !== TIPO_A_COBRAR), claveCompra)
   const compraDe = clave => compras.find(c => c.clave === clave)
   const comprasFiltradas = compras
     .filter(c => {
@@ -579,7 +580,9 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
                     </td>
                     <td style={{...S.td, ...S.tdId}}>{p.idPago}</td>
                     <td style={{...S.td, whiteSpace:'nowrap'}}>
-                      {(p.tipo === 'MERCADERÍA' || p.compra) && !p.anulado
+                      {p.tipo === TIPO_A_COBRAR
+                        ? (p.compra ? <button style={S.compraLink} onClick={() => setBusqueda(p.compra)} title="Ver los productos de esta tanda">{p.compra}</button> : <span style={{color:'var(--muted)'}}>—</span>)
+                        : (p.tipo === 'MERCADERÍA' || p.compra) && !p.anulado
                         ? <button style={S.compraLink} onClick={() => setCompraAbierta(claveCompra(p))} title="Ver la compra">{p.compra || 'ver compra'}</button>
                         : <span style={{color:'var(--muted)'}}>—</span>}
                       {p.comprobante && <div style={{fontSize:11, color:'var(--muted)'}}>Nº {p.comprobante}</div>}
@@ -680,7 +683,7 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
                   <label style={S.label}>ARTÍCULO *</label>
                   {form.articuloId ? (
                     <div style={S.artSeleccionado}>
-                      {form.articuloFoto && <img src={form.articuloFoto} alt="" style={S.artFoto} onError={e => e.currentTarget.style.display='none'} />}
+                      <FotoArticulo src={form.articuloFoto} />
                       <div style={{flex:1}}>
                         <div style={{fontFamily:'Barlow, sans-serif', fontSize:15, color:'var(--text)'}}>{form.articuloNombre}</div>
                         <div style={{fontFamily:'Barlow Condensed, sans-serif', fontSize:13, color:'var(--muted)'}}>{form.articuloId}</div>
@@ -703,7 +706,7 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
                         <div style={S.artDropdown}>
                           {articulosFiltrados.map(a => (
                             <button key={a.id} style={S.artDropdownItem} onClick={() => seleccionarArticulo(a)}>
-                              {a.foto && <img src={a.foto} alt="" style={S.artDropdownFoto} onError={e => e.currentTarget.style.display='none'} />}
+                              <FotoArticulo src={a.foto} />
                               <div>
                                 <div style={{fontFamily:'Barlow, sans-serif', fontSize:14, color:'var(--text)'}}>{a.nombre}</div>
                                 <div style={{fontFamily:'Barlow Condensed, sans-serif', fontSize:12, color:'var(--muted)'}}>{a.id}</div>
@@ -1068,7 +1071,7 @@ const S = {
   artScanBtn: { background:'none', border:'none', borderLeft:'1.5px solid var(--border)', color:'var(--accent-text)', cursor:'pointer', padding:'0 14px', display:'flex', alignItems:'center', justifyContent:'center' },
   artDropdown: { position:'absolute', top:'100%', left:0, right:0, background:'var(--surface)', border:'1.5px solid var(--border)', borderRadius:8, zIndex:10, maxHeight:280, overflowY:'auto', boxShadow:'0 8px 24px rgba(0,0,0,0.4)' },
   artDropdownItem: { width:'100%', display:'flex', alignItems:'center', gap:10, padding:'10px 14px', background:'none', border:'none', borderBottom:'1px solid var(--border)', cursor:'pointer', textAlign:'left', color:'var(--text)' },
-  artDropdownFoto: { width:36, height:36, objectFit:'cover', borderRadius:5, flexShrink:0 },
+  artDropdownFoto: { width:52, height:52, objectFit:'cover', borderRadius:6, flexShrink:0 },
   qtyWrap: { display:'flex', alignItems:'center', gap:8 },
   qtyBtn: { width:40, height:40, background:'var(--border)', border:'none', borderRadius:8, color:'var(--text)', fontSize:20, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:700, flexShrink:0 },
   qtyInput: { flex:1, background:'var(--surface2)', border:'1.5px solid var(--border)', borderRadius:8, color:'var(--text)', fontFamily:'Barlow Condensed, sans-serif', fontWeight:800, fontSize:20, padding:'8px 12px', outline:'none', textAlign:'center', minWidth:0, width:'100%' },

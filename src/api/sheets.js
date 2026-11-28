@@ -2548,13 +2548,15 @@ function fechaHoraAMs(fecha, hora) {
 // Tutoriales activos, del más nuevo al más viejo. Si la hoja no existe todavía devuelve [].
 export async function getTutoriales() {
   let data
-  try { data = await sheetsGet(`${HOJA_TUTORIALES}!A2:H`) }
+  try { data = await sheetsGet(`${HOJA_TUTORIALES}!A2:I`) }
   catch (e) { if (String(e.message).includes('400')) return []; throw e }
   return (data.values || [])
     .map(r => ({
       id: r[0] || '', fecha: r[1] || '', hora: r[2] || '', titulo: r[3] || '',
       descripcion: r[4] || '', link: r[5] || '', subidoPor: r[6] || '',
       activo: !(r[7] === 'FALSE' || r[7] === false),
+      // Columna I "SOLO ADMIN": los ven solo los Admin (ej. los de Pagos, con gastos y sueldos)
+      soloAdmin: r[8] === true || String(r[8] || '').toUpperCase() === 'TRUE',
     }))
     .filter(t => t.id && t.link && t.activo)
     .map(t => ({ ...t, ms: fechaHoraAMs(t.fecha, t.hora) }))
@@ -2567,7 +2569,7 @@ export const CLAVE_TUTORIALES_VISTOS = 'tb_tutoriales_vistos'
 export function leerTutorialesVistos(persona = '') { try { const v = JSON.parse(localStorage.getItem(clavePersona(CLAVE_TUTORIALES_VISTOS, persona))); return Array.isArray(v) ? v : null } catch { return null } }
 export function guardarTutorialesVistos(ids, persona = '') { try { localStorage.setItem(clavePersona(CLAVE_TUTORIALES_VISTOS, persona), JSON.stringify([...new Set(ids)])) } catch {} }
 
-export async function agregarTutorial({ titulo, descripcion = '', link, subidoPor = '' }) {
+export async function agregarTutorial({ titulo, descripcion = '', link, subidoPor = '', soloAdmin = false }) {
   await asegurarHojaTutoriales()
   const dt = getArgentinaDate()
   const data = await sheetsGet(`${HOJA_TUTORIALES}!A2:A`)
@@ -2575,13 +2577,17 @@ export async function agregarTutorial({ titulo, descripcion = '', link, subidoPo
   let seq = ids.size + 1
   while (ids.has(`T${String(seq).padStart(3, '0')}`)) seq++
   const id = `T${String(seq).padStart(3, '0')}`
-  await sheetsAppend(`${HOJA_TUTORIALES}!A1`, [[id, `'${dt.fecha}`, `'${dt.hora}`, titulo, descripcion, link, subidoPor, 'TRUE']])
+  if (soloAdmin) {
+    const enc = ((await sheetsGet(`${HOJA_TUTORIALES}!I1`)).values || [])[0] || []
+    if (!enc[0]) await sheetsUpdate(`${HOJA_TUTORIALES}!I1`, [['SOLO ADMIN']])
+  }
+  await sheetsAppend(`${HOJA_TUTORIALES}!A1`, [[id, `'${dt.fecha}`, `'${dt.hora}`, titulo, descripcion, link, subidoPor, 'TRUE', soloAdmin ? 'TRUE' : '']])
   for (const k of clavesDe(CLAVE_TUTORIALES_VISTOS)) {
     const persona = k.includes('::') ? k.split('::')[1] : ''
     const vistos = leerTutorialesVistos(persona)
     if (vistos) guardarTutorialesVistos([...vistos, id], persona)
   }
-  await registrarLog({ accion: 'TUTORIAL_AGREGADO', detalle: titulo, idReferencia: id, empleado: subidoPor, resultado: 'OK' })
+  await registrarLog({ accion: 'TUTORIAL_AGREGADO', detalle: `${titulo}${soloAdmin ? ' (solo Admin)' : ''}`, idReferencia: id, empleado: subidoPor, resultado: 'OK' })
   return id
 }
 

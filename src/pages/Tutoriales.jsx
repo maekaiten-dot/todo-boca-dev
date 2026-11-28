@@ -24,6 +24,7 @@ export default function Tutoriales({ esAdmin = false, perfilNombre = '', version
   const [titulo, setTitulo] = useState('')
   const [descripcion, setDescripcion] = useState('')
   const [link, setLink] = useState('')
+  const [soloAdmin, setSoloAdmin] = useState(false)
   const [guardando, setGuardando] = useState(false)
   const [confirmQuitar, setConfirmQuitar] = useState(null)
   const [quitando, setQuitando] = useState(false)
@@ -35,7 +36,7 @@ export default function Tutoriales({ esAdmin = false, perfilNombre = '', version
   async function cargar() {
     setLoading(true)
     setError(null)
-    try { setTutoriales(await getTutoriales()) }
+    try { setTutoriales((await getTutoriales()).filter(t => esAdmin || !t.soloAdmin)) }
     catch (e) { console.error(e); setError('No se pudieron cargar los tutoriales.') }
     finally { setLoading(false) }
   }
@@ -53,9 +54,9 @@ export default function Tutoriales({ esAdmin = false, perfilNombre = '', version
     if (!puedeGuardar) return
     setGuardando(true)
     try {
-      await agregarTutorial({ titulo: titulo.trim(), descripcion: descripcion.trim(), link: link.trim(), subidoPor: perfilNombre })
+      await agregarTutorial({ titulo: titulo.trim(), descripcion: descripcion.trim(), link: link.trim(), subidoPor: perfilNombre, soloAdmin })
       showToast('Tutorial agregado', 'success')
-      setTitulo(''); setDescripcion(''); setLink(''); setFormAbierto(false)
+      setTitulo(''); setDescripcion(''); setLink(''); setSoloAdmin(false); setFormAbierto(false)
       await cargar()
     } catch (e) {
       console.error(e)
@@ -107,6 +108,11 @@ export default function Tutoriales({ esAdmin = false, perfilNombre = '', version
             <div style={S.fieldLabel}>LINK</div>
             <input style={S.input} type="url" inputMode="url" placeholder="https://..." value={link} onChange={e => setLink(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') guardar() }} />
             <div style={S.ayuda}>Pegá el link del documento, PDF o video. Tiene que estar compartido para que se pueda abrir desde la tablet.</div>
+            <label style={S.soloAdmin}>
+              <input type="checkbox" checked={soloAdmin} onChange={e => setSoloAdmin(e.target.checked)} />
+              <span>🔒 Solo para Admin <span style={S.opcional}>(las empleadas no lo ven ni les llega el aviso)</span></span>
+            </label>
+            {soloAdmin && <div style={S.ayuda}>En Drive compartilo solo con los Admin (no "cualquiera con el link"), así el archivo tampoco se abre desde otra cuenta.</div>}
             <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
               <button style={S.cancelBtn} onClick={() => setFormAbierto(false)} disabled={guardando}>Cancelar</button>
               <button style={{ ...S.guardarBtn, opacity: puedeGuardar ? 1 : 0.5 }} onClick={guardar} disabled={!puedeGuardar}>{guardando ? 'Guardando...' : 'GUARDAR'}</button>
@@ -137,6 +143,7 @@ export default function Tutoriales({ esAdmin = false, perfilNombre = '', version
                       <span style={{ minWidth: 0, flex: 1 }}>
                         <span style={S.itemTitulo}>
                           {esNuevo && <span style={S.badgeNuevo}>NUEVO</span>}
+                          {t.soloAdmin && <span style={S.badgeAdmin} title="Solo lo ven los Admin">🔒 SOLO ADMIN</span>}
                           {t.titulo}
                         </span>
                         {t.descripcion && <span style={S.itemDesc}>{t.descripcion}</span>}
@@ -198,6 +205,8 @@ const S = {
   itemDesc: { display: 'block', fontFamily: 'Barlow, sans-serif', fontSize: 14, color: 'var(--text)', opacity: 0.85, marginTop: 2 },
   itemMeta: { display: 'block', fontFamily: 'Barlow, sans-serif', fontSize: 12, color: 'var(--muted)', marginTop: 4 },
   abrir: { flexShrink: 0, fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 800, fontSize: 16, color:'var(--accent-text)', whiteSpace: 'nowrap' },
+  soloAdmin: { display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontFamily: 'Barlow, sans-serif', fontSize: 14, color: 'var(--text)', cursor: 'pointer' },
+  badgeAdmin: { display: 'inline-block', marginRight: 6, padding: '1px 6px', borderRadius: 4, border: '1px solid var(--border)', fontSize: 11, fontWeight: 700, color: 'var(--muted)', verticalAlign: 'middle' },
   badgeNuevo: { fontSize: 11, fontWeight: 800, color: '#000', background: 'var(--accent)', borderRadius: 4, padding: '2px 6px', marginRight: 8, letterSpacing: 1, verticalAlign: 'middle' },
   quitarBtn: { alignSelf: 'center', marginRight: 12, background: 'none', border: '1px solid rgba(239,68,68,0.4)', borderRadius: 6, color: 'rgba(239,68,68,0.8)', fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: 11, padding: '3px 8px', cursor: 'pointer', letterSpacing: 0.5, textTransform: 'uppercase', flexShrink: 0 },
   muted: { fontFamily: 'Barlow, sans-serif', fontSize: 14, color: 'var(--muted)', padding: '8px 0' },

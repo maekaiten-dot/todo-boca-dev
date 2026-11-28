@@ -632,7 +632,7 @@ export default function Pagos({ empleado = '', empleadoFijo = null, usuarios = [
         const c = cuentaCon(pagos, confirmCompensar), m = Math.min(c.totalNosDebe, c.totalLeDebemos)
         return (
           <div style={S.overlay} onClick={() => !compensando && setConfirmCompensar(null)}>
-            <div style={{ ...S.modal, maxWidth: 480 }} onClick={e => e.stopPropagation()} role="alertdialog" aria-label="Compensar cuenta">
+            <div style={{ ...S.modal, maxWidth: 480, padding: '4px 20px 20px', boxSizing: 'border-box' }} onClick={e => e.stopPropagation()} role="alertdialog" aria-label="Compensar cuenta">
               <div style={S.modalHeader}><div style={S.modalTitle}>COMPENSAR CON {confirmCompensar.toUpperCase()}</div></div>
               <div style={{ padding: '0 4px 8px', fontFamily: 'Barlow, sans-serif', fontSize: 15, color: 'var(--text)', lineHeight: 1.5 }}>
                 Se descuentan <b>${Math.round(m).toLocaleString('es-AR')}</b> de los dos lados, empezando por lo más viejo:

@@ -357,7 +357,9 @@ export default function App() {
   }
 
   // Compara los tutoriales activos con los que ya vio cada uno
-  function detectarTutoriales(tutos) {
+  function detectarTutoriales(todos) {
+    // Los "solo Admin" no se avisan en la tablet de las empleadas ni a perfiles Caja
+    const tutos = todos.filter(t => !t.soloAdmin || (esPerfilAdmin() && !porEmpleada()))
     const ids = tutos.map(t => t.id)
     if (ids.join('|') !== tutosRef.current.map(t => t.id).join('|')) setVersionTutos(v => v + 1)
     tutosRef.current = tutos
